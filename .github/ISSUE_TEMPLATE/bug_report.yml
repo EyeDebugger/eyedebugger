@@ -1,0 +1,69 @@
+name: Bug report
+description: eyedbg or eyedbgd does not behave as documented.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security issue? Do not file it here** — use [private vulnerability reporting](https://github.com/EyeDebugger/eyedebugger/security/advisories/new).
+        Debugger output can contain variable values, source code and environment data. **Redact secrets** before pasting anything.
+  - type: textarea
+    id: version
+    attributes:
+      label: eyedbg version
+      description: Output of `eyedbg version`.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Linux, macOS, Windows]
+    validations:
+      required: true
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Architecture
+      options: [amd64 (x86-64), arm64]
+    validations:
+      required: true
+  - type: input
+    id: adapter
+    attributes:
+      label: Language, runtime and debug adapter
+      description: For example ".NET 10, netcoredbg 3.2.0".
+  - type: input
+    id: client
+    attributes:
+      label: Client
+      description: What drove eyedbg — for example Claude Code, Codex, or a person in a terminal.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands, in order.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Full command output (add `--json` if relevant). Redact secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Daemon logs or a DAP trace, if you have them. Redact secrets.
+      render: text
