@@ -84,14 +84,67 @@ func TestErrorsExitNonZero(t *testing.T) {
 	}
 }
 
-// rootFactories returns a fresh command tree per binary, so every test below
-// covers every binary in the scaffold (docs/DESIGN.md §4). A factory (not a
-// shared instance) matters: cobra command state must not be reused across
-// multiple Execute calls.
+// TestCompletionUsesConfiguredWriter guards against completion scripts
+// bypassing the command's configured output writer. cobra's
+// InitDefaultCompletionCmd captures the writer once, when it runs, and every
+// shell sub-command's RunE reuses that captured writer forever after; if
+// finalizeCommandTree ran before a caller's SetOut (as it once did, in
+// New*Command), the script would go to the process's real stdout instead of
+// wherever the caller pointed it.
+//
+// It builds its tree with NewEyedbgCommand directly, not via rootFactories,
+// so that (like a real caller) SetOut runs before this tree is ever
+// finalized.
+func TestCompletionUsesConfiguredWriter(t *testing.T) {
+	t.Parallel()
+
+	for _, shell := range []string{"bash", "zsh"} {
+		t.Run(shell, func(t *testing.T) {
+			t.Parallel()
+
+			stdout, stderr, code := execute(t, NewEyedbgCommand(testInfo), []string{"completion", shell})
+			if code != 0 {
+				t.Fatalf("completion %s: exit code = %d, stderr = %q", shell, code, stderr)
+			}
+
+			if len(stdout) == 0 {
+				t.Fatalf("completion %s: no output landed in the configured writer (it went elsewhere, e.g. os.Stdout)", shell)
+			}
+
+			if !strings.Contains(string(stdout), "eyedbg") {
+				t.Errorf("completion %s: output doesn't mention \"eyedbg\"\n--- stdout ---\n%s", shell, stdout)
+			}
+		})
+	}
+}
+
+// rootFactories returns a fresh, already-finalized command tree per binary,
+// so every test below covers every binary in the scaffold (docs/DESIGN.md
+// §4). A factory (not a shared instance) matters: cobra command state must
+// not be reused across multiple Execute calls.
+//
+// Finalizing here, ahead of any SetOut, is safe only because none of the
+// trees this factory produces are ever used to actually run "completion
+// <shell>" (as opposed to "completion <shell> --help", which cobra answers
+// without invoking the sub-command's RunE): see TestCompletionUsesConfiguredWriter,
+// which deliberately builds its own unfinalized tree instead.
 func rootFactories() map[string]func() *cobra.Command {
+	newEyedbg := func() *cobra.Command {
+		root := NewEyedbgCommand(testInfo)
+		finalizeCommandTree(root)
+
+		return root
+	}
+	newDaemon := func() *cobra.Command {
+		root := NewDaemonCommand(testInfo)
+		finalizeCommandTree(root)
+
+		return root
+	}
+
 	return map[string]func() *cobra.Command{
-		"eyedbg":  func() *cobra.Command { return NewEyedbgCommand(testInfo) },
-		"eyedbgd": func() *cobra.Command { return NewDaemonCommand(testInfo) },
+		"eyedbg":  newEyedbg,
+		"eyedbgd": newDaemon,
 	}
 }
 

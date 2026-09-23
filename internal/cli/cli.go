@@ -35,6 +35,14 @@ type globals struct {
 // Run executes root with args (without the program name) and returns the
 // process exit code.
 func Run(ctx context.Context, root *cobra.Command, args []string) int {
+	// Must run after the caller's SetOut/SetErr (docs/DESIGN.md §4): cobra's
+	// InitDefaultCompletionCmd captures the command's output writer once, at
+	// the moment it runs, and every completion sub-command's RunE reuses that
+	// captured writer forever after. Finalizing any earlier — e.g. in
+	// New*Command, before a caller can SetOut — would silently pin completion
+	// output to os.Stdout regardless of what the caller configures.
+	finalizeCommandTree(root)
+
 	if args == nil {
 		args = []string{} // cobra falls back to os.Args[1:] when args is nil
 	}
@@ -69,7 +77,6 @@ const eyedbgExample = `  eyedbg version           # build info for this binary
 func NewEyedbgCommand(info version.Info) *cobra.Command {
 	root, g := newRoot("eyedbg", "AI-native, CLI-first debugger", eyedbgLong, eyedbgExample, info)
 	root.AddCommand(newVersionCommand("eyedbg", info, g))
-	finalizeCommandTree(root)
 
 	return root
 }
@@ -91,17 +98,17 @@ func NewDaemonCommand(info version.Info) *cobra.Command {
 	// eyedbgd is never invoked interactively by a shell (docs/DESIGN.md §6), so shell
 	// completion has no audience here; disabling it keeps eyedbgd --help short.
 	root.CompletionOptions.DisableDefaultCmd = true
-	finalizeCommandTree(root)
 
 	return root
 }
 
 // finalizeCommandTree adds cobra's built-in "help" and "completion" commands
 // up front instead of leaving them to be created lazily inside Execute, and
-// gives each of them its own Example. Without this, a New*Command tree walked
-// without ever calling Execute (as the tests below do) would miss commands
-// that every real 'eyedbg --help' shows (docs/DESIGN.md §4). Call it once, as
-// the last step of building a root command, after every other AddCommand.
+// gives each of them its own Example. It is idempotent (cobra's own
+// InitDefaultHelpCmd/InitDefaultCompletionCmd are no-ops once the commands
+// already exist), so Run calls it unconditionally, right before Execute. Test
+// code that only walks or inspects a tree without ever executing it (never
+// producing output) may also call it directly, e.g. via rootFactories.
 func finalizeCommandTree(root *cobra.Command) {
 	root.InitDefaultHelpCmd()
 	root.InitDefaultCompletionCmd()
