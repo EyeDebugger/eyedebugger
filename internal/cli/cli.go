@@ -5,6 +5,11 @@
 // eyedbgd). It owns flag parsing and output rendering; the logic behind each
 // command lives in other internal packages.
 //
+// Every command is documented in place: Short, Long and Example are a tested
+// artifact (docs/DESIGN.md §4, docs/CONVENTIONS.md § Help text), not an
+// afterthought. Run `eyedbg <command> --help` or `eyedbg help <command>` for
+// any command's own help; agents should treat that output as authoritative.
+//
 // Only this package and cmd/ may import the CLI framework.
 package cli
 
@@ -46,28 +51,53 @@ func Run(ctx context.Context, root *cobra.Command, args []string) int {
 	return 0
 }
 
+const eyedbgLong = `eyedbg is the CLI for EyeDebugger, an AI-native, CLI-first debugger built for
+coding agents (and humans) driving the same live debug session.
+
+The CLI is stateless: every invocation talks to a per-user daemon (eyedbgd) over local IPC, which
+auto-starts on first use. There is no MCP server by default — this CLI, with its complete built-in
+help, is the agent interface (docs/DESIGN.md §10).
+
+Run 'eyedbg <command> --help' or 'eyedbg help <command>' for a command's own help: what it does,
+when to use it, whether it blocks (and for how long), its effect on the debuggee, its output shape,
+and its exit codes (docs/DESIGN.md §4).`
+
+const eyedbgExample = `  eyedbg version           # build info for this binary
+  eyedbg version --json    # machine-readable build info ("schema": 1)`
+
 // NewEyedbgCommand returns the root command of the eyedbg CLI.
 func NewEyedbgCommand(info version.Info) *cobra.Command {
-	root, g := newRoot("eyedbg", "AI-native, CLI-first debugger", info)
-	root.AddCommand(newVersionCommand(info, g))
+	root, g := newRoot("eyedbg", "AI-native, CLI-first debugger", eyedbgLong, eyedbgExample, info)
+	root.AddCommand(newVersionCommand("eyedbg", info, g))
 
 	return root
 }
+
+const eyedbgdLong = `eyedbgd is the EyeDebugger daemon: the per-user process that owns live debug
+sessions, clients, the control lease, breakpoint ownership, the event log and stop snapshots
+(docs/DESIGN.md §6). It is not meant to be run by hand in normal use — eyedbg auto-starts it on
+first use and talks to it over local IPC.
+
+This binary is not implemented yet (docs/DESIGN.md §13, milestone 1).`
+
+const eyedbgdExample = `  eyedbgd version           # build info for this binary`
 
 // NewDaemonCommand returns the root command of the eyedbgd daemon.
 func NewDaemonCommand(info version.Info) *cobra.Command {
-	root, g := newRoot("eyedbgd", "EyeDebugger per-user daemon", info)
+	root, g := newRoot("eyedbgd", "EyeDebugger per-user daemon", eyedbgdLong, eyedbgdExample, info)
 	root.RunE = notImplemented("the daemon (docs/DESIGN.md §13, milestone 1)")
-	root.AddCommand(newVersionCommand(info, g))
+	root.AddCommand(newVersionCommand("eyedbgd", info, g))
 
 	return root
 }
 
-func newRoot(name, short string, info version.Info) (*cobra.Command, *globals) {
+func newRoot(name, short, long, example string, info version.Info) (*cobra.Command, *globals) {
 	g := &globals{}
 	root := &cobra.Command{
 		Use:           name,
 		Short:         short,
+		Long:          long,
+		Example:       example,
 		Version:       info.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,

@@ -29,11 +29,18 @@ type versionOutput struct {
 	Platform  string `json:"platform"`
 }
 
-func newVersionCommand(info version.Info, g *globals) *cobra.Command {
+func newVersionCommand(binName string, info version.Info, g *globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print build information",
-		Args:  cobra.NoArgs,
+		Long: fmt.Sprintf(`Print %[1]s's build information: version, commit, build date, Go
+toolchain version and platform.
+
+Never blocks, has no effect on any debug session, and always exits 0. Default output is text for
+LLM/human reading; --json prints the machine-readable form with a stable "schema" field
+(docs/DESIGN.md §5) that only changes on purpose.`, binName),
+		Example: fmt.Sprintf("  %[1]s version\n  %[1]s version --json", binName),
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return writeVersion(cmd.OutOrStdout(), cmd.Root().Name(), info, g.json)
 		},

@@ -96,6 +96,15 @@ Design rules:
 - **Blocking is bounded.** Execution commands wait for `stopped|exited|timeout` (default 30 s) and report which happened; the program keeps running after a timeout and `wait` resumes waiting.
 - **`--changed`** shows locals that differ from the previous stop snapshot (highest-signal view for step loops).
 - **Anchors:** `bp add 'Foo.cs@"var total = items.Sum"'` resolves by content, re-resolved when the file changes; the reply always reports the *resolved* line and whether the adapter verified or moved it.
+- **Help is the interface.** Every command and subcommand — including the root command of each
+  binary — has a `Short`, a `Long` (what it does, when to use it, whether it blocks and for how
+  long, its side effects on the debuggee, its output shape, and its exit codes) and at least one
+  `Example` with real invocations; flags document their unit and default. This is how an agent is
+  expected to learn the CLI: `eyedbg <command> --help` or `eyedbg help <command>`, reachable at
+  every level of the tree, is authoritative and kept in sync by a unit test that walks the whole
+  command tree (`internal/cli`). `eyedbg help --all`, printing the full tree's help in one read, and
+  a `--json` help variant, are planned (§13). Help text is a tested, reviewed artifact — treat a
+  change to it like a change to the output contract (§5).
 
 ## 5. Output contract
 
