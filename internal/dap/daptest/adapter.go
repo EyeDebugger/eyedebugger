@@ -20,6 +20,10 @@ import (
 // on stdin and stdout.
 const EnvFakeAdapter = "EYEDBG_TEST_FAKE_ADAPTER"
 
+// noTestsArg re-executes a test binary without running any of its tests, so
+// it only does what [MaybeRun] or [MaybeRunRunner] makes it do.
+const noTestsArg = "-test.run=^$"
+
 // MaybeRun serves DAP on stdin and stdout until the client disconnects or
 // closes stdin, and returns true, if this process was started by [Command]
 // or [CommandWith]. Otherwise it returns false at once. Call it first in
