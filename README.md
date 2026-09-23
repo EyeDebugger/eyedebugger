@@ -29,8 +29,10 @@ VS Code extension (P2) ──┘     + per-session DAP facade (P2)       │
 - The CLI is stateless; every invocation talks to the daemon over local IPC.
 - A per-user daemon owns sessions: clients, the control lease, breakpoint ownership, the event log
   and stop snapshots.
-- Languages plug in via Debug Adapter Protocol (DAP) adapters. .NET is first, via netcoredbg —
-  never vsdbg (see [ADR 0005](docs/adr/0005-never-use-vsdbg.md)).
+- Languages plug in via Debug Adapter Protocol (DAP) adapters, each described by a JSON adapter
+  manifest ([docs/adapter-manifests.md](docs/adapter-manifests.md)). .NET is first, via netcoredbg —
+  never vsdbg (see [ADR 0005](docs/adr/0005-never-use-vsdbg.md)); Python works through debugpy with a
+  manifest alone, no language-specific Go ([ADR 0011](docs/adr/0011-declarative-adapter-manifests-and-their-trust-model.md)).
 
 Full design: [docs/DESIGN.md](docs/DESIGN.md).
 
@@ -42,7 +44,7 @@ Full design: [docs/DESIGN.md](docs/DESIGN.md).
 4. ✅ Model for P2: client identity, breakpoint ownership merge, lease, event log + `events --since`.
 5. ✅ Breadth: hit counts, logpoints, function and exception breakpoints, eval with side effects, `set`, `attach`/`detach`, `test`, anchors.
 6. Ship: SKILL.md, CI matrix (6 os/arch), e2e tests driving sample apps.
-7. Second language via manifest only (debugpy) to prove the plugin boundary.
+7. ✅ Second language via manifest only: Python through debugpy (`eyedbg start python`), adapter manifests, `adapters ls`, `--opt`.
 
 Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; more languages.
 

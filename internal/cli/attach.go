@@ -26,6 +26,8 @@ func newAttachCommand(info version.Info, g *globals) *cobra.Command {
 		Short: "Debug a program that is already running",
 		Long: `Attach the debugger to a running process, creating a new session, as 'eyedbg start' would for a
 program it launches. Languages: dotnet (a .NET program whose runtime has started, via netcoredbg).
+python can't attach yet (UNSUPPORTED_BY_ADAPTER, exit 4: debugpy needs gdb or lldb for it): start
+the program with 'eyedbg start python' instead.
 Only your own processes: another user's is refused (ATTACH_FAILED, exit 3). The session shows the
 process as "pid N (name)", never its command line.
 

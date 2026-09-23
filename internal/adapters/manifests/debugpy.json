@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "name": "debugpy",
+  "description": "Python debugger by Microsoft (MIT); needs Python 3.10+",
+  "homepage": "https://github.com/microsoft/debugpy",
+  "license": "MIT",
+  "version": "1.8.22",
+  "adapter": {"id": "debugpy", "transport": "stdio", "runtime": "python", "entry": "debugpy/adapter"},
+  "python": {
+    "env": "EYEDBG_PYTHON", "option": "python",
+    "commands": [["python3"], ["python"], ["py", "-3"]],
+    "venvs": [".venv", "venv"], "minVersion": "3.10", "module": "debugpy"
+  },
+  "install": {"downloads": {"*": {
+    "url": "https://files.pythonhosted.org/packages/56/3d/c7dc9f35bc9e22cdb53679f844bee40fd5cff871862f60595869a433400d/debugpy-1.8.22-py2.py3-none-any.whl",
+    "sha256": "a9e9d3550e15ca479c59333e90845029190531f0cacfedab3b815a57bd913947",
+    "size": 5374857, "archive": "zip", "root": ""
+  }}},
+  "language": {"name": "python", "extensions": [".py", ".pyw"],
+               "markers": ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile"]},
+  "options": {
+    "module": {"help": "run this module like 'python -m MODULE' instead of --program (e.g. pytest)"},
+    "python": {"help": "the Python 3.10+ interpreter that runs the program and debugpy"},
+    "justMyCode": {"type": "bool", "default": "true", "help": "stop and step only in your own code; false also in libraries"}
+  },
+  "launch": {
+    "require": ["program", "opt.module"],
+    "arguments": {
+      "name": "eyedbg", "type": "debugpy", "request": "launch",
+      "program": "${program}", "module": "${opt.module}", "args": "${args}", "cwd": "${cwd}",
+      "env": "${env}", "python": "${runtime}", "stopOnEntry": "${stopOnEntry}",
+      "justMyCode": "${opt.justMyCode}", "console": "internalConsole", "redirectOutput": true,
+      "subProcess": false, "showReturnValue": true,
+      "variablePresentation": {"special": "hide", "function": "hide", "class": "group", "protected": "inline"}
+    }
+  },
+  "attachUnsupported": "attaching to a running Python process needs gdb or lldb and isn't supported yet; start it under the debugger with 'eyedbg start python --program FILE'",
+  "exceptions": {"all": ["raised", "uncaught"], "uncaught": ["uncaught", "userUnhandled"]},
+  "evalGuard": {
+    "quotes": ["'", "\""],
+    "interpolatedPrefixes": ["f", "rf", "fr", "t", "rt", "tr"],
+    "nonCallWords": ["and", "or", "not", "in", "is", "if", "else", "for"],
+    "safeCalls": ["len", "str", "repr", "type", "isinstance", "issubclass", "id", "abs", "bool", "int",
+                  "float", "hash", "hasattr", "getattr", "callable", "ord", "chr", "hex", "oct", "bin",
+                  "round", "format", "vars", "dir"],
+    "assignOps": ["=", ":="]
+  }
+}

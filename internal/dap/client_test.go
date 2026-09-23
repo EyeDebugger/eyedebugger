@@ -6,6 +6,7 @@ package dap
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -178,4 +179,49 @@ func TestDoFailsWhenAdapterExits(t *testing.T) {
 	if _, err := c.Do(t.Context(), &godap.Request{Command: "threads"}); !errors.Is(err, ErrClosed) {
 		t.Errorf("Do after close: err = %v, want ErrClosed", err)
 	}
+}
+
+// TestDebugpyTraffic: debugpy's startDebugging reverse request gets a
+// failed answer, and its custom debugpyAttach event (which go-dap can't
+// decode) is dropped without losing the events after it.
+func TestDebugpyTraffic(t *testing.T) {
+	t.Parallel()
+
+	events := make(chan string, 2)
+	c, fa := pipeClient(t, Handlers{Event: func(e godap.EventMessage) { events <- e.GetEvent().Event }})
+
+	fa.seq++
+	fa.write(&godap.StartDebuggingRequest{Request: godap.Request{
+		ProtocolMessage: godap.ProtocolMessage{Seq: fa.seq, Type: "request"}, Command: "startDebugging",
+	}})
+
+	resp, ok := fa.read().(godap.ResponseMessage)
+	if !ok {
+		t.Fatal("no response to startDebugging")
+	}
+
+	if r := resp.GetResponse(); r.Success || r.RequestSeq != fa.seq || r.Command != "startDebugging" {
+		t.Errorf("startDebugging response = %+v, want a failed answer to seq %d", r, fa.seq)
+	}
+
+	fa.seq++
+	raw := fmt.Sprintf(`{"seq":%d,"type":"event","event":"debugpyAttach","body":{"name":"child","request":"attach"}}`, fa.seq)
+
+	if err := godap.WriteBaseMessage(fa.out, []byte(raw)); err != nil {
+		t.Fatal(err)
+	}
+
+	fa.seq++
+	fa.write(&godap.StoppedEvent{Event: godap.Event{ProtocolMessage: godap.ProtocolMessage{Seq: fa.seq, Type: "event"}, Event: "stopped"}})
+
+	select {
+	case got := <-events:
+		if got != "stopped" {
+			t.Errorf("event = %q, want stopped (debugpyAttach dropped)", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stopped not delivered after debugpyAttach")
+	}
+
+	_ = c
 }

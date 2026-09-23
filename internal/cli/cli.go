@@ -24,6 +24,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/eyedebugger/eyedebugger/drivers/dotnet"
+	"github.com/eyedebugger/eyedebugger/drivers/generic"
+	"github.com/eyedebugger/eyedebugger/internal/adapters"
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/daemon"
 	"github.com/eyedebugger/eyedebugger/internal/session"
@@ -171,8 +173,9 @@ The CLI is stateless: every invocation talks to a per-user daemon (eyedbgd) over
 auto-starts on first use and exits by itself when idle (see 'eyedbg daemon --help'). There is no MCP server by default — this CLI, with its complete built-in
 help, is the agent interface (docs/DESIGN.md §10).
 
-A typical loop: start a program with breakpoints (or attach to a running one, or debug a test
-run with 'eyedbg test'), inspect (status, stack, vars, eval, output), move (next, step-in,
+A typical loop: start a program with breakpoints (dotnet or python, or a language your own
+adapter manifest adds: 'eyedbg adapters ls'; or attach to a running one, or debug a test run with
+'eyedbg test'), inspect (status, stack, vars, eval, output), move (next, step-in,
 step-out, continue, pause, wait), change it if needed (set), and stop (or detach) when done.
 Every execution command prints where the program ended up, so no extra call is needed to see it.
 Breakpoints (lines, text anchors, functions, hit counts, logpoints) and exception stops are
@@ -202,6 +205,7 @@ stderr; with --json, {"schema": 1, "error": {"code", "message", "hint"}} on stdo
 
 const eyedbgExample = `  eyedbg adapters install netcoredbg            # once per machine
   eyedbg start dotnet --bp Program.cs:12         # build, run, stop at line 12
+  eyedbg start python --program app.py --bp app.py:7
   eyedbg vars                                    # locals of the current frame
   eyedbg next                                    # step over, show where it stopped
   eyedbg eval 'total * 2'
@@ -284,7 +288,7 @@ func NewDaemonCommand(info version.Info) *cobra.Command {
 
 		err = daemon.Serve(cmd.Context(), daemon.Config{
 			Paths: p, IdleTimeout: idle, Info: info, Logger: logger,
-			Drivers: []session.Driver{dotnet.New()},
+			Drivers: daemonDrivers(cmd.Context(), loadRegistry(), logger),
 		})
 		if errors.Is(err, daemon.ErrAlreadyRunning) {
 			// An auto-started daemon that lost the start race: the client
@@ -305,6 +309,19 @@ func NewDaemonCommand(info version.Info) *cobra.Command {
 	root.CompletionOptions.DisableDefaultCmd = true
 
 	return root
+}
+
+// daemonDrivers are the daemon's languages: the Go drivers, each given the
+// manifest serving its language, and a generic driver for every other
+// language a manifest serves. Manifests that failed to load are logged.
+func daemonDrivers(ctx context.Context, reg *adapters.Registry, logger *slog.Logger) []session.Driver {
+	for _, p := range reg.Problems() {
+		logger.WarnContext(ctx, "adapter manifest ignored", slog.String("path", p.Path), slog.Any("error", p.Err))
+	}
+
+	drivers := []session.Driver{dotnet.NewWith(reg.Language(dotnet.Language))}
+
+	return append(drivers, generic.Drivers(reg)...)
 }
 
 // formatError renders err for stderr: the message, its stable code and a

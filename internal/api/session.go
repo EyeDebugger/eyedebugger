@@ -53,6 +53,13 @@ type LaunchSpec struct {
 	Env         map[string]string `json:"env,omitempty"`
 	NoBuild     bool              `json:"noBuild,omitempty"`
 	StopOnEntry bool              `json:"stopOnEntry,omitempty"`
+	// Options are the language's own options (start --opt NAME=VALUE),
+	// checked by its driver against the options it declares.
+	Options map[string]string `json:"options,omitempty"`
+	// ClientDir is the caller's working directory: a driver may default
+	// the program's working directory to it (like running the program
+	// from there).
+	ClientDir string `json:"clientDir,omitempty"`
 }
 
 // StartParams are the params of [MethodSessionStart].

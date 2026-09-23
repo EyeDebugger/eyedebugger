@@ -18,8 +18,8 @@ const attachHint = "the process must be a .NET (Core) program of yours whose run
 
 // PrepareAttach implements session.Attacher: netcoredbg attaches to spec's
 // process.
-func (*Driver) PrepareAttach(_ context.Context, spec api.AttachSpec) (session.Launch, error) {
-	launch, err := netcoredbg()
+func (d *Driver) PrepareAttach(_ context.Context, spec api.AttachSpec) (session.Launch, error) {
+	launch, err := d.netcoredbg()
 	if err != nil {
 		return session.Launch{}, err
 	}

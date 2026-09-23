@@ -232,7 +232,7 @@ func (a *adapter) inspect(req godap.RequestMessage) {
 	case *godap.StackTraceRequest:
 		a.respond(req, godap.StackTraceResponseBody{StackFrames: []godap.StackFrame{a.prog.frame()}, TotalFrames: 1})
 	case *godap.ScopesRequest:
-		a.respond(req, godap.ScopesResponseBody{Scopes: []godap.Scope{{Name: "Locals", VariablesReference: localsRef}}})
+		a.respond(req, godap.ScopesResponseBody{Scopes: a.scopes()})
 	case *godap.VariablesRequest:
 		vars, ok := a.prog.variables(r.Arguments.VariablesReference)
 		if !ok {
@@ -255,6 +255,19 @@ func (a *adapter) inspect(req godap.RequestMessage) {
 		a.respond(req, info)
 	default:
 		a.fail(req, req.GetRequest().Command+" is not supported by the fake adapter")
+	}
+}
+
+// scopes are the frame's scopes: Locals, and Globals with
+// [Options.GlobalsScope].
+func (a *adapter) scopes() []godap.Scope {
+	if !a.opts.GlobalsScope {
+		return []godap.Scope{{Name: "Locals", VariablesReference: localsRef}}
+	}
+
+	return []godap.Scope{
+		{Name: "Locals", PresentationHint: "locals", VariablesReference: localsRef},
+		{Name: "Globals", VariablesReference: globalsRef},
 	}
 }
 

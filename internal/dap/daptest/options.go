@@ -22,6 +22,9 @@ type Options struct {
 	// condition holds stop with reason breakpoint, as netcoredbg does (a
 	// breakpoint hit ends the step there).
 	StepHitsBreakpoints bool `json:"stepHitsBreakpoints,omitempty"`
+	// GlobalsScope marks the Locals scope with presentationHint "locals"
+	// and adds a cheap "Globals" scope holding g = 1, as debugpy does.
+	GlobalsScope bool `json:"globalsScope,omitempty"`
 }
 
 // DefaultCaps are the capabilities the fake adapter declares by default:

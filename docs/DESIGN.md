@@ -65,7 +65,9 @@ Global flags: `--session/-s <id>` (or `EYEDBG_SESSION`), `--json`, `--as <client
 
 ```
 eyedbg start  <lang> [--program P | --project P.csproj] [--args ...] [--cwd] [--env K=V] [--stop-on-entry] [--no-build]
-              [--bp LOC]... [--exceptions all|uncaught|none] [--lease-policy free|handoff|human-priority] [--no-record]
+              [--opt NAME=VALUE]... [--bp LOC]... [--exceptions all|uncaught|none]
+              [--lease-policy free|handoff|human-priority] [--no-record]
+                                          # --opt: the language's options from its manifest (python: module, python, justMyCode)
 eyedbg attach <lang> --pid N [--bp LOC]... [--exceptions MODE] [--lease-policy P] [--no-record]
 eyedbg test   <lang> [FILTER] [--project P] [--framework TFM] [--no-build] [--env K=V] [--bp LOC]... [--exceptions MODE]
                                           # dotnet test (VSTest) + VSTEST_HOST_DEBUG, attached to the test host
@@ -91,7 +93,7 @@ eyedbg events [--since N] [--limit N] [--kind k,...] [--wait] [--timeout 30s]
 
 eyedbg lease [status|take [--force]|release|grant <client> [--force]|policy <p> [--force]]
 eyedbg daemon [status|stop|logs]
-eyedbg adapters [ls|install <name>|doctor]
+eyedbg adapters ls | install <adapter|language> | doctor [adapter|language...]
 ```
 
 Design rules:
@@ -131,10 +133,12 @@ Design rules:
 
 ## 7. Plugin model (languages)
 
-Two layers, so simple languages need no Go code:
+Two layers, so simple languages need no Go code (ADR 0011):
 
-1. **Adapter manifest** (declarative, TOML/JSON, bundled or in `~/.config/eyedbg/adapters/`): how to obtain the adapter (download URL per os/arch, checksum, or "on PATH"), how to spawn it (stdio vs TCP), launch/attach config templates, file extensions, and quirks (e.g. `readMemory: false`).
-2. **Driver** (Go interface, compiled in) for languages that need logic:
+1. **Adapter manifest** (declarative JSON, schema 1; field reference in docs/adapter-manifests.md): bundled (`internal/adapters/manifests/`, embedded) or the user's own (`adapters/` in the user config directory, `EYEDBG_CONFIG_DIR` overrides), one per adapter. It says how to obtain the adapter (pinned download per os/arch or `"*"`, SHA-256, size, archive layout), how to find and spawn it (stdio; a native executable found by env variable, installed copy or PATH, or a `python` runtime: a package run on the user's interpreter), and, for a language served by the generic driver, its `--opt` options, launch/attach templates (`${program}`, `${args}`, `${cwd}`, `${env}`, `${stopOnEntry}`, `${runtime}`, `${pid}`, `${opt.NAME}`), exception-mode filter ids and eval-guard rules. A user manifest replaces the bundled one of the same name or language, whole; invalid or untrusted ones are left out and reported (`adapters ls`, `doctor`, the daemon log).
+2. **Driver** (Go interface, compiled in) for languages that need logic (dotnet: project detection and builds, VSTest test runs, the C# side-effect check); its manifest is `"builtin": true` and carries adapter metadata only. Every other language a manifest names is served by the generic driver (`drivers/generic`), registered by `generic.Drivers(registry)` in `internal/cli`: nothing in `internal/session` or `internal/daemon` knows a language.
+
+The interface as designed:
 
 ```go
 type Driver interface {
@@ -148,21 +152,35 @@ type Driver interface {
 }
 ```
 
-As built (`internal/session/driver.go`): `Prepare(ctx, LaunchSpec) (Launch, error)` returns the adapter command and the DAP request body, plus per-driver behaviour the session applies: `Request` (`launch`/`attach`), `PID`, `ExceptionFilters` (mode → adapter filter ids), `SideEffects` (the eval check), `AttachHint`. Optional interfaces: `Attacher` (`PrepareAttach(ctx, AttachSpec)`) and `Tester` (`TestCommand(ctx, TestSpec)`: the command, how to find the test host's pid in its output, and how to explain an exit without one; a Tester is also an Attacher).
+As built (`internal/session/driver.go`): `Name()` and `Prepare(ctx, LaunchSpec) (Launch, error)`, which returns the adapter command and the DAP request body, plus per-driver behaviour the session applies: `Request` (`launch`/`attach`), `PID`, `ExceptionFilters` (mode → adapter filter ids), `SideEffects` (the eval check), `AttachHint`. `LaunchSpec` carries the language's `Options` (`--opt`) and the caller's working directory (`ClientDir`). Optional interfaces: `Attacher` (`PrepareAttach(ctx, AttachSpec)`) and `Tester` (`TestCommand(ctx, TestSpec)`: the command, how to find the test host's pid in its output, and how to explain an exit without one; a Tester is also an Attacher). The generic driver is always an Attacher: without an `attach` template it answers `UNSUPPORTED_BY_ADAPTER` with the manifest's hint. Language detection from a manifest's `extensions` and `markers` is not wired yet (`start` names the language).
 
-- **Capability degradation:** the daemon caches the adapter's `initialize` capabilities; commands needing unsupported features fail with `UNSUPPORTED_BY_ADAPTER` + a hint (e.g. `memory read` on netcoredbg → "use `eyedbg dotnet heap`"). Checked today: `--if` (conditional breakpoints), `func:` (function breakpoints), exception filters (the error names the adapter's), `set` (setExpression, else setVariable); exception details (exceptionInfo) are left out silently when missing.
+- **Trust:** a user manifest names commands eyedbg runs, so it is trusted like the user's shell configuration: never read from a project; on Unix its directory, the parent and the file (checked through the opened handle) must be the user's and writable by neither group nor others (OpenSSH's `st_mode & 022` rule); nothing runs at load; argv never goes through a shell; downloads are https, size-capped and SHA-256-checked before extraction (§11).
+- **Capability degradation:** the daemon caches the adapter's `initialize` capabilities; commands needing unsupported features fail with `UNSUPPORTED_BY_ADAPTER` + a hint (e.g. `memory read` on netcoredbg → "use `eyedbg dotnet heap`"). Checked today: `--if` (conditional breakpoints), `func:` (function breakpoints), exception filters (the error names the adapter's), `set` (setExpression, else setVariable); exception details (exceptionInfo) are left out silently when missing. Manifests can't override capabilities yet (schema 1 has no field for it; it would need a session hook).
+- **Stop captures** read the scopes the adapter marks `presentationHint: "locals"` when it marks any, else every cheap scope; `vars` shows every scope.
 - **Side helpers:** out-of-process, JSON-RPC over stdio, any language. Lets .NET-specific inspection live in C# while the core stays Go.
 
-## 8. .NET specifics
+## 8. Language specifics
+
+### .NET
 
 | Piece | Choice | Notes |
 |---|---|---|
-| Default adapter | **netcoredbg** (Samsung, MIT) 3.2.0 | Binaries: linux-x64/arm64, osx-arm64 ("community supported"), win-x64. We build win-arm64 / osx-x64 in our CI. |
+| Default adapter | **netcoredbg** (Samsung, MIT) 3.2.0 | Binaries: linux-x64/arm64, osx-arm64 ("community supported"), win-x64. We build win-arm64 / osx-x64 in our CI. Pinned in `internal/adapters/manifests/netcoredbg.json`. |
 | Alt adapter | **SharpDbg** (MIT, C#, `dotnet tool`) | Better eval & `DebuggerDisplay`/`DebuggerTypeProxy`. Young, single maintainer. Selectable: `--adapter sharpdbg`. |
 | Forbidden | **vsdbg** | License restricts it to Microsoft IDEs. Never download, detect, or drive it. |
 | Non-pausing inspection | `eyedbg-dotnet-helper` (C#): ClrMD, DiagnosticsClient/EventPipe | `eyedbg dotnet counters`, `trace`, `dump`, `heap` (stats, top types, gcroot on a dump), `threads` for a hung process. Live-heap reads without suspension are inconsistent → default to dump-then-analyze. |
 
-Known netcoredbg gaps to surface honestly: no lambda/LINQ-lambda evaluation, no `readMemory`/`disassemble`, no `DebuggerDisplay`; no native hit counts or logpoints (emulated by the daemon, §4); `evaluate` ignores its context and always runs code, so eval can't be side-effect free — the driver refuses expressions that visibly change the program (a method call, `new`, assignment, `++`/`--`, interpolated strings) without `--allow-side-effects`, but getters, indexers and operators still run; an unhandled exception always stops the program, whatever the exception mode. A function breakpoint also stops with reason `breakpoint`, so the stop filter can't tell its stops from those of a line breakpoint on the function's first line: a `--hit`/`--log` breakpoint there decides the function breakpoint's stops too (documented in `bp add --help`). Driver `Prepare` builds with `dotnet build` unless `--no-build`. `attach` sends netcoredbg only the pid (Just My Code stays on); an attach failure surfaces at `configurationDone` and becomes `ATTACH_FAILED`. `test` runs `dotnet test -c Debug --tl:off` with `VSTEST_HOST_DEBUG=1 VSTEST_DEBUG_NOBP=1`, reads the `Process Id: N, Name: …` line vstest.console prints (the host runs under `dotnet`), attaches, and ends with `dotnet test`'s exit code — validated on Linux (.NET 10 SDK). Microsoft.Testing.Platform projects are refused (`NO_TEST_HOST`, hint: debug the test app with `start`).
+Known netcoredbg gaps to surface honestly: no lambda/LINQ-lambda evaluation, no `readMemory`/`disassemble`, no `DebuggerDisplay`; no native hit counts or logpoints (emulated by the daemon, §4); `evaluate` ignores its context and always runs code, so eval can't be side-effect free — the driver refuses expressions that visibly change the program (a method call, `new`, assignment, `++`/`--`, interpolated strings) without `--allow-side-effects`, but getters, indexers and operators still run; an unhandled exception always stops the program, whatever the exception mode. A function breakpoint also stops with reason `breakpoint`, so the stop filter can't tell its stops from those of a line breakpoint on the function's first line: a `--hit`/`--log` breakpoint there decides the function breakpoint's stops too (documented in `bp add --help`). Driver `Prepare` builds with `dotnet build` unless `--no-build`; it takes no `--opt`. `attach` sends netcoredbg only the pid (Just My Code stays on); an attach failure surfaces at `configurationDone` and becomes `ATTACH_FAILED`. `test` runs `dotnet test -c Debug --tl:off` with `VSTEST_HOST_DEBUG=1 VSTEST_DEBUG_NOBP=1`, reads the `Process Id: N, Name: …` line vstest.console prints (the host runs under `dotnet`), attaches, and ends with `dotnet test`'s exit code — validated on Linux (.NET 10 SDK). Microsoft.Testing.Platform projects are refused (`NO_TEST_HOST`, hint: debug the test app with `start`).
+
+### Python
+
+Served by the manifest alone (`internal/adapters/manifests/debugpy.json`, debugpy 1.8.22, MIT): `eyedbg start python --program app.py` or `--opt module=pytest` (like `python -m`). One interpreter runs both debugpy (`<interpreter> <root>/debugpy/adapter`) and the program (debugpy's `python` launch argument): `--opt python=PATH`, else `EYEDBG_PYTHON` (from the daemon's environment), else a `.venv`/`venv` holding `pyvenv.cfg` in the working directory, then the program's directory and its parents (only directories the user owns; the venv itself must pass the manifest permission check), else `python3`, `python`, `py -3` on PATH; Python 3.10+. debugpy comes from `eyedbg adapters install python` (the pinned pure-Python universal wheel, SHA-256- and size-checked, no pip or venv; it has no compiled speedups) when installed, else from the interpreter's own. The working directory defaults to where `eyedbg` ran (like `python app.py`). `--project` and `--no-build` are ignored.
+
+- Child processes run but aren't debugged (`subProcess: false`; debugpy's `debugpyAttach` event is dropped and its `startDebugging` reverse request refused). `attach` is refused (`UNSUPPORTED_BY_ADAPTER`: debugpy needs gdb or lldb to inject into a pid).
+- Exception modes: `all` → filters `raised` + `uncaught` (debugpy stops at each frame the exception passes through, then once more if nothing catches it); `uncaught` → `uncaught` + `userUnhandled` (one stop where it leaves the user's code; frame 0 is the raise site, and execution waits in the frame debugpy marks "(Current frame)"); `none` lets an uncaught exception end the program with its traceback in the output.
+- Scopes are Locals and Globals; special (dunder) and function variables are hidden, class variables grouped (`variablePresentation`), so snapshots and `--changed` read Locals only (§7). `eval` refuses, without `--allow-side-effects`, calls other than read-only builtins (`len`, `str`, `repr`, `type`, `isinstance`, …), `=`, `:=` and f-/t-strings (the manifest's `evalGuard`; best-effort, as for .NET). Watch-context evaluation of an unknown name is `ADAPTER_ERROR` ("NameError: …"); a string's value is its repr.
+- Function breakpoints match the bare function name (`func:price`), stop with reason `function breakpoint`, and debugpy verifies any name.
+- Stop on entry stops at the module's first executable line.
 
 ## 9. Phase 2: VS Code co-debugging (design now, build later)
 
@@ -180,11 +198,12 @@ Known netcoredbg gaps to surface honestly: no lambda/LINQ-lambda evaluation, no 
 
 ## 11. Safety
 
-- `eval` may run code (method calls, property getters). Default: read-only intent (DAP `context: "watch"`) plus the driver's syntactic check (`SIDE_EFFECTS`), since netcoredbg enforces nothing; `--allow-side-effects` (context `repl`) is an execution request: it needs the lease and is logged. `vars --expand` doesn't evaluate a path the check flags. Breakpoint conditions and logpoint expressions are not checked: the user wrote them for the program to run.
+- `eval` may run code (method calls, property getters). Default: read-only intent (DAP `context: "watch"`) plus the driver's syntactic check (`SIDE_EFFECTS`; for manifest languages, the manifest's `evalGuard`), since netcoredbg enforces nothing and debugpy only refuses statements in `watch`; `--allow-side-effects` (context `repl`) is an execution request: it needs the lease and is logged. `vars --expand` doesn't evaluate a path the check flags. Breakpoint conditions and logpoint expressions are not checked: the user wrote them for the program to run.
 - Socket access restricted to the user; token file; no TCP listener by default.
 - Redaction (§5), not implemented yet. Session recordings (`sessions/<id>.jsonl` in the private runtime dir, 0600, never overwritten, capped at 4 MiB, pruned 7 days after the session ended) hold control events only: started, client, lease, exec, continued, stopped (reason and thread only), breakpoints (conditions included), threads, exited, ended — no program output, stop text, launch arguments, environment or variable values, until redaction exists. On by default; `start --no-record` or `EYEDBG_NO_RECORD=1` turns it off.
 - `attach` only to processes owned by the same user (checked first: Linux `/proc`, other Unix `ps`, Windows the process token's SID), shown as `pid N (name)`, never by command line. For .NET the ptrace-scope/`task_for_pid` hints don't apply: CoreCLR's debugger falls back to its pipe transport when it can't read memory directly (dotnet/runtime `shimremotedatatarget.cpp`), so the real failure modes — not a started .NET runtime, `DOTNET_EnableDiagnostics=0`, another debugger attached, a different `TMPDIR`, another user — are what `ATTACH_FAILED`'s hint lists. `stop` detaches from an attached program, never kills it.
 - `test` passes the filter, framework and environment to `dotnet test` as argv, never through a shell, and runs it in its own process group, killed as a whole by `stop`.
+- Adapter manifests (§7, ADR 0011): the user's are trusted like shell configuration and permission-checked on Unix, never read from a project; downloads are pinned (https, SHA-256, size) and extracted through a staging directory that refuses escaping entries. The Python interpreter probe runs with `-c` after dropping the working directory from `sys.path`, so a cloned repository's `debugpy.py` or `sitecustomize.py` is never used; the adapter is started by path, never with `-m`. A discovered venv is run only if the user owns it and no one else can write it, and only directories the user owns are searched, so another user's `/tmp/.venv` is never run.
 
 ## 12. Repo layout (Go)
 
@@ -197,7 +216,8 @@ internal/session/    session, lease, breakpoint store, event log, stop snapshot
 internal/dap/        DAP client over go-dap: framing, seq mapping, reverse requests
 internal/facade/     DAP facade (P2)
 internal/present/    budgeting, truncation, text/JSON renderers
-internal/adapters/   manifest loader, installer (download + checksum)
+internal/adapters/   manifest schema, loader and trust check, templates, installer (download + checksum), Python runtime
+internal/adapters/manifests/   bundled adapter manifests (netcoredbg, debugpy)
 internal/proc/       process owner lookup (attach), process groups (test runs)
 internal/cli/        command trees for all binaries (only package importing the CLI framework)
 internal/version/    build metadata (ldflags / debug.ReadBuildInfo)
@@ -205,7 +225,7 @@ drivers/dotnet/      Driver impl
 drivers/generic/     manifest-only driver
 helpers/dotnet/      C# side helper (ClrMD, EventPipe)
 skill/SKILL.md
-testdata/apps/       sample debuggees per language
+testdata/apps/       sample debuggees per language (dotnet/, python/)
 ```
 
 ## 13. MVP milestones
@@ -220,7 +240,8 @@ testdata/apps/       sample debuggees per language
 5. **Breadth** (done): hit counts, logpoints, function and exception breakpoints, eval with side
    effects, `set`, `attach`/`detach`, `test`, anchors, capability degradation, sample apps (ADR 0010).
 6. **Ship:** SKILL.md, CI matrix (6 os/arch), e2e tests driving sample apps.
-7. **Second language** via manifest only (debugpy) to prove the plugin boundary.
+7. **Second language** (done) via manifest only (debugpy) to prove the plugin boundary: manifest schema,
+   loader and trust model, generic driver, `adapters ls`, `--opt` (ADR 0011).
 
 Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; more languages.
 
@@ -232,10 +253,12 @@ Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; mor
 - Lease policy default for P2 (`handoff` vs `human-priority`) — decide with real usage.
 - Anchor re-resolution after edits: decided (ADR 0010) — anchors resolve once, exactly; a changed file gets a note, and a future `restart` can re-resolve every anchor against the rebuilt program.
 - Windows: AF_UNIX vs named pipe as primary — prototype both in milestone 1.
+- Python: the downloaded pure-Python debugpy has no compiled speedups (tracing speed unmeasured); attach to a running Python process (gdb/lldb injection, Python 3.14's `sys.remote_exec`) and debugging child processes are future work; interpreter discovery (Windows `py`/Store aliases, conda/poetry venvs outside the project) is checked by unit tests only, the end-to-end tests run on Linux.
 
 ## 15. References
 
 - netcoredbg: https://github.com/Samsung/netcoredbg (releases; `src/protocols/vscodeprotocol.cpp`)
+- debugpy: https://github.com/microsoft/debugpy (`src/debugpy/adapter/clients.py`, `launcher/handlers.py`) · https://pypi.org/project/debugpy/
 - vsdbg licensing: https://github.com/dotnet/vscode-csharp/blob/main/docs/debugger/Microsoft-.NET-Core-Debugger-licensing-and-Microsoft-Visual-Studio-Code.md
 - SharpDbg: https://github.com/MattParkerDev/sharpdbg · ClrDebug: https://github.com/lordmilko/ClrDebug
 - ClrMD / diagnostics: https://github.com/microsoft/clrmd · https://learn.microsoft.com/en-us/dotnet/core/diagnostics/
