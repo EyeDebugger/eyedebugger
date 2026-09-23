@@ -292,7 +292,14 @@ func (s *Session) waitHostPID(ctx context.Context, tc TestCommand) (int, error) 
 		case <-s.run.done:
 			s.mu.Lock()
 			code, tail := *s.run.code, strings.Join(s.run.tail, "\n")
+			stopping := s.stopReason != "" || s.state == api.StateExited
 			s.mu.Unlock()
+
+			// A stop kills the runner before it ends the session: the
+			// runner's exit is then the stop's doing, not a failure.
+			if stopping {
+				return 0, s.stoppedWhileStarting()
+			}
 
 			return 0, tc.Failure(code, tail)
 		case <-ctx.Done():

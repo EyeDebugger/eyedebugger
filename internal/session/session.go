@@ -1001,10 +1001,10 @@ func (s *Session) send(ctx context.Context, kind string, thread, before int) err
 	s.mu.Lock()
 	if kind != ExecPause {
 		s.resumedAt = s.log.latest()
-	}
-
-	if kind != ExecPause {
 		s.stepping = kind == ExecNext || kind == ExecStepIn || kind == ExecStepOut
+		// A pause that reached an already stopped program got no stop to
+		// clear it; it must not outlive this resume.
+		s.pauseRequested = false
 	} else {
 		s.pauseRequested = true
 	}
