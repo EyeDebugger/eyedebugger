@@ -11,7 +11,7 @@ decision-makers: Ijat (@ijat)
 `eyedbg` is invoked by agents many times per debugging loop (docs/DESIGN.md §2), so process start
 time matters. The project also ships one static binary across six OS/arch targets, cross-compiled
 from a single host, and needs a Debug Adapter Protocol (DAP) client library. Which language should
-the daemon, CLI and MCP server be written in?
+the daemon and CLI be written in?
 
 ## Decision Drivers
 

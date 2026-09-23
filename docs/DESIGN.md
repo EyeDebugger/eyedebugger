@@ -20,13 +20,14 @@ Gap in prior art (see §15): every existing agent debugger is an MCP server or I
 - Hot reload / Edit & Continue (not available outside Microsoft tooling for .NET).
 - Remote/cross-machine sessions.
 - Time-travel debugging.
+- MCP wrapper (§10): the CLI is the agent interface; a thin MCP wrapper is optional future work.
 
 ## 2. Architecture
 
 ```
-eyedbg CLI (stateless) ─────┐
-eyedbg-mcp (thin wrapper) ──┼── local IPC (JSON-RPC 2.0) ──► eyedbgd (daemon, per user)
-VS Code extension (P2) ─────┘   + per-session DAP facade (P2)      │
+eyedbg CLI (stateless) ──┐
+                         ├── local IPC (JSON-RPC 2.0) ──► eyedbgd (daemon, per user)
+VS Code extension (P2) ──┘     + per-session DAP facade (P2)      │
                                                                    ├── Session ── DAP ──► adapter process
                                                                    │   (netcoredbg | sharpdbg | debugpy | dlv | lldb-dap | js-debug)
                                                                    └── Side helpers (JSON-RPC over stdio)
@@ -34,9 +35,11 @@ VS Code extension (P2) ─────┘   + per-session DAP facade (P2)      �
 ```
 
 - **Language: Go.** Cross-compiles every OS/arch from one host, ~5 ms process start (matters: agents invoke the CLI many times), `google/go-dap` provides DAP types + framing (used by delve). Measured and sourced in the research notes.
-- **The daemon's session model is the source of truth.** CLI, MCP, and VS Code are views/controllers over it. No client talks to an adapter directly.
+- **The daemon's session model is the source of truth.** The CLI and VS Code (and any future MCP
+  wrapper, §10) are views/controllers over it. No client talks to an adapter directly.
 - **Two client-facing protocols:**
-  1. *Native API* (JSON-RPC 2.0) — sessions, leases, budgeted views, event log. Used by CLI/MCP, and by the extension for non-DAP concerns.
+  1. *Native API* (JSON-RPC 2.0) — sessions, leases, budgeted views, event log. Used by the CLI, and
+     by the extension for non-DAP concerns.
   2. *DAP facade* (phase 2) — per-session DAP endpoint so VS Code's built-in debug UI attaches natively. Requests from it go through the same lease/ownership checks as native calls.
 
 ## 3. Core concepts
@@ -153,7 +156,7 @@ Known netcoredbg gaps to surface honestly: no lambda/LINQ-lambda evaluation, no 
 ## 10. Agent integration
 
 - `SKILL.md` shipped with the binary (`eyedbg skill print`/`install`): when to reach for the debugger (after a failed hypothesis or two, per debug-gym), the standard loop (`start → bp add → run-until --dump → vars --changed → eval`), budgets, and "always `eyedbg stop` when done".
-- `eyedbg-mcp`: thin MCP server that maps ~10 coarse tools onto the same daemon API (for agents that prefer MCP). No logic lives in it.
+- No MCP server by default — agents use the CLI directly; its help is the documentation. A thin MCP wrapper may be added later only if a concrete agent needs it (non-goal for MVP).
 
 ## 11. Safety
 
@@ -167,8 +170,7 @@ Known netcoredbg gaps to surface honestly: no lambda/LINQ-lambda evaluation, no 
 ```
 cmd/eyedbg/            CLI
 cmd/eyedbgd/           daemon (also `eyedbg daemon run`)
-cmd/eyedbg-mcp/        MCP wrapper
-internal/api/        native JSON-RPC schema (shared by CLI, MCP, extension)
+internal/api/        native JSON-RPC schema (shared by the CLI, the extension, and any future MCP wrapper)
 internal/daemon/     lifecycle, IPC, auth
 internal/session/    session, lease, breakpoint store, event log, stop snapshot
 internal/dap/        DAP client over go-dap: framing, seq mapping, reverse requests
@@ -191,7 +193,7 @@ testdata/apps/       sample debuggees per language
 3. **Agent ergonomics:** stop snapshot, `--dump`, `run-until`, `wait`, `--changed`, budgets, JSON schema, errors.
 4. **Model for P2:** client identity, bp ownership merge, lease, event log + `events --since`.
 5. **Breadth:** conditional/log/function/exception bps, eval, set, attach, `test`, anchors.
-6. **Ship:** SKILL.md, `eyedbg-mcp`, CI matrix (6 os/arch), e2e tests driving sample apps.
+6. **Ship:** SKILL.md, CI matrix (6 os/arch), e2e tests driving sample apps.
 7. **Second language** via manifest only (debugpy) to prove the plugin boundary.
 
 Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; more languages.
