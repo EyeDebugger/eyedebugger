@@ -37,7 +37,7 @@
 
 - [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/). Types: build,
   chore, ci, docs, feat, fix, perf, refactor, revert, style, test.
-- Scope = area (`cli`, `daemon`, `session`, `dap`, `dotnet`, `mcp`, `deps`, `adr`).
+- Scope = area (`cli`, `daemon`, `session`, `dap`, `dotnet`, `deps`, `adr`).
 - Breaking changes use `!` or a `BREAKING CHANGE:` footer.
 - CI checks the PR title, and it becomes the squash-commit subject.
 - Rename GitHub's `Revert "…"` titles to `revert: …`.

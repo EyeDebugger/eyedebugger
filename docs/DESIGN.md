@@ -27,7 +27,7 @@ Gap in prior art (see §15): every existing agent debugger is an MCP server or I
 ```
 eyedbg CLI (stateless) ──┐
                          ├── local IPC (JSON-RPC 2.0) ──► eyedbgd (daemon, per user)
-VS Code extension (P2) ──┘     + per-session DAP facade (P2)      │
+VS Code extension (P2) ──┘     + per-session DAP facade (P2)       │
                                                                    ├── Session ── DAP ──► adapter process
                                                                    │   (netcoredbg | sharpdbg | debugpy | dlv | lldb-dap | js-debug)
                                                                    └── Side helpers (JSON-RPC over stdio)
@@ -199,7 +199,9 @@ testdata/apps/       sample debuggees per language
 
 1. **Skeleton:** daemon auto-start, IPC + token, version handshake, `daemon status/stop`.
 2. **DAP core:** go-dap client, netcoredbg install/doctor, `start` a console app, `bp add` (line), `continue`, `status`, `stack`, `vars`, `stop`.
-3. **Agent ergonomics:** stop snapshot, `--dump`, `run-until`, `wait`, `--changed`, budgets, JSON schema, errors.
+3. **Agent ergonomics:** stop snapshot, `--dump`, `run-until`, `wait`, `--changed`, budgets, JSON
+   schema, errors, `eyedbg help --all` (the full command tree's help in one read) and a `--json`
+   help variant.
 4. **Model for P2:** client identity, bp ownership merge, lease, event log + `events --since`.
 5. **Breadth:** conditional/log/function/exception bps, eval, set, attach, `test`, anchors.
 6. **Ship:** SKILL.md, CI matrix (6 os/arch), e2e tests driving sample apps.
