@@ -98,8 +98,8 @@ func TestSessionRendering(t *testing.T) {
 func TestParseLocation(t *testing.T) {
 	t.Parallel()
 
-	spec, err := parseLocation("/src/Program.cs:12")
-	if err != nil || spec.File != "/src/Program.cs" || spec.Line != 12 {
+	spec, err := parseLocation("src/Program.cs:12")
+	if err != nil || spec.File != absPath("src/Program.cs") || spec.Line != 12 {
 		t.Errorf("parseLocation = %+v, %v", spec, err)
 	}
 
