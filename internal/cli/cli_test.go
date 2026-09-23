@@ -83,6 +83,122 @@ func TestErrorsExitNonZero(t *testing.T) {
 	}
 }
 
+// rootFactories returns a fresh command tree per binary, so every test below
+// covers every binary in the scaffold (docs/DESIGN.md §4). A factory (not a
+// shared instance) matters: cobra command state must not be reused across
+// multiple Execute calls.
+func rootFactories() map[string]func() *cobra.Command {
+	return map[string]func() *cobra.Command{
+		"eyedbg":  func() *cobra.Command { return NewEyedbgCommand(testInfo) },
+		"eyedbgd": func() *cobra.Command { return NewDaemonCommand(testInfo) },
+	}
+}
+
+// TestAllCommandsHaveHelp walks every command and subcommand of every binary
+// and fails if any non-hidden command lacks Short, Long or Example, so a
+// future command can't regress docs/DESIGN.md §4's "help is the interface"
+// rule.
+func TestAllCommandsHaveHelp(t *testing.T) {
+	t.Parallel()
+
+	for name, newRoot := range rootFactories() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assertHasHelp(t, newRoot())
+		})
+	}
+}
+
+func assertHasHelp(t *testing.T, cmd *cobra.Command) {
+	t.Helper()
+
+	if !cmd.Hidden {
+		path := cmd.CommandPath()
+
+		if cmd.Short == "" {
+			t.Errorf("%s: missing Short", path)
+		}
+
+		if cmd.Long == "" {
+			t.Errorf("%s: missing Long", path)
+		}
+
+		if cmd.Example == "" {
+			t.Errorf("%s: missing Example", path)
+		}
+	}
+
+	for _, sub := range cmd.Commands() {
+		assertHasHelp(t, sub)
+	}
+}
+
+// TestHelpReachableForEveryCommand asserts that every command and subcommand
+// of every binary (including the root command itself) is reachable both as
+// '<path...> --help' and as 'help <path...>', and that both forms print that
+// command's own Long and Example text (docs/DESIGN.md §4).
+func TestHelpReachableForEveryCommand(t *testing.T) {
+	t.Parallel()
+
+	for name, newRoot := range rootFactories() {
+		for _, path := range commandPaths(newRoot()) {
+			t.Run(name+"/"+strings.Join(append([]string{"root"}, path...), " "), func(t *testing.T) {
+				t.Parallel()
+
+				target, _, err := newRoot().Find(path)
+				if err != nil {
+					t.Fatalf("Find(%v): %v", path, err)
+				}
+
+				assertHelpOutput(t, newRoot(), append(append([]string{}, path...), "--help"), target.Long, target.Example)
+				assertHelpOutput(t, newRoot(), append([]string{"help"}, path...), target.Long, target.Example)
+			})
+		}
+	}
+}
+
+// commandPaths returns the argument path (one element per level, matching
+// Command.Name()) of every non-hidden command in root's tree, including the
+// root itself as an empty path.
+func commandPaths(root *cobra.Command) [][]string {
+	var paths [][]string
+
+	var walk func(cmd *cobra.Command, prefix []string)
+	walk = func(cmd *cobra.Command, prefix []string) {
+		if cmd.Hidden {
+			return
+		}
+
+		paths = append(paths, append([]string{}, prefix...))
+
+		for _, sub := range cmd.Commands() {
+			walk(sub, append(prefix, sub.Name()))
+		}
+	}
+
+	walk(root, nil)
+
+	return paths
+}
+
+func assertHelpOutput(t *testing.T, root *cobra.Command, args []string, wantLong, wantExample string) {
+	t.Helper()
+
+	stdout, stderr, code := execute(t, root, args)
+	if code != 0 {
+		t.Fatalf("eyedbg %s: exit code = %d, stderr = %q", strings.Join(args, " "), code, stderr)
+	}
+
+	if !strings.Contains(string(stdout), wantLong) {
+		t.Errorf("eyedbg %s: stdout missing Long text\n--- stdout ---\n%s", strings.Join(args, " "), stdout)
+	}
+
+	if !strings.Contains(string(stdout), wantExample) {
+		t.Errorf("eyedbg %s: stdout missing Example text\n--- stdout ---\n%s", strings.Join(args, " "), stdout)
+	}
+}
+
 func execute(t *testing.T, root *cobra.Command, args []string) (stdout, stderr []byte, code int) {
 	t.Helper()
 

@@ -49,6 +49,24 @@
 - `--json` is stable and carries `"schema": N`; bump it only on incompatible changes.
 - Every output shape has a golden test.
 
+## Help text
+
+- Help is the interface (DESIGN §4): there is no MCP server by default, so the CLI's own help is
+  how an agent is expected to learn the tool.
+- Every command **and subcommand** — including each binary's root command — has a `Short`, a `Long`
+  (what it does, when to use it, whether it blocks and for how long, its side effects on the
+  debuggee, its output shape, and its exit codes) and at least one `Example` with a real
+  invocation. Flags document their unit and default in their usage string.
+- Help must be reachable both ways, at every level of the tree: `eyedbg <path...> --help` and
+  `eyedbg help <path...>`.
+- `internal/cli`'s tests enforce this: one walks the whole command tree and fails on any non-hidden
+  command missing `Short`, `Long` or `Example`; another executes both help forms for every command
+  and asserts they print that command's own `Long` and `Example`. A new command without help fails
+  CI, not review.
+- `eyedbg help --all` (prints the full tree's help in one read) and a `--json` help variant are
+  planned (DESIGN §13); until then, `--help` per command is the source of truth.
+- Help text is a tested, reviewed artifact: change it deliberately, the same as `--json` output.
+
 ## Testing
 
 - Stdlib `testing`; testify is blocked. `github.com/google/go-cmp` may be added with justification

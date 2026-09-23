@@ -1,9 +1,11 @@
 # Agent instructions
 
 EyeDebugger (`eyedbg`) is an AI-native, CLI-first debugger; agents and humans share one live debug
-session through a per-user daemon. There is no MCP server by default: the CLI is the agent
-interface. `docs/DESIGN.md` is the source of truth for design; decisions are recorded in
-`docs/adr/`.
+session through a per-user daemon. There is no MCP server by default: the CLI, with complete
+built-in help, is the agent interface. Run `eyedbg help --all` (planned) or `eyedbg <command>
+--help` / `eyedbg help <command>` for any command's own help — treat it as the source of truth over
+this file for exact flags and behavior. `docs/DESIGN.md` is the source of truth for design;
+decisions are recorded in `docs/adr/`.
 
 ## Repo map
 
@@ -43,6 +45,9 @@ Run `task ci` before finishing. Individual tasks and their raw equivalents are i
 7. Windows is first-class: no bash-only scripts, `filepath` for OS paths.
 8. Tests: stdlib `testing`, table-driven, `t.Parallel()`, no sleeps.
 9. Debuggee data may hold secrets: never copy it into logs, issues or commits.
+10. Help is the interface (`docs/CONVENTIONS.md` § Help text): every command and subcommand needs
+    `Short`, `Long` and `Example`, reachable as both `<path> --help` and `help <path>` at every
+    level. `internal/cli`'s tree-walk test enforces this — a new command without help fails CI.
 
 ## Commits
 
