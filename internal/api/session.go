@@ -72,6 +72,14 @@ type StartParams struct {
 	LeasePolicy LeasePolicy `json:"leasePolicy,omitempty"`
 	// NoRecord turns off the session's recording.
 	NoRecord bool `json:"noRecord,omitempty"`
+	// Exceptions is the starting client's exception mode, set before the
+	// program runs; empty means none.
+	Exceptions ExceptionMode `json:"exceptions,omitempty"`
+	// Attach debugs a running process instead of launching one; the launch
+	// fields must then be empty.
+	Attach *AttachSpec `json:"attach,omitempty"`
+	// Test debugs a test run of the project (see [TestSpec]).
+	Test *TestSpec `json:"test,omitempty"`
 }
 
 // SessionRef names a session, and the client acting on it.
@@ -108,7 +116,16 @@ type SessionInfo struct {
 	Clients []ClientInfo `json:"clients,omitempty"`
 	// Recording is the file the session's control events are recorded to.
 	Recording string `json:"recording,omitempty"`
+	// Mode is how the session got its program: [ModeAttach], [ModeTest],
+	// or empty for a launched one.
+	Mode string `json:"mode,omitempty"`
 }
+
+// Session modes ([SessionInfo.Mode]).
+const (
+	ModeAttach = "attach"
+	ModeTest   = "test"
+)
 
 // What a snapshot can include beyond the stop location ([DumpSpec]).
 const (
@@ -155,6 +172,9 @@ type Snapshot struct {
 	Target  *BreakpointSpec `json:"target,omitempty"`
 	Locals  *Scope          `json:"locals,omitempty"`
 	Changes *Changes        `json:"changes,omitempty"`
+	// Exception describes the exception the program stopped at, when the
+	// adapter can tell.
+	Exception *ExceptionInfo `json:"exception,omitempty"`
 }
 
 // Changes are the locals of frame 0 that differ from the previous stop.
@@ -221,10 +241,20 @@ type WaitParams struct {
 
 // BreakpointSpec asks for a breakpoint at File:Line, optionally only when
 // Condition (an expression in the program's language) is true.
+//
+// Instead of a line, Anchor names the line by its text (the daemon finds
+// the one line of File holding it); instead of a location, Function names a
+// function. HitCondition ("N", ">=N" or "%N") stops only at some hits, and
+// LogMessage makes it a logpoint: it prints the message (with {expression}
+// parts evaluated) and never stops.
 type BreakpointSpec struct {
-	File      string `json:"file"`
-	Line      int    `json:"line"`
-	Condition string `json:"condition,omitempty"`
+	File         string `json:"file"`
+	Line         int    `json:"line"`
+	Condition    string `json:"condition,omitempty"`
+	Function     string `json:"function,omitempty"`
+	Anchor       string `json:"anchor,omitempty"`
+	HitCondition string `json:"hitCondition,omitempty"`
+	LogMessage   string `json:"logMessage,omitempty"`
 }
 
 // Breakpoint is a breakpoint as the adapter resolved it.
@@ -246,6 +276,15 @@ type Breakpoint struct {
 	// Note explains how sharing its line with other clients' breakpoints
 	// changes it.
 	Note string `json:"note,omitempty"`
+	// Function, Anchor, HitCondition and LogMessage are as in
+	// [BreakpointSpec]; a function breakpoint has no file or line.
+	Function     string `json:"function,omitempty"`
+	Anchor       string `json:"anchor,omitempty"`
+	HitCondition string `json:"hitCondition,omitempty"`
+	LogMessage   string `json:"logMessage,omitempty"`
+	// Hits counts the stops where its condition held, for breakpoints with
+	// a hit condition or a log message.
+	Hits int `json:"hits,omitempty"`
 }
 
 // BreakpointAddParams are the params of [MethodBreakpointAdd].
@@ -334,6 +373,14 @@ type EvalParams struct {
 
 	Expression string `json:"expression"`
 	Frame      int    `json:"frame"`
+	// AllowSideEffects evaluates expressions that may change the program
+	// (method calls, assignments); it takes the control lease like an
+	// execution request.
+	AllowSideEffects bool `json:"allowSideEffects,omitempty"`
+	// Depth expands the result's members this many levels (1 or 0: none).
+	Depth int `json:"depth,omitempty"`
+	// Budget is as in [DumpSpec].
+	Budget int `json:"budget,omitempty"`
 }
 
 // EvalResult is the result of [MethodEval].
@@ -342,6 +389,11 @@ type EvalResult struct {
 	Value       string `json:"value"`
 	Type        string `json:"type,omitempty"`
 	HasChildren bool   `json:"hasChildren,omitempty"`
+	// Children are the result's members, when a depth was asked for; More
+	// and Truncated are as in [Scope].
+	Children  []Var `json:"children,omitempty"`
+	More      int   `json:"more,omitempty"`
+	Truncated bool  `json:"truncated,omitempty"`
 }
 
 // OutputParams are the params of [MethodOutput].

@@ -136,11 +136,12 @@ func exitCode(err error) int {
 		api.CodeLeaseHeld, api.CodeNotOwner:
 		return exitState
 	case api.CodeAdapterMissing, api.CodeBuildFailed, api.CodeDaemonNotRunning, api.CodeDaemonStart,
-		api.CodeVersionMismatch, api.CodeUnauthorized:
+		api.CodeVersionMismatch, api.CodeUnauthorized, api.CodeAttachFailed, api.CodeNoTestHost:
 		return exitEnvironment
-	case api.CodeAdapterFailed:
+	case api.CodeAdapterFailed, api.CodeUnsupported:
 		return exitAdapter
-	case api.CodeInvalidRequest, api.CodeUnknownMethod, api.CodeInternal:
+	case api.CodeInvalidRequest, api.CodeUnknownMethod, api.CodeInternal, api.CodeSideEffects,
+		api.CodeAnchorNotFound, api.CodeAnchorAmbiguous:
 		return exitError
 	default:
 		return exitError
@@ -170,10 +171,12 @@ The CLI is stateless: every invocation talks to a per-user daemon (eyedbgd) over
 auto-starts on first use and exits by itself when idle (see 'eyedbg daemon --help'). There is no MCP server by default — this CLI, with its complete built-in
 help, is the agent interface (docs/DESIGN.md §10).
 
-A typical loop: start a program with breakpoints, inspect (status, stack, vars, eval, output),
-move (next, step-in, step-out, continue, pause, wait), and stop the session when done. Every
-execution command prints where the program ended up, so no extra call is needed to see it.
-Breakpoints are managed with 'eyedbg bp'. Add --json to any command for machine-readable output
+A typical loop: start a program with breakpoints (or attach to a running one, or debug a test
+run with 'eyedbg test'), inspect (status, stack, vars, eval, output), move (next, step-in,
+step-out, continue, pause, wait), change it if needed (set), and stop (or detach) when done.
+Every execution command prints where the program ended up, so no extra call is needed to see it.
+Breakpoints (lines, text anchors, functions, hit counts, logpoints) and exception stops are
+managed with 'eyedbg bp'. Add --json to any command for machine-readable output
 with a "schema" field; errors print a stable [CODE] and a hint.
 
 Run 'eyedbg <command> --help' or 'eyedbg help <command>' for a command's own help: what it does,
@@ -189,10 +192,12 @@ that added them; the control lease decides who may run, step or pause the progra
 --help'); 'eyedbg events' shows what every client did.
 
 Exit codes: 0 success (a wait that times out is a success that says so); 1 usage or internal
-error; 2 no such session, it is in the wrong state, or another client holds it (NO_SESSION,
-NOT_STOPPED, NOT_RUNNING, SESSION_EXITED, SESSIONS_ACTIVE, LEASE_HELD, NOT_OWNER); 3 setup problem (ADAPTER_NOT_INSTALLED, BUILD_FAILED,
-DAEMON_*, VERSION_MISMATCH, UNAUTHORIZED); 4 the debug adapter refused a request (ADAPTER_ERROR,
-e.g. an expression that doesn't evaluate). Errors print "eyedbg: message [CODE]" and a hint on
+error (INVALID_REQUEST, SIDE_EFFECTS, ANCHOR_NOT_FOUND, ANCHOR_AMBIGUOUS); 2 no such session, it is
+in the wrong state, or another client holds it (NO_SESSION, NOT_STOPPED, NOT_RUNNING,
+SESSION_EXITED, SESSIONS_ACTIVE, LEASE_HELD, NOT_OWNER); 3 setup problem (ADAPTER_NOT_INSTALLED,
+BUILD_FAILED, ATTACH_FAILED, NO_TEST_HOST, DAEMON_*, VERSION_MISMATCH, UNAUTHORIZED); 4 the debug
+adapter refused a request or can't do it (ADAPTER_ERROR, e.g. an expression that doesn't
+evaluate; UNSUPPORTED_BY_ADAPTER). Errors print "eyedbg: message [CODE]" and a hint on
 stderr; with --json, {"schema": 1, "error": {"code", "message", "hint"}} on stdout.`
 
 const eyedbgExample = `  eyedbg adapters install netcoredbg            # once per machine
@@ -200,6 +205,7 @@ const eyedbgExample = `  eyedbg adapters install netcoredbg            # once pe
   eyedbg vars                                    # locals of the current frame
   eyedbg next                                    # step over, show where it stopped
   eyedbg eval 'total * 2'
+  eyedbg bp add Program.cs:20 --log 'i={i}'      # print instead of stopping
   eyedbg continue                                # to the next breakpoint or exit
   eyedbg stop                                    # end the session`
 
@@ -224,6 +230,10 @@ func NewEyedbgCommand(info version.Info) *cobra.Command {
 		newOutputCommand(info, g),
 		newBreakpointCommand(info, g),
 		newRunUntilCommand(info, g),
+		newSetCommand(info, g),
+		newAttachCommand(info, g),
+		newDetachCommand(info, g),
+		newTestCommand(info, g),
 		newLeaseCommand(info, g),
 		newEventsCommand(info, g),
 		newStopCommand(info, g),

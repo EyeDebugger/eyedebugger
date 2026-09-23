@@ -1,0 +1,5 @@
+{Order}  (Order)
+  Id: int = 42
+  Items: List<Item> = Count = 2 {…}
+  … 3 more
+  (cut to fit --budget: 'eyedbg vars --expand NAME' shows one variable, --budget 0 shows all)

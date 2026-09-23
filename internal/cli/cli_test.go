@@ -398,6 +398,12 @@ func TestExitCodeClasses(t *testing.T) {
 		{api.NewError(api.CodeLeaseHeld, "", ""), exitState},
 		{api.NewError(api.CodeNotOwner, "", ""), exitState},
 		{api.NewError(api.CodeVersionMismatch, "", ""), exitEnvironment},
+		{api.NewError(api.CodeSideEffects, "", ""), exitError},
+		{api.NewError(api.CodeAnchorNotFound, "", ""), exitError},
+		{api.NewError(api.CodeAnchorAmbiguous, "", ""), exitError},
+		{api.NewError(api.CodeAttachFailed, "", ""), exitEnvironment},
+		{api.NewError(api.CodeNoTestHost, "", ""), exitEnvironment},
+		{api.NewError(api.CodeUnsupported, "", ""), exitAdapter},
 	}
 
 	for _, tt := range tests {

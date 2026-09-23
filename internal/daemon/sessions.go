@@ -54,6 +54,14 @@ func lifecycleHandlers(m *session.Manager) map[string]handler {
 
 			return m.Stop(ctx, c, p.SessionID)
 		}),
+		api.MethodSessionDetach: withParams(func(ctx context.Context, p api.SessionRef) (any, error) {
+			c, err := api.ParseClient(p.Client)
+			if err != nil {
+				return nil, err
+			}
+
+			return m.Detach(ctx, c, p.SessionID)
+		}),
 		api.MethodSessionStatus: onSession(m, func(ctx context.Context, sess *session.Session, _ api.Client, p api.StatusParams) (any, error) {
 			return sess.Snapshot(ctx, p.DumpSpec), nil
 		}),
@@ -97,6 +105,9 @@ func breakpointHandlers(m *session.Manager) map[string]handler {
 
 			return api.BreakpointRemoveResult{Removed: removed, Kept: kept}, err
 		}),
+		api.MethodBreakpointExceptions: onSession(m, func(ctx context.Context, sess *session.Session, c api.Client, p api.ExceptionsParams) (any, error) {
+			return sess.Exceptions(ctx, c, p)
+		}),
 	}
 }
 
@@ -117,8 +128,11 @@ func inspectHandlers(m *session.Manager) map[string]handler {
 				return sess.Vars(ctx, p.Frame, max(p.Depth, 1), p.Budget)
 			}
 		}),
-		api.MethodEval: onSession(m, func(ctx context.Context, sess *session.Session, _ api.Client, p api.EvalParams) (any, error) {
-			return sess.Eval(ctx, p.Expression, p.Frame)
+		api.MethodEval: onSession(m, func(ctx context.Context, sess *session.Session, c api.Client, p api.EvalParams) (any, error) {
+			return sess.Eval(ctx, c, p)
+		}),
+		api.MethodSet: onSession(m, func(ctx context.Context, sess *session.Session, c api.Client, p api.SetParams) (any, error) {
+			return sess.Set(ctx, c, p)
 		}),
 		api.MethodOutput: onSession(m, func(_ context.Context, sess *session.Session, _ api.Client, p api.OutputParams) (any, error) {
 			return sess.Output(p.Since, p.Tail), nil

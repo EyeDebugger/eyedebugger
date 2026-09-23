@@ -40,7 +40,7 @@ Full design: [docs/DESIGN.md](docs/DESIGN.md).
 2. ✅ DAP core: go-dap client, netcoredbg install/doctor, `start` a console app, `bp add` (line), `continue`, `status`, `stack`, `vars`, `stop`.
 3. ✅ Agent ergonomics: stop snapshot, `--dump`, `run-until`, `wait`, `--changed`, budgets, JSON schema, errors, `help --all`.
 4. ✅ Model for P2: client identity, breakpoint ownership merge, lease, event log + `events --since`.
-5. Breadth: conditional/log/function/exception breakpoints, eval, set, attach, `test`, anchors.
+5. ✅ Breadth: hit counts, logpoints, function and exception breakpoints, eval with side effects, `set`, `attach`/`detach`, `test`, anchors.
 6. Ship: SKILL.md, CI matrix (6 os/arch), e2e tests driving sample apps.
 7. Second language via manifest only (debugpy) to prove the plugin boundary.
 

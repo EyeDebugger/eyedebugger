@@ -55,6 +55,11 @@ type Session struct {
 	Lang      string
 	Program   string
 	CreatedAt time.Time
+	// mode is api.ModeAttach, api.ModeTest or "" (launched); immutable.
+	mode string
+	// run is a test session's runner (nil otherwise); the pointer is
+	// immutable.
+	run *testRun
 
 	cmd     *exec.Cmd
 	client  *dap.Client
@@ -64,7 +69,6 @@ type Session struct {
 	// events (not by a request) runs under it.
 	life context.Context //nolint:containedctx // Outlives requests by design, like the adapter it tears down.
 
-	caps        godap.Capabilities
 	initialized chan struct{}
 	initOnce    sync.Once
 
@@ -103,6 +107,35 @@ type Session struct {
 	stopping, stopReason string
 	changed              chan struct{} // closed and replaced on every state change
 	ended                bool          // adapter torn down
+	// caps are the adapter's capabilities, known once it answered
+	// initialize.
+	caps      godap.Capabilities
+	capsKnown bool
+	// excFilters maps exception modes to the adapter's filters (the
+	// driver's).
+	excFilters map[api.ExceptionMode][]string
+	// excModes are the clients' exception modes other than none, in the
+	// order they were first set.
+	excModes []api.ClientExceptionMode
+	// excInfo describes the exception of stop number excInfoStops.
+	excInfo      *api.ExceptionInfo
+	excInfoStops int
+	// sideEffects is the driver's check of eval expressions (nil: none).
+	sideEffects func(expr string) (string, bool)
+	// curStale means cur's values may have changed (set, eval with side
+	// effects): the next capture refetches them.
+	curStale bool
+	// stopGen counts the adapter's stopped and continued events: a stop
+	// the stop filter holds is still pending while it is unchanged.
+	stopGen int
+	// stepping is set while a step is the last execution request sent and
+	// the program has not stopped since.
+	stepping bool
+	// pauseRequested is set from sending a pause until the next applied
+	// stop: a pause that reached the adapter while the stop filter held a
+	// stop was a no-op there (netcoredbg: "already stopped"), so the filter
+	// publishes that stop instead of continuing.
+	pauseRequested bool
 
 	// captureMu serializes fetching stop captures; cur is the capture of
 	// the current (or last) stop, prev the one before it.
@@ -123,16 +156,25 @@ type breakpoint struct {
 	api.Breakpoint
 
 	adapterID int
+	// source is the path the adapter gave for the verified breakpoint (to
+	// attribute stops); empty until then.
+	source string
+	// hit and log are the parsed HitCondition and LogMessage (emulate.go).
+	hit *hitCondition
+	log []logPart
 }
 
-// newSession returns a session started by starter, who holds its lease.
-func newSession(life context.Context, id, lang string, launch Launch, logger *slog.Logger, starter api.Client, policy api.LeasePolicy) *Session {
+// newSession returns a session started by starter, who holds its lease;
+// mode is how it gets its program (see api.SessionInfo.Mode).
+func newSession(life context.Context, id, lang, mode string, launch Launch, logger *slog.Logger, starter api.Client, policy api.LeasePolicy) *Session {
 	now := time.Now()
 
 	return &Session{
 		life:        life,
 		ID:          id,
 		Lang:        lang,
+		mode:        mode,
+		pid:         launch.PID,
 		Program:     launch.Program,
 		CreatedAt:   now,
 		logger:      logger.With(slog.String("session", id)),
@@ -144,6 +186,8 @@ func newSession(life context.Context, id, lang string, launch Launch, logger *sl
 		lease:       lease{policy: policy, holder: starter, since: now},
 		clients:     []api.ClientInfo{{Client: starter, FirstSeen: now, LastSeen: now}},
 		changed:     make(chan struct{}),
+		excFilters:  launch.ExceptionFilters,
+		sideEffects: launch.SideEffects,
 	}
 }
 
@@ -155,13 +199,14 @@ func (s *Session) attachRecorder(w io.WriteCloser, path string) {
 	s.log.setSink(s.rec.record)
 }
 
-// logStarted appends the started event, the log's first.
+// logStarted appends the started event, the log's first; its action is the
+// session's mode (empty for a launch).
 func (s *Session) logStarted() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	info := s.lease.info()
-	s.log.append(api.Event{Kind: api.EventStarted, Client: s.starter.ID, Program: s.Program, Lease: &info})
+	s.log.append(api.Event{Kind: api.EventStarted, Client: s.starter.ID, Program: s.Program, Lease: &info, Action: s.mode})
 }
 
 // startAdapter launches the adapter process and connects a DAP client to it.
@@ -184,16 +229,20 @@ func (s *Session) startAdapter(ctx context.Context, launch Launch, stderr io.Wri
 		return api.NewError(api.CodeAdapterFailed, "start "+launch.Adapter+": "+err.Error(), "check 'eyedbg adapters doctor'")
 	}
 
+	// Under mu: a test run's session is shared before its adapter starts.
+	s.mu.Lock()
 	s.cmd = cmd
 	s.client = dap.NewClient(stdout, stdin, dap.Handlers{Event: s.onEvent})
+	s.mu.Unlock()
 
 	go s.watchAdapter()
 
 	return nil
 }
 
-// configure runs the DAP start-up sequence: initialize, launch, breakpoints
-// (owned by the starter), configurationDone.
+// configure runs the DAP start-up sequence: initialize, launch (or
+// attach), breakpoints (owned by the starter), exception filters,
+// configurationDone.
 func (s *Session) configure(ctx context.Context, launch Launch, bps []api.BreakpointSpec) error {
 	if err := s.initialize(ctx, launch.AdapterID); err != nil {
 		return err
@@ -204,30 +253,39 @@ func (s *Session) configure(ctx context.Context, launch Launch, bps []api.Breakp
 		return fmt.Errorf("encode launch arguments: %w", err)
 	}
 
-	// Some adapters answer launch only after configurationDone, so it is
-	// sent without waiting.
+	var req godap.RequestMessage = &godap.LaunchRequest{Request: godap.Request{Command: RequestLaunch}, Arguments: args}
+	if launch.Request == RequestAttach {
+		req = &godap.AttachRequest{Request: godap.Request{Command: RequestAttach}, Arguments: args}
+	}
+
+	// Some adapters answer launch (and attach) only after
+	// configurationDone, so it is sent without waiting.
 	launchDone := make(chan error, 1)
 
 	go func() {
-		_, err := s.client.Do(ctx, &godap.LaunchRequest{Request: godap.Request{Command: "launch"}, Arguments: args})
+		_, err := s.client.Do(ctx, req)
 		launchDone <- err
 	}()
 
 	if err := s.waitInitialized(ctx, launchDone); err != nil {
-		return err
+		return startErr(launch, err)
 	}
 
 	if err := s.configurationPhase(ctx, bps); err != nil {
 		return err
 	}
 
+	if err := s.configurationDone(ctx); err != nil {
+		return startErr(launch, err)
+	}
+
 	select {
 	case err := <-launchDone:
 		if err != nil {
-			return adapterErr(err)
+			return startErr(launch, adapterErr(err))
 		}
 	case <-ctx.Done():
-		return fmt.Errorf("wait for launch: %w", ctx.Err())
+		return fmt.Errorf("wait for %s: %w", req.GetRequest().Command, ctx.Err())
 	}
 
 	s.mu.Lock()
@@ -252,7 +310,7 @@ func (s *Session) initialize(ctx context.Context, adapterID string) error {
 		return adapterErr(err)
 	}
 
-	s.caps = resp.Body
+	s.setCaps(resp.Body)
 
 	return nil
 }
@@ -291,19 +349,26 @@ func (s *Session) configurationPhase(ctx context.Context, bps []api.BreakpointSp
 	added := make([]*breakpoint, 0, len(bps))
 
 	for _, spec := range bps {
+		if err := s.checkBreakpointCapsLocked(spec); err != nil {
+			s.mu.Unlock()
+
+			return err
+		}
+
 		if b, isNew, _ := s.addBreakpointLocked(s.starter.ID, spec); isNew {
 			added = append(added, b)
 		}
 	}
 
-	files := make([]string, 0, len(s.bps))
-	for file := range s.bps {
-		files = append(files, file)
+	keys := make([]string, 0, len(s.bps))
+	for key := range s.bps {
+		keys = append(keys, key)
 	}
+
 	s.mu.Unlock()
 
-	for _, file := range files {
-		if err := s.syncBreakpoints(ctx, file); err != nil {
+	for _, key := range keys {
+		if err := s.syncKey(ctx, key); err != nil {
 			return err
 		}
 	}
@@ -314,20 +379,35 @@ func (s *Session) configurationPhase(ctx context.Context, bps []api.BreakpointSp
 	}
 	s.mu.Unlock()
 
-	if _, err := s.client.Do(ctx, &godap.SetExceptionBreakpointsRequest{
-		Request:   godap.Request{Command: "setExceptionBreakpoints"},
-		Arguments: godap.SetExceptionBreakpointsArguments{Filters: []string{}},
-	}); err != nil {
+	return s.configureExceptions(ctx)
+}
+
+// configurationDone ends the configuration, if the adapter wants it. An
+// attach fails here with netcoredbg, which attaches only now.
+func (s *Session) configurationDone(ctx context.Context) error {
+	s.mu.Lock()
+	caps, _ := s.capsLocked()
+	s.mu.Unlock()
+
+	if !caps.SupportsConfigurationDoneRequest {
+		return nil
+	}
+
+	if _, err := s.client.Do(ctx, &godap.ConfigurationDoneRequest{Request: godap.Request{Command: "configurationDone"}}); err != nil {
 		return adapterErr(err)
 	}
 
-	if s.caps.SupportsConfigurationDoneRequest {
-		if _, err := s.client.Do(ctx, &godap.ConfigurationDoneRequest{Request: godap.Request{Command: "configurationDone"}}); err != nil {
-			return adapterErr(err)
-		}
+	return nil
+}
+
+// startErr turns an adapter's refusal of an attach into ATTACH_FAILED with
+// the driver's hint.
+func startErr(launch Launch, err error) error {
+	if launch.Request != RequestAttach || api.CodeOf(err) != api.CodeAdapterFailed {
+		return err
 	}
 
-	return nil
+	return api.NewError(api.CodeAttachFailed, fmt.Sprintf("attach to pid %d failed: %s", launch.PID, err.Error()), launch.AttachHint)
 }
 
 // onEvent runs on the DAP client's read goroutine.
@@ -339,31 +419,20 @@ func (s *Session) onEvent(ev godap.EventMessage) {
 	case *godap.InitializedEvent:
 		s.initOnce.Do(func() { close(s.initialized) })
 	case *godap.StoppedEvent:
-		s.stops++
-		s.stop = api.StopInfo{Reason: e.Body.Reason, ThreadID: e.Body.ThreadId, Description: e.Body.Description, Text: e.Body.Text}
-		s.setStateLocked(api.StateStopped)
-
-		stop := s.stop
-		s.log.append(api.Event{Kind: api.EventStopped, Stop: &stop})
+		s.onStoppedLocked(e)
 	case *godap.ContinuedEvent:
-		if s.state == api.StateStopped {
-			s.setStateLocked(api.StateRunning)
-		}
-
-		// Adapters (netcoredbg) also send it for our own requests, before
-		// answering them: only an adapter-initiated resume is news.
-		if !s.execInFlight {
-			s.log.append(api.Event{Kind: api.EventContinued, ThreadID: e.Body.ThreadId})
-		}
+		s.onContinuedLocked(e)
 	case *godap.ExitedEvent:
-		code, logged := e.Body.ExitCode, e.Body.ExitCode
-		s.exitCode = &code
-		s.bump()
-		s.log.append(api.Event{Kind: api.EventExited, ExitCode: &logged})
+		s.onExitedLocked(e)
 	case *godap.ThreadEvent:
 		s.log.append(api.Event{Kind: api.EventThread, Reason: e.Body.Reason, ThreadID: e.Body.ThreadId})
 	case *godap.TerminatedEvent:
-		s.endLocked("the program terminated")
+		// A test host ending is not the session's end: the runner's is.
+		if s.mode == api.ModeTest {
+			go s.shutdownAdapter(s.life, true)
+		} else {
+			s.endLocked("the program terminated")
+		}
 	case *godap.ProcessEvent:
 		s.pid = e.Body.SystemProcessId
 	case *godap.OutputEvent:
@@ -375,18 +444,68 @@ func (s *Session) onEvent(ev godap.EventMessage) {
 	}
 }
 
+// onStoppedLocked applies a stop, or hands a breakpoint stop that may be
+// one to count or log and pass to the stop filter (off this goroutine: it
+// waits for the adapter's answers).
+func (s *Session) onStoppedLocked(e *godap.StoppedEvent) {
+	stop := api.StopInfo{Reason: e.Body.Reason, ThreadID: e.Body.ThreadId, Description: e.Body.Description, Text: e.Body.Text}
+	s.stopGen++
+
+	if stop.Reason == reasonBreakpoint && s.emulatingLocked() {
+		go s.filterStop(s.stopGen, stop)
+
+		return
+	}
+
+	s.applyStopLocked(stop)
+}
+
+func (s *Session) onContinuedLocked(e *godap.ContinuedEvent) {
+	s.stopGen++
+
+	if s.state == api.StateStopped {
+		s.setStateLocked(api.StateRunning)
+	}
+
+	// Adapters (netcoredbg) also send it for our own requests, before
+	// answering them: only an adapter-initiated resume is news.
+	if !s.execInFlight {
+		s.log.append(api.Event{Kind: api.EventContinued, ThreadID: e.Body.ThreadId})
+	}
+}
+
+// onExitedLocked records the program's exit code; a test host's is only
+// noted (the session's is its runner's).
+func (s *Session) onExitedLocked(e *godap.ExitedEvent) {
+	if s.mode == api.ModeTest {
+		s.hostExitedLocked(e.Body.ExitCode)
+
+		return
+	}
+
+	code, logged := e.Body.ExitCode, e.Body.ExitCode
+	s.exitCode = &code
+	s.bump()
+	s.log.append(api.Event{Kind: api.EventExited, ExitCode: &logged})
+}
+
 // watchAdapter marks the session exited when the adapter goes away, and
 // ends the recording.
 func (s *Session) watchAdapter() {
 	<-s.client.Done()
 
-	s.mu.Lock()
-	s.endLocked("the debug adapter exited")
-	s.mu.Unlock()
+	// A test session ends with its runner (watchRunner).
+	if s.mode != api.ModeTest {
+		s.mu.Lock()
+		s.endLocked("the debug adapter exited")
+		s.mu.Unlock()
+	}
 
 	_ = s.cmd.Wait()
 
-	s.closeRecording()
+	if s.mode != api.ModeTest {
+		s.closeRecording()
+	}
 }
 
 // closeRecording ends the recording, if any.
@@ -411,16 +530,19 @@ func (s *Session) endLocked(reason string) {
 	s.setStateLocked(api.StateExited)
 	s.log.append(api.Event{Kind: api.EventEnded, Reason: reason, Client: s.stopping})
 
+	// A test host goes with its run.
 	if s.client != nil {
-		go s.shutdownAdapter(s.life, false)
+		go s.shutdownAdapter(s.life, s.mode == api.ModeTest)
 	}
 }
 
 // shutdownAdapter disconnects from the adapter (asking it to kill the
-// debuggee if terminate is true) and kills the adapter if it lingers.
+// debuggee if terminate is true, else to leave an attached one running)
+// and kills the adapter if it lingers. Without an adapter (a test run
+// still waiting for its host) there is nothing to do.
 func (s *Session) shutdownAdapter(ctx context.Context, terminate bool) {
 	s.mu.Lock()
-	if s.ended {
+	if s.ended || s.client == nil {
 		s.mu.Unlock()
 
 		return
@@ -434,10 +556,7 @@ func (s *Session) shutdownAdapter(ctx context.Context, terminate bool) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 	defer cancel()
 
-	_, _ = s.client.Do(ctx, &godap.DisconnectRequest{
-		Request:   godap.Request{Command: "disconnect"},
-		Arguments: &godap.DisconnectArguments{TerminateDebuggee: terminate},
-	})
+	_, _ = s.client.Do(ctx, disconnect(terminate, s.mode != ""))
 
 	select {
 	case <-s.client.Done():
@@ -449,9 +568,35 @@ func (s *Session) shutdownAdapter(ctx context.Context, terminate bool) {
 	}
 }
 
-// Terminate ends the session for client c: the debuggee is killed and the
-// adapter exits. While the program is live this is an execution request: it
-// needs the lease (LEASE_HELD otherwise).
+// disconnectRequest is godap's DisconnectRequest, able to send
+// terminateDebuggee false: for an attached program that means detach, and
+// leaving it out lets the adapter choose (netcoredbg detaches then too, but
+// kills a launched one).
+type disconnectRequest struct {
+	godap.Request
+
+	Arguments disconnectArguments `json:"arguments"`
+}
+
+type disconnectArguments struct {
+	TerminateDebuggee *bool `json:"terminateDebuggee,omitempty"`
+}
+
+// disconnect builds the request; explicit sends terminateDebuggee even when
+// false.
+func disconnect(terminate, explicit bool) *disconnectRequest {
+	r := &disconnectRequest{Request: godap.Request{Command: "disconnect"}}
+	if terminate || explicit {
+		r.Arguments.TerminateDebuggee = &terminate
+	}
+
+	return r
+}
+
+// Terminate ends the session for client c: the debuggee is killed (an
+// attached one is detached from and keeps running) and the adapter exits.
+// While the program is live this is an execution request: it needs the
+// lease (LEASE_HELD otherwise).
 func (s *Session) Terminate(ctx context.Context, c api.Client) error {
 	s.execMu.Lock()
 	defer s.execMu.Unlock()
@@ -466,13 +611,29 @@ func (s *Session) Terminate(ctx context.Context, c api.Client) error {
 	}
 	s.mu.Unlock()
 
-	s.terminate(ctx, c.ID, "stopped by "+c.ID)
+	s.terminate(ctx, c.ID, s.endedBy(c.ID))
 
 	return nil
 }
 
+// endedBy is the ended event's reason when client by (empty: the daemon)
+// ends the session.
+func (s *Session) endedBy(by string) string {
+	who := by
+	if who == "" {
+		who = "the daemon"
+	}
+
+	if s.mode == api.ModeAttach {
+		return "detached by " + who + " (the program keeps running)"
+	}
+
+	return "stopped by " + who
+}
+
 // terminate ends the session without checking the lease: by names the
-// client (empty: the daemon), reason goes to the ended event.
+// client (empty: the daemon), reason goes to the ended event. An attached
+// program is detached from, never killed.
 func (s *Session) terminate(ctx context.Context, by, reason string) {
 	s.mu.Lock()
 	running := s.state != api.StateExited
@@ -482,7 +643,8 @@ func (s *Session) terminate(ctx context.Context, by, reason string) {
 	}
 	s.mu.Unlock()
 
-	s.shutdownAdapter(ctx, running)
+	s.killRunner(ctx)
+	s.shutdownAdapter(ctx, running && s.mode != api.ModeAttach)
 
 	s.mu.Lock()
 	s.endLocked(reason)
@@ -533,6 +695,7 @@ func (s *Session) Info() api.SessionInfo {
 		Lease:     &leaseInfo,
 		Clients:   slices.Clone(s.clients),
 		Recording: s.recPath,
+		Mode:      s.mode,
 	}
 
 	if s.state == api.StateStopped {
@@ -561,6 +724,10 @@ func (s *Session) Snapshot(ctx context.Context, dump api.DumpSpec) api.Snapshot 
 	levels := 1
 	if dump.Wants(api.DumpStack) {
 		levels = dumpFrames
+	}
+
+	if snap.Session.Stop.Reason == reasonException {
+		snap.Exception = s.exceptionInfo(ctx, s.Stops(), snap.Session.Stop.ThreadID)
 	}
 
 	frames, err := s.stack(ctx, snap.Session.Stop.ThreadID, levels)
@@ -622,7 +789,7 @@ func (s *Session) capture(ctx context.Context) (cur, prev *stopCapture, err erro
 	s.mu.Lock()
 	state, stops, thread := s.state, s.stops, s.stop.ThreadID
 
-	if s.cur != nil && s.cur.stops == stops {
+	if s.cur != nil && s.cur.stops == stops && !s.curStale {
 		cur, prev = s.cur, s.prev
 		s.mu.Unlock()
 
@@ -656,7 +823,12 @@ func (s *Session) capture(ctx context.Context) (cur, prev *stopCapture, err erro
 		return c, s.cur, nil
 	}
 
-	s.prev, s.cur = s.cur, c
+	// A refetch of the same stop (after a change) keeps the previous stop.
+	if s.cur == nil || s.cur.stops != stops {
+		s.prev = s.cur
+	}
+
+	s.cur, s.curStale = c, false
 
 	return s.cur, s.prev, nil
 }
@@ -740,9 +912,10 @@ const execRunUntil = "runUntil"
 // execRequest is one execution-changing request.
 type execRequest struct {
 	client api.Client
-	kind   string // an Exec* kind or execRunUntil
+	kind   string // an Exec* kind, execRunUntil, execEval or execSet
 	thread int
 	target *api.BreakpointSpec // run-until's location
+	text   string              // eval's expression, set's variable
 }
 
 // execution is what an accepted request leaves for its caller to wait on.
@@ -817,7 +990,7 @@ func (s *Session) admit(r execRequest) (execution, int, error) {
 		thread = s.stop.ThreadID
 	}
 
-	s.log.append(api.Event{Kind: api.EventExec, Client: r.client.ID, Action: r.kind, ThreadID: r.thread})
+	s.log.append(api.Event{Kind: api.EventExec, Client: r.client.ID, Action: r.kind, ThreadID: r.thread, Text: r.text})
 
 	return execution{before: s.stops}, thread, nil
 }
@@ -828,6 +1001,12 @@ func (s *Session) send(ctx context.Context, kind string, thread, before int) err
 	s.mu.Lock()
 	if kind != ExecPause {
 		s.resumedAt = s.log.latest()
+	}
+
+	if kind != ExecPause {
+		s.stepping = kind == ExecNext || kind == ExecStepIn || kind == ExecStepOut
+	} else {
+		s.pauseRequested = true
 	}
 
 	s.execInFlight = true
@@ -847,6 +1026,14 @@ func (s *Session) send(ctx context.Context, kind string, thread, before int) err
 	defer s.mu.Unlock()
 
 	s.execInFlight = false
+
+	switch {
+	case err == nil:
+	case kind == ExecPause:
+		s.pauseRequested = false
+	default:
+		s.stepping = false
+	}
 
 	if err == nil && kind != ExecPause && s.state == api.StateStopped && s.stops == before {
 		s.setStateLocked(api.StateRunning)
@@ -1022,10 +1209,10 @@ func (s *Session) frameID(ctx context.Context, index int) (int, error) {
 }
 
 // Breakpoints returns the breakpoints of owner (a client id; "" for every
-// client's), ordered by id.
+// client's), ordered by id, with a note on those in files changed since the
+// session started.
 func (s *Session) Breakpoints(owner string) []api.Breakpoint {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	var out []api.Breakpoint
 	for _, list := range s.bps {
@@ -1035,10 +1222,11 @@ func (s *Session) Breakpoints(owner string) []api.Breakpoint {
 			}
 		}
 	}
+	s.mu.Unlock()
 
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 
-	return out
+	return s.annotate(out)
 }
 
 func stateError(id string, state api.SessionState, what string) error {

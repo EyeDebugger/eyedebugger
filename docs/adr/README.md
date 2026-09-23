@@ -19,6 +19,7 @@ security model, major dependencies, licensing and the contribution process.
 | [0007](0007-use-task-as-the-task-runner.md) | Use Task as the task runner | accepted |
 | [0008](0008-apache-2-license-and-dco.md) | Apache-2.0 license and DCO | accepted |
 | [0009](0009-client-identity-breakpoint-ownership-lease-and-event-log.md) | Client identity, breakpoint ownership, the control lease and the event log | proposed |
+| [0010](0010-breakpoint-kinds-exceptions-attach-and-test-runs.md) | Hit counts and logpoints, exception stops, eval side effects, test runs and anchors | proposed |
 
 ## Process
 

@@ -80,9 +80,11 @@
 - Session-level tests run real DAP round trips against `internal/dap/daptest`, a fake adapter:
   the test binary re-executes itself as the adapter. A package whose tests start sessions needs a
   `TestMain` that calls `daptest.MaybeRun()` first and returns when it returns true, plus a small
-  fake `session.Driver` launching `daptest.Command()` with `daptest.Arguments(...)`.
+  fake `session.Driver` launching `daptest.Command()` with `daptest.Arguments(...)`. Test runs use
+  the fake runner too (`daptest.MaybeRunRunner()` in `TestMain`, `daptest.RunnerCommand`).
 - e2e tests against real adapters (`drivers/dotnet`, `EYEDBG_E2E=1`) need the .NET SDK and
-  netcoredbg.
+  netcoredbg. They drive the sample apps in `testdata/apps`, copied to a temporary directory first
+  (`copyApp`), and find lines by their `// marker: NAME` comments, not by number.
 
 ## Dependencies
 

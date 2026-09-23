@@ -92,8 +92,9 @@ func (m *Manager) Languages() []string {
 }
 
 // Start prepares and launches a new session for client c, who holds its
-// lease. It returns once the program is running (or stopped at an entry or
-// early breakpoint, if wait allows).
+// lease: it launches a program, attaches to one (p.Attach) or debugs a test
+// run (p.Test). It returns once the program is running (or stopped at an
+// entry or early breakpoint, if wait allows).
 func (m *Manager) Start(ctx context.Context, c api.Client, p api.StartParams) (*Session, error) {
 	drv, ok := m.drivers[p.Lang]
 	if !ok {
@@ -106,15 +107,36 @@ func (m *Manager) Start(ctx context.Context, c api.Client, p api.StartParams) (*
 		return nil, err
 	}
 
+	if p.Attach != nil && p.Test != nil {
+		return nil, api.NewError(api.CodeInvalidRequest, "a session either attaches or runs tests, not both", "")
+	}
+
+	if p, err = checkStart(p); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
+
+	switch {
+	case p.Attach != nil:
+		return m.startAttach(ctx, c, drv, p, policy)
+	case p.Test != nil:
+		return m.startTest(ctx, c, drv, p, policy)
+	}
 
 	launch, err := drv.Prepare(ctx, p.LaunchSpec)
 	if err != nil {
 		return nil, err
 	}
 
-	s := newSession(m.ctx, m.newID(), p.Lang, launch, m.logger, c, policy) //nolint:contextcheck // The session outlives this request.
+	return m.run(ctx, m.create(ctx, c, p, policy, launch, ""), launch, p.Breakpoints)
+}
+
+// create makes a session and starts its recording and event log.
+func (m *Manager) create(ctx context.Context, c api.Client, p api.StartParams, policy api.LeasePolicy, launch Launch, mode string) *Session {
+	s := newSession(m.ctx, m.newID(), p.Lang, mode, launch, m.logger, c, policy) //nolint:contextcheck // The session outlives this request.
+	s.excModes = withMode(nil, c.ID, p.Exceptions, false)
 
 	// Recording starts before anything can be logged, so it begins with
 	// the started event.
@@ -124,21 +146,44 @@ func (m *Manager) Start(ctx context.Context, c api.Client, p api.StartParams) (*
 
 	s.logStarted()
 
+	if p.Exceptions != api.ExceptionsNone {
+		s.mu.Lock()
+		s.log.append(api.Event{Kind: api.EventExceptions, Client: c.ID, Action: string(p.Exceptions)})
+		s.mu.Unlock()
+	}
+
+	return s
+}
+
+// run starts s's adapter, shares s and configures the debuggee; a failure
+// ends s and forgets it.
+func (m *Manager) run(ctx context.Context, s *Session, launch Launch, bps []api.BreakpointSpec) (*Session, error) {
 	// The adapter lives as long as the daemon, not this request.
 	if err := s.startAdapter(m.ctx, launch, m.stderr); err != nil { //nolint:contextcheck // Deliberately not the request's context.
+		if s.mode == api.ModeTest { // shared already: end it properly
+			m.fail(ctx, s, err)
+
+			return nil, err
+		}
+
 		s.closeRecording()
 
 		return nil, err
 	}
 
+	// A test run's session is shared before its adapter starts: a client
+	// may have stopped it meanwhile, before there was an adapter to end.
+	if s.Info().State == api.StateExited {
+		m.fail(ctx, s, s.stoppedWhileStarting())
+
+		return nil, s.stoppedWhileStarting()
+	}
+
 	m.add(s)
 	m.saveIfLive(s)
 
-	if err := s.configure(ctx, launch, p.Breakpoints); err != nil {
-		m.logger.WarnContext(ctx, "session start failed", slog.String("session", s.ID), slog.Any("error", err))
-		s.terminate(ctx, "", "its start failed")
-		m.remove(s.ID)
-		m.forget(ctx, s.ID)
+	if err := s.configure(ctx, launch, bps); err != nil {
+		m.fail(ctx, s, err)
 
 		return nil, err
 	}
@@ -148,6 +193,40 @@ func (m *Manager) Start(ctx context.Context, c api.Client, p api.StartParams) (*
 	go m.watch(s)
 
 	return s, nil
+}
+
+// fail ends a session whose start failed, and forgets it.
+func (m *Manager) fail(ctx context.Context, s *Session, err error) {
+	m.logger.WarnContext(ctx, "session start failed", slog.String("session", s.ID), slog.Any("error", err))
+	s.terminate(ctx, "", "its start failed")
+	m.remove(s.ID)
+	m.forget(ctx, s.ID)
+}
+
+// checkStart checks what every kind of start shares: the exception mode
+// (empty: none) and the breakpoints, whose anchors it resolves (before a
+// build, so a wrong one fails fast).
+func checkStart(p api.StartParams) (api.StartParams, error) {
+	if p.Exceptions == "" {
+		p.Exceptions = api.ExceptionsNone
+	}
+
+	if _, err := api.ParseExceptionMode(string(p.Exceptions)); err != nil {
+		return p, err
+	}
+
+	bps := make([]api.BreakpointSpec, len(p.Breakpoints))
+
+	for i, spec := range p.Breakpoints {
+		var err error
+		if bps[i], err = resolveSpec(spec, true); err != nil {
+			return p, err
+		}
+	}
+
+	p.Breakpoints = bps
+
+	return p, nil
 }
 
 // record attaches a recording to s; failing to is not fatal.
@@ -307,7 +386,27 @@ func (m *Manager) Stop(ctx context.Context, c api.Client, id string) (api.Sessio
 	return s.Info(), nil
 }
 
-// StopAll ends every session, whoever holds its lease.
+// Detach ends attached session id for client c, leaving its program
+// running (see Session.Detach), and forgets it.
+func (m *Manager) Detach(ctx context.Context, c api.Client, id string) (api.SessionInfo, error) {
+	s, err := m.Get(id)
+	if err != nil {
+		return api.SessionInfo{}, err
+	}
+
+	if err := s.Detach(ctx, c); err != nil {
+		return api.SessionInfo{}, err
+	}
+
+	m.remove(s.ID)
+	m.forget(ctx, s.ID)
+	m.logger.InfoContext(ctx, "session detached", slog.String("session", s.ID))
+
+	return s.Info(), nil
+}
+
+// StopAll ends every session, whoever holds its lease: launched programs
+// and test runs are killed, attached ones detached from.
 func (m *Manager) StopAll(ctx context.Context) int {
 	m.mu.Lock()
 	all := make([]*Session, 0, len(m.sessions))
@@ -320,7 +419,7 @@ func (m *Manager) StopAll(ctx context.Context) int {
 	m.notify()
 
 	for _, s := range all {
-		s.terminate(ctx, "", "stopped by the daemon")
+		s.terminate(ctx, "", s.endedBy(""))
 		m.forget(ctx, s.ID)
 	}
 

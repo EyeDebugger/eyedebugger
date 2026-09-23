@@ -1,0 +1,3 @@
+exceptions: none
+exceptions: all (agent), uncaught (human:ijat)
+adapter filters: all, user-unhandled

@@ -122,13 +122,64 @@ func call(cmd *cobra.Command, info version.Info, timeout time.Duration, method s
 // envNoRecord, when "1", turns recording off for new sessions.
 const envNoRecord = "EYEDBG_NO_RECORD"
 
+// sessionFlags are the flags every command that creates a session has
+// (start, attach, test).
+type sessionFlags struct {
+	leasePolicy, exceptions string
+	bps                     []string
+	noRecord                bool
+	timeout                 time.Duration
+	dump                    *dumpFlag
+}
+
+// register adds the flags to cmd.
+func (sf *sessionFlags) register(cmd *cobra.Command) {
+	f := cmd.Flags()
+	f.StringArrayVar(&sf.bps, "bp", nil, `breakpoint FILE:LINE, FILE@"TEXT" or func:NAME set before the program runs (repeatable)`)
+	f.StringVar(&sf.exceptions, "exceptions", "", "which exceptions stop the program for you: all, uncaught or none (see 'eyedbg bp exceptions')")
+	f.StringVar(&sf.leasePolicy, "lease-policy", string(api.LeaseFree), "who may take the control lease: free, handoff or human-priority")
+	f.BoolVar(&sf.noRecord, "no-record", false, "don't record the session's control events (also EYEDBG_NO_RECORD=1)")
+	f.DurationVar(&sf.timeout, "timeout", defaultExecTimeout, "how long to wait for the first stop when there are --bp breakpoints (or --stop-on-entry)")
+	sf.dump = addDumpFlag(cmd)
+}
+
+// params fills in what the flags set of a start request, for client g.
+func (sf *sessionFlags) params(g *globals, p *api.StartParams) error {
+	policy, err := api.ParseLeasePolicy(sf.leasePolicy)
+	if err != nil {
+		return err
+	}
+
+	if sf.exceptions != "" {
+		if p.Exceptions, err = api.ParseExceptionMode(sf.exceptions); err != nil {
+			return err
+		}
+	}
+
+	p.Client, p.LeasePolicy, p.Wait = g.clientID(), policy, api.Duration(sf.timeout)
+	p.NoRecord = sf.noRecord || os.Getenv(envNoRecord) == "1"
+
+	for _, b := range sf.bps {
+		spec, err := parseLocation(b)
+		if err != nil {
+			return err
+		}
+
+		p.Breakpoints = append(p.Breakpoints, spec)
+	}
+
+	p.DumpSpec, err = sf.dump.spec(g)
+
+	return err
+}
+
 // startFlags are the flags of 'eyedbg start'.
 type startFlags struct {
-	project, program, cwd, leasePolicy string
-	env, bps                           []string
-	stopOnEntry, noBuild, noRecord     bool
-	timeout                            time.Duration
-	dump                               *dumpFlag
+	sessionFlags
+
+	project, program, cwd string
+	env                   []string
+	stopOnEntry, noBuild  bool
 }
 
 func newStartCommand(info version.Info, g *globals) *cobra.Command {
@@ -145,10 +196,14 @@ For dotnet: --project takes a project file or a directory with exactly one proje
 current directory), which is built in Debug; --program takes an already-built .dll (or apphost)
 and skips the build. Everything after "--" is passed to the program.
 
-Breakpoints given with --bp are set before the program runs, so they can't be missed; add more
-later with 'eyedbg bp add'. With --stop-on-entry or --bp, start waits (up to --timeout) for the
-first stop and reports where the program stopped; otherwise it returns as soon as the program
-runs. Starts the daemon if needed. Building can take minutes on a cold machine.
+Breakpoints given with --bp are set before the program runs, so they can't be missed; --bp takes
+FILE:LINE, FILE@"TEXT" or func:NAME (see 'eyedbg bp add'; conditions, hit counts and logpoints
+need 'eyedbg bp add'). --exceptions all|uncaught|none chooses which exceptions stop the program
+(see 'eyedbg bp exceptions'). Add more later with 'eyedbg bp add'. With --stop-on-entry or --bp,
+start waits (up to --timeout) for the first stop and reports where the program stopped;
+otherwise it returns as soon as the program runs. Starts the daemon if needed. Building can take
+minutes on a cold machine. To debug a program that already runs, see 'eyedbg attach'; to debug
+tests, 'eyedbg test'.
 
 The starting client (--as) owns the --bp breakpoints and holds the control lease first;
 --lease-policy decides whether other clients can take it (free, the default: anyone, by just
@@ -163,6 +218,7 @@ failure (BUILD_FAILED with the compiler errors, ADAPTER_NOT_INSTALLED, ...; see 
 for the exit codes).` + dumpHelp + `
 `,
 		Example: `  eyedbg start dotnet --bp Program.cs:12         # build ./, stop at line 12
+  eyedbg start dotnet --bp 'Program.cs@"return total"' --exceptions all
   eyedbg start dotnet --project src/App/App.csproj --stop-on-entry
   eyedbg start dotnet --program bin/Debug/net10.0/App.dll -- --verbose input.txt`,
 		Args: cobra.MinimumNArgs(1),
@@ -172,9 +228,7 @@ for the exit codes).` + dumpHelp + `
 				return err
 			}
 
-			params.Client = g.clientID()
-
-			if params.DumpSpec, err = sf.dump.spec(g); err != nil {
+			if err := sf.sessionFlags.params(g, &params); err != nil {
 				return err
 			}
 
@@ -194,17 +248,13 @@ func (sf *startFlags) register(cmd *cobra.Command) {
 	f.StringVar(&sf.program, "program", "", "already-built program to run (.dll or apphost); skips the build")
 	f.StringVar(&sf.cwd, "cwd", "", "working directory of the program (default: the project's directory)")
 	f.StringArrayVar(&sf.env, "env", nil, "environment variable KEY=VALUE for the program (repeatable)")
-	f.StringArrayVar(&sf.bps, "bp", nil, "breakpoint FILE:LINE set before the program runs (repeatable)")
 	f.BoolVar(&sf.stopOnEntry, "stop-on-entry", false, "stop at the program's entry point")
 	f.BoolVar(&sf.noBuild, "no-build", false, "don't build; requires --program")
-	f.StringVar(&sf.leasePolicy, "lease-policy", string(api.LeaseFree), "who may take the control lease: free, handoff or human-priority")
-	f.BoolVar(&sf.noRecord, "no-record", false, "don't record the session's control events (also EYEDBG_NO_RECORD=1)")
-	f.DurationVar(&sf.timeout, "timeout", defaultExecTimeout, "how long to wait for the first stop with --bp or --stop-on-entry")
-	sf.dump = addDumpFlag(cmd)
+	sf.sessionFlags.register(cmd)
 }
 
-// params turns the flags and arguments (<lang> [-- program args]) into a
-// start request, resolving paths against the working directory.
+// params turns the launch flags and arguments (<lang> [-- program args])
+// into a start request, resolving paths against the working directory.
 func (sf *startFlags) params(args []string, dash int) (api.StartParams, error) {
 	lang := args[0]
 	progArgs := args[1:]
@@ -226,33 +276,17 @@ func (sf *startFlags) params(args []string, dash int) (api.StartParams, error) {
 		project = "."
 	}
 
-	policy, err := api.ParseLeasePolicy(sf.leasePolicy)
-	if err != nil {
-		return api.StartParams{}, err
-	}
-
 	params := api.StartParams{
 		Lang: lang,
 		LaunchSpec: api.LaunchSpec{
 			Project: absPath(project), Program: absPath(sf.program), Cwd: absPath(sf.cwd),
 			Args: progArgs, NoBuild: sf.noBuild, StopOnEntry: sf.stopOnEntry,
 		},
-		Wait:        api.Duration(sf.timeout),
-		LeasePolicy: policy,
-		NoRecord:    sf.noRecord || os.Getenv(envNoRecord) == "1",
 	}
 
+	var err error
 	if params.Env, err = parseEnv(sf.env); err != nil {
 		return api.StartParams{}, err
-	}
-
-	for _, b := range sf.bps {
-		spec, err := parseLocation(b)
-		if err != nil {
-			return api.StartParams{}, err
-		}
-
-		params.Breakpoints = append(params.Breakpoints, spec)
 	}
 
 	return params, nil
@@ -321,8 +355,10 @@ func newStatusCommand(info version.Info, g *globals) *cobra.Command {
 		Use:   statusUse,
 		Short: "Show a session's state and where it is stopped",
 		Long: `Show a session's state; when stopped, also why (breakpoint, step, entry, pause, exception),
-the thread, the current function and file:line, and the source lines around it. When exited, the
-exit code.
+the thread, the current function and file:line, and the source lines around it. At an exception
+stop, also the exception: its type and message, the first 5 lines of its stack trace (eval
+'$exception.StackTrace' for the rest) and its inner exceptions, when the adapter can tell. When
+exited, the exit code.
 
 Read-only: never resumes the program. Returns at once.` + dumpHelp + sessionHelp,
 		Example: `  eyedbg status
@@ -352,9 +388,11 @@ Read-only: never resumes the program. Returns at once.` + dumpHelp + sessionHelp
 func newStopCommand(info version.Info, g *globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
-		Short: "End a debug session (kills the program)",
+		Short: "End a debug session (kills the program; detaches from an attached one)",
 		Long: `End a session: the program is terminated if it is still running, the debug adapter exits, and
-the session is removed from 'eyedbg sessions'. Use it when done debugging; the daemon exits by
+the session is removed from 'eyedbg sessions'. A session made by 'eyedbg attach' is detached from
+instead: that program keeps running (like 'eyedbg detach'). A test run ('eyedbg test') is ended:
+'dotnet test' and its test host are killed. Use it when done debugging; the daemon exits by
 itself once no session is left for its idle timeout. While the program is live this needs the
 control lease, like the execution commands (LEASE_HELD, exit 2, if the policy keeps you from
 taking it); once it has exited, anyone may stop the session.
@@ -391,7 +429,7 @@ Returns within a few seconds.` + sessionHelp,
 				return writeText(cmd.OutOrStdout(), "session "+info2.ID+" forgotten (it was lost)\n")
 			}
 
-			return writeText(cmd.OutOrStdout(), "session "+info2.ID+" ended\n")
+			return writeEnded(cmd.OutOrStdout(), info2)
 		},
 	}
 }
@@ -618,24 +656,37 @@ Returns at once.` + sessionHelp,
 }
 
 func newEvalCommand(info version.Info, g *globals) *cobra.Command {
-	var frame int
+	var p api.EvalParams
 
 	cmd := &cobra.Command{
 		Use:   "eval <expression>",
 		Short: "Evaluate an expression in a stack frame",
 		Long: `Evaluate an expression in the context of a frame of the stopped thread (default: #0) and print
 its value and type. For dotnet, netcoredbg evaluates C# expressions: operators, member and index
-access, method calls and casts; lambdas and LINQ with lambdas are not supported.
+access, method calls and casts; lambdas and LINQ with lambdas are not supported. At an exception
+stop, $exception is the exception (e.g. '$exception.StackTrace'). --depth N also shows the
+result's members, N-1 levels deep, cut to --budget tokens.
 
-Side effects: calling a method or property getter runs code in the program and can change its
-state. Needs a stopped program; returns at once.` + sessionHelp,
+Side effects: an expression that visibly changes the program (for dotnet: a method call, new, an
+assignment, ++ or --, an interpolated string) is refused with SIDE_EFFECTS (exit 1) unless you
+pass --allow-side-effects. That flag makes the eval an execution request: it needs the control
+lease (see below) and is logged in 'eyedbg events'. The check is best-effort, a scan of the
+expression's text: a property getter, indexer or operator still runs code in the program without
+it (netcoredbg can't evaluate without running code), so a getter with side effects is not caught,
+and a delegate called through a parenthesized name, '(f)(1)', passes as a cast.
+
+An evaluation still running when another client resumes the program is canceled (ADAPTER_ERROR).
+Needs a stopped program; returns at once.` + leaseHelp + sessionHelp,
 		Example: `  eyedbg eval total
-  eyedbg eval 'order.Items.Count * 2' --frame 1`,
+  eyedbg eval 'order.Items.Count * 2' --frame 1
+  eyedbg eval order --depth 2
+  eyedbg eval 'Orders.Price(2)' --allow-side-effects`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			p.SessionRef, p.Expression, p.Budget = g.ref(), args[0], g.budget
+
 			var res api.EvalResult
-			if err := call(cmd, info, daemonCallTimeout, api.MethodEval,
-				api.EvalParams{SessionRef: g.ref(), Expression: args[0], Frame: frame}, &res); err != nil {
+			if err := call(cmd, info, daemonCallTimeout, api.MethodEval, p, &res); err != nil {
 				return err
 			}
 
@@ -643,7 +694,9 @@ state. Needs a stopped program; returns at once.` + sessionHelp,
 		},
 	}
 
-	cmd.Flags().IntVar(&frame, "frame", 0, "frame number from 'eyedbg stack' (0 = innermost)")
+	cmd.Flags().IntVar(&p.Frame, "frame", 0, "frame number from 'eyedbg stack' (0 = innermost)")
+	cmd.Flags().IntVar(&p.Depth, "depth", 1, "levels of the result's members to show (1 = none)")
+	cmd.Flags().BoolVar(&p.AllowSideEffects, "allow-side-effects", false, "evaluate even if it calls methods or assigns (takes the lease)")
 
 	return cmd
 }
@@ -655,7 +708,8 @@ func newOutputCommand(info version.Info, g *globals) *cobra.Command {
 		Use:   "output",
 		Short: "Show what the program printed",
 		Long: `Show the program's output (stdout, stderr and debugger console messages), as captured by the
-debugger. The last 2000 chunks are kept per session. Each chunk has a sequence number: pass the
+debugger, and what logpoints printed (category "logpoint" in --json; see 'eyedbg bp add --log').
+In a test session ('eyedbg test') it is what 'dotnet test' printed. The last 2000 chunks are kept per session. Each chunk has a sequence number: pass the
 highest one you have seen to --since to get only newer output ("seq" in --json).
 
 Read-only; works in any state, including after the program exited.` + sessionHelp,
@@ -683,48 +737,81 @@ Read-only; works in any state, including after the program exited.` + sessionHel
 func newBreakpointCommand(info version.Info, g *globals) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bp",
-		Short: "Add, list and remove breakpoints",
-		Long: `Manage line breakpoints of a session. Breakpoints can be added while the program runs or is
-stopped; to be sure one is hit early in the program, pass it to 'eyedbg start --bp' instead.
+		Short: "Add, list and remove breakpoints; choose exception stops",
+		Long: `Manage a session's breakpoints: at a line (FILE:LINE), at the line holding some text
+(FILE@"TEXT"), or at a function (func:NAME); with conditions, hit counts or log messages
+(logpoints). 'eyedbg bp exceptions' chooses which exceptions stop the program. Breakpoints can be
+added while the program runs or is stopped; to be sure one is hit early in the program, pass it to
+'eyedbg start --bp' instead.
 
 Without a subcommand, prints this help and exits 0; an unknown subcommand exits 1.`,
 		Example: `  eyedbg bp add Program.cs:12
+  eyedbg bp add 'Program.cs@"total += price"' --log 'total={total}'
+  eyedbg bp exceptions all
   eyedbg bp ls
   eyedbg bp rm 1`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 
-	cmd.AddCommand(newBreakpointAddCommand(info, g), newBreakpointListCommand(info, g), newBreakpointRemoveCommand(info, g))
+	cmd.AddCommand(newBreakpointAddCommand(info, g), newBreakpointListCommand(info, g), newBreakpointRemoveCommand(info, g),
+		newExceptionsCommand(info, g))
 
 	return cmd
 }
 
-func newBreakpointAddCommand(info version.Info, g *globals) *cobra.Command {
-	var cond string
-
-	cmd := &cobra.Command{
-		Use:   "add <file:line>",
-		Short: "Add a line breakpoint",
-		Long: `Add a breakpoint at FILE:LINE (FILE relative to the current directory, or absolute). The adapter
-may move it to the nearest line with code: the output shows the requested and actual line, and
-whether it is verified. An unverified breakpoint is pending (e.g. its module isn't loaded yet) and
-may still bind later; 'eyedbg bp ls' shows the current state.
+// bpAddLong is the long help of BreakpointAdd.
+const bpAddLong = `Add a breakpoint. LOCATION is one of:
+  FILE:LINE     a line (FILE relative to the current directory, or absolute);
+  FILE@"TEXT"   the one line of FILE that holds TEXT (case-sensitive; runs of whitespace match
+                one space), e.g. 'Program.cs@"total += price"' (quote it for the shell). It is
+                found once, now: several matching lines is ANCHOR_AMBIGUOUS and none is
+                ANCHOR_NOT_FOUND with the closest lines (both exit 1). If the file changes later,
+                the breakpoint stays on that line (the program still runs the code it was built
+                from) and 'eyedbg bp ls' notes it; add it again to find the text anew;
+  func:NAME     a function, by name or a dotted suffix of its full name (Price, Orders.Price or
+                Ns.Orders.Price), bound when its module loads. Needs an adapter that has them
+                (netcoredbg does; UNSUPPORTED_BY_ADAPTER, exit 4, otherwise).
+The adapter may move a line breakpoint to the nearest line with code: the output shows the
+requested and actual line, and whether it is verified. An unverified breakpoint is pending (e.g.
+its module isn't loaded yet) and may still bind later; 'eyedbg bp ls' shows the current state.
 
 --if EXPR stops only when EXPR, an expression in the program's language, is true there (e.g.
-'i == 3'). The adapter evaluates it each time the line runs, so it runs code in the program; an
-expression that fails to evaluate stops the program. Adding a breakpoint at a line where you
-already have one replaces its condition.
+'i == 3'). It is evaluated each time the line runs, so it runs code in the program; an expression
+that fails to evaluate stops the program.
 
-The breakpoint is yours (--as): only you remove it, unless 'bp rm --force'. Other clients'
-breakpoints at the same line share it: the program stops there if any of them would (a
-breakpoint without a condition wins; different conditions make it stop unconditionally, which
-'eyedbg bp ls' notes). Needs no lease.
+--hit counts the times the line is reached with its --if true, and stops only at some: N (only
+the Nth time), >=N (the Nth time and after) or %N (every Nth time). --log MESSAGE makes it a
+logpoint: it never stops, and prints MESSAGE to the output (category "logpoint"; see 'eyedbg
+output') each time, with every {EXPR} replaced by its value ({{ and }} print braces); --hit then
+chooses which times log. Both are for FILE:LINE and FILE@"TEXT" breakpoints. eyedbg does the
+counting and logging itself (netcoredbg can't): each time the line is reached the program pauses
+briefly, and eyedbg continues it. A step (or a pause) that reaches such a line stops there, even
+when it wouldn't stop the program otherwise. 'eyedbg bp ls' shows the counts. Don't put one on
+the first line of a function that has a func: breakpoint: eyedbg can't tell that function
+breakpoint's stops from the line's, so its --hit or --log decides them too.
 
-Does not resume the program; returns at once.` + sessionHelp,
+Adding a breakpoint where you already have one replaces its condition, hit count and log message
+(and restarts its count). The breakpoint is yours (--as): only you remove it, unless 'bp rm
+--force'. Other clients' breakpoints at the same line share it: the program stops there if any
+of them would (a breakpoint without a condition wins; different conditions make it stop
+unconditionally, which 'eyedbg bp ls' notes, except while some breakpoint has --hit or --log:
+then each one's condition is checked). Needs no lease.
+
+Does not resume the program; returns at once.` + sessionHelp
+
+func newBreakpointAddCommand(info version.Info, g *globals) *cobra.Command {
+	var cond, hit, logMsg string
+
+	cmd := &cobra.Command{
+		Use:   "add <location>",
+		Short: "Add a breakpoint, logpoint or function breakpoint",
+		Long:  bpAddLong,
 		Example: `  eyedbg bp add Program.cs:12
   eyedbg bp add Orders.cs:88 --if 'order.Total > 100'
-  eyedbg bp add src/App/Orders.cs:88 --json`,
+  eyedbg bp add 'Program.cs@"total += price"' --hit '>=3'
+  eyedbg bp add Program.cs:20 --log 'i={i} total={total}'
+  eyedbg bp add func:Orders.Price --json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			spec, err := parseLocation(args[0])
@@ -732,7 +819,7 @@ Does not resume the program; returns at once.` + sessionHelp,
 				return err
 			}
 
-			spec.Condition = cond
+			spec.Condition, spec.HitCondition, spec.LogMessage = cond, hit, logMsg
 
 			var bp api.Breakpoint
 			if err := call(cmd, info, daemonCallTimeout, api.MethodBreakpointAdd,
@@ -745,9 +832,29 @@ Does not resume the program; returns at once.` + sessionHelp,
 	}
 
 	cmd.Flags().StringVar(&cond, "if", "", "stop only when this expression is true")
+	cmd.Flags().StringVar(&hit, "hit", "", "stop only at some hits: N, >=N or %N")
+	cmd.Flags().StringVar(&logMsg, "log", "", "print this message (with {EXPR} values) instead of stopping")
 
 	return cmd
 }
+
+// runUntilLong is the long help of RunUntil.
+const runUntilLong = `Continue the stopped program until it reaches FILE:LINE (or FILE@"TEXT": the line holding TEXT,
+see 'eyedbg bp add'); with --if EXPR, until it reaches it with EXPR true (an expression in the
+program's language, e.g. 'i == 3' or 'order.Total > 100'; evaluating it runs code in the
+program). Replaces "bp add, continue, bp rm" with one call.
+
+It works through a temporary breakpoint, removed once the program stops or exits. The program may
+stop elsewhere first (another breakpoint, an exception, a pause) or exit: the output says where it
+is. If you already have a breakpoint at that line, that one is used and --if is ignored (unless it
+is a logpoint or has --hit: then a temporary one is added beside it); another client's breakpoint
+there is not (your temporary one shares the line with it).
+
+Blocks until the program stops or exits, at most --timeout (default 30s). On a timeout the program
+keeps running and the temporary breakpoint stays (marked in 'eyedbg bp ls') so 'eyedbg wait' can
+still catch it; the next execution command, whoever sends it, removes it. Exits 2 if the program
+isn't stopped or another client holds the lease (LEASE_HELD).` +
+	leaseHelp + dumpHelp + sessionHelp
 
 func newRunUntilCommand(info version.Info, g *globals) *cobra.Command {
 	var (
@@ -758,23 +865,11 @@ func newRunUntilCommand(info version.Info, g *globals) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "run-until <file:line>",
+		Use:   "run-until <location>",
 		Short: "Continue to a line, optionally until a condition holds there",
-		Long: `Continue the stopped program until it reaches FILE:LINE; with --if EXPR, until it reaches it
-with EXPR true (an expression in the program's language, e.g. 'i == 3' or 'order.Total > 100';
-evaluating it runs code in the program). Replaces "bp add, continue, bp rm" with one call.
-
-It works through a temporary breakpoint, removed once the program stops or exits. The program may
-stop elsewhere first (another breakpoint, an exception, a pause) or exit: the output says where it
-is. If you already have a breakpoint at that line, that one is used and --if is ignored; another
-client's breakpoint there is not (your temporary one shares the line with it).
-
-Blocks until the program stops or exits, at most --timeout (default 30s). On a timeout the program
-keeps running and the temporary breakpoint stays (marked in 'eyedbg bp ls') so 'eyedbg wait' can
-still catch it; the next execution command, whoever sends it, removes it. Exits 2 if the program
-isn't stopped or another client holds the lease (LEASE_HELD).` +
-			leaseHelp + dumpHelp + sessionHelp,
+		Long:  runUntilLong,
 		Example: `  eyedbg run-until Program.cs:20
+  eyedbg run-until 'Program.cs@"return total"'
   eyedbg run-until Orders.cs:88 --if 'order.Id == 42' --timeout 2m
   eyedbg run-until Program.cs:20 --dump locals`,
 		Args: cobra.ExactArgs(1),
@@ -819,9 +914,12 @@ func newBreakpointListCommand(info version.Info, g *globals) *cobra.Command {
 		Use:   "ls",
 		Short: "List breakpoints",
 		Long: `List the session's breakpoints, every client's (--mine: only yours): id, owner (the client that
-added it), file:line (and the requested line if the adapter moved it), condition, and whether each
-is verified. A note says when a breakpoint shares its line with another client's breakpoint whose
-condition differs (it then stops unconditionally).
+added it), where (file:line, with the anchor text it was found by; or func:NAME), the requested
+line if the adapter moved it, condition, hit count and log message, whether each is verified, and
+how many hits it counted (breakpoints with --hit or --log). A note says when a breakpoint shares
+its line with another client's breakpoint whose condition differs (it then stops
+unconditionally), or when its file changed after the session started (the program still runs the
+code it was built from, so the line may not match the file any more).
 
 Read-only; returns at once. Prints nothing when there are none.` + sessionHelp,
 		Example: `  eyedbg bp ls
@@ -935,12 +1033,25 @@ func forgetLost(id string, notFound error) (api.SessionInfo, error) {
 	return api.SessionInfo{}, notFound
 }
 
-// parseLocation parses FILE:LINE, resolving FILE against the working
-// directory.
+// parseLocation parses FILE:LINE, FILE@"TEXT" (an anchor: the line holding
+// TEXT) or func:NAME, resolving FILE against the working directory.
 func parseLocation(s string) (api.BreakpointSpec, error) {
+	if name, ok := strings.CutPrefix(s, "func:"); ok && name != "" && strings.Trim(name, "0123456789") != "" {
+		return api.BreakpointSpec{Function: name}, nil
+	}
+
+	if at := strings.Index(s, `@"`); at > 0 {
+		text, ok := strings.CutSuffix(s[at+2:], `"`)
+		if !ok || strings.TrimSpace(text) == "" {
+			return api.BreakpointSpec{}, fmt.Errorf(`invalid anchor in %q: want FILE@"TEXT" with TEXT from one line`, s)
+		}
+
+		return api.BreakpointSpec{File: absPath(s[:at]), Anchor: text}, nil
+	}
+
 	i := strings.LastIndex(s, ":")
 	if i <= 0 {
-		return api.BreakpointSpec{}, fmt.Errorf("invalid location %q: want FILE:LINE", s)
+		return api.BreakpointSpec{}, fmt.Errorf(`invalid location %q: want FILE:LINE, FILE@"TEXT" or func:NAME`, s)
 	}
 
 	line, err := strconv.Atoi(s[i+1:])

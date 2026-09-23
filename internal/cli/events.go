@@ -176,7 +176,7 @@ func writeEvents(w io.Writer, res api.EventsResult, view eventsView, asJSON bool
 func describeEvent(e *api.Event, base string) string {
 	switch e.Kind {
 	case api.EventStarted:
-		s := "started by " + e.Client + ": " + location(e.Program, 0, base)
+		s := "started by " + e.Client + ": " + startedWhat(e, base)
 		if e.Lease != nil {
 			s += " (lease policy " + string(e.Lease.Policy) + ")"
 		}
@@ -187,7 +187,7 @@ func describeEvent(e *api.Event, base string) string {
 	case api.EventLease:
 		return describeLease(e)
 	case api.EventExec:
-		return e.Client + ": " + execVerb(e.Action) + threadSuffix(e.ThreadID)
+		return describeExec(e)
 	case api.EventContinued:
 		return "continued" + threadSuffix(e.ThreadID)
 	case api.EventStopped:
@@ -198,16 +198,52 @@ func describeEvent(e *api.Event, base string) string {
 		return describeBreakpoint(e, base)
 	case api.EventThread:
 		return fmt.Sprintf("thread %d %s", e.ThreadID, e.Reason)
-	case api.EventExited:
-		if e.ExitCode != nil {
-			return fmt.Sprintf("exited with code %d", *e.ExitCode)
-		}
-
-		return "exited"
-	case api.EventEnded:
-		return "ended: " + e.Reason
+	case api.EventExited, api.EventEnded, api.EventExceptions:
+		return describeEnd(e)
 	default:
 		return string(e.Kind)
+	}
+}
+
+// startedWhat is what a session started on: a program, an attached
+// process or a test run.
+func startedWhat(e *api.Event, base string) string {
+	switch e.Action {
+	case api.ModeAttach:
+		return "attached to " + e.Program
+	case api.ModeTest:
+		return e.Program
+	default:
+		return location(e.Program, 0, base)
+	}
+}
+
+// describeExec renders an execution request; eval and set name what they
+// changed.
+func describeExec(e *api.Event) string {
+	switch e.Action {
+	case "eval":
+		return e.Client + ": eval " + cutLine(e.Text) + " (side effects allowed)"
+	case "set":
+		return e.Client + ": set " + cutLine(e.Text)
+	default:
+		return e.Client + ": " + execVerb(e.Action) + threadSuffix(e.ThreadID)
+	}
+}
+
+// describeEnd renders exited, ended and exceptions events.
+func describeEnd(e *api.Event) string {
+	switch {
+	case e.Kind == api.EventExceptions && e.Reason == "force":
+		return e.Client + ": exceptions " + e.Action + " (for every client)"
+	case e.Kind == api.EventExceptions:
+		return e.Client + ": exceptions " + e.Action
+	case e.Kind == api.EventEnded:
+		return "ended: " + e.Reason
+	case e.ExitCode != nil:
+		return fmt.Sprintf("exited with code %d", *e.ExitCode)
+	default:
+		return "exited"
 	}
 }
 
@@ -351,12 +387,9 @@ func describeBreakpoint(e *api.Event, base string) string {
 	}
 }
 
-// breakpointWhere is "file:line[ if cond][ (run-until)]".
+// breakpointWhere is breakpointSpot, marked when it is run-until's.
 func breakpointWhere(bp *api.Breakpoint, base string) string {
-	s := location(bp.File, bp.Line, base)
-	if bp.Condition != "" {
-		s += " if " + bp.Condition
-	}
+	s := breakpointSpot(bp, base)
 
 	if bp.Temporary {
 		s += " (run-until)"

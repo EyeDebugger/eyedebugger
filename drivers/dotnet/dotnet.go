@@ -23,6 +23,12 @@ import (
 // buildOutputLines is how much of a failed build's output is reported.
 const buildOutputLines = 40
 
+// Names netcoredbg and the CLI know .NET by.
+const (
+	lang        = "dotnet"
+	adapterType = "coreclr"
+)
+
 // Driver debugs .NET programs with netcoredbg (docs/DESIGN.md §8).
 type Driver struct{}
 
@@ -30,17 +36,12 @@ type Driver struct{}
 func New() *Driver { return &Driver{} }
 
 // Name implements session.Driver.
-func (*Driver) Name() string { return "dotnet" }
+func (*Driver) Name() string { return lang }
 
 // Prepare implements session.Driver: it builds the project (unless a program
 // is given) and launches the result under netcoredbg via the dotnet host.
 func (*Driver) Prepare(ctx context.Context, spec session.LaunchSpec) (session.Launch, error) {
-	dbg, err := adapters.FindNetcoredbg()
-	if errors.Is(err, adapters.ErrNotInstalled) {
-		return session.Launch{}, api.NewError(api.CodeAdapterMissing, "netcoredbg is not installed",
-			"run 'eyedbg adapters install netcoredbg', or set "+adapters.EnvNetcoredbg+" to an existing netcoredbg")
-	}
-
+	launch, err := netcoredbg()
 	if err != nil {
 		return session.Launch{}, err
 	}
@@ -78,12 +79,35 @@ func (*Driver) Prepare(ctx context.Context, spec session.LaunchSpec) (session.La
 		cwd = filepath.Dir(program)
 	}
 
+	launch.Arguments = launchArguments(host, program, cwd, spec)
+	launch.Program = program
+
+	return launch, nil
+}
+
+// netcoredbg returns the Launch fields every netcoredbg session shares.
+func netcoredbg() (session.Launch, error) {
+	dbg, err := adapters.FindNetcoredbg()
+	if errors.Is(err, adapters.ErrNotInstalled) {
+		return session.Launch{}, api.NewError(api.CodeAdapterMissing, "netcoredbg is not installed",
+			"run 'eyedbg adapters install netcoredbg', or set "+adapters.EnvNetcoredbg+" to an existing netcoredbg")
+	}
+
+	if err != nil {
+		return session.Launch{}, err
+	}
+
 	return session.Launch{
 		Adapter:     dbg.Path,
 		AdapterArgs: []string{"--interpreter=vscode"},
-		AdapterID:   "coreclr",
-		Arguments:   launchArguments(host, program, cwd, spec),
-		Program:     program,
+		AdapterID:   adapterType,
+		// netcoredbg's exception filters (docs/adr/0010).
+		ExceptionFilters: map[api.ExceptionMode][]string{
+			api.ExceptionsAll:      {"all"},
+			api.ExceptionsUncaught: {"user-unhandled"},
+		},
+		SideEffects: SideEffects,
+		AttachHint:  attachHint,
 	}, nil
 }
 
@@ -98,7 +122,7 @@ func launchArguments(host, program, cwd string, spec session.LaunchSpec) map[str
 
 	launchArgs := map[string]any{
 		"name":        "eyedbg",
-		"type":        "coreclr",
+		"type":        adapterType,
 		"request":     "launch",
 		"program":     exe,
 		"args":        args,

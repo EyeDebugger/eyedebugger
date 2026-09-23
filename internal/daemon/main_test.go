@@ -5,9 +5,12 @@ package daemon
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
+	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/dap/daptest"
 	"github.com/eyedebugger/eyedebugger/internal/session"
 )
@@ -38,8 +41,30 @@ func (fakeDriver) Prepare(_ context.Context, spec session.LaunchSpec) (session.L
 		lines = 2
 	}
 
+	pa := daptest.ProgramArgs{Program: spec.Program, Lines: lines, StopAtEntry: spec.StopOnEntry}
+	if slices.Contains(spec.Args, "laps=3") {
+		pa.Laps = 3
+	}
+
 	return session.Launch{
 		Adapter: path, AdapterArgs: args, AdapterEnv: env, AdapterID: "fake", Program: spec.Program,
-		Arguments: daptest.Arguments(spec.Program, lines, spec.StopOnEntry, false),
+		Arguments: pa.Map(),
 	}, nil
 }
+
+// PrepareAttach attaches to a hanging fake program of 10 lines, prog.txt
+// in the temp dir.
+func (fakeDriver) PrepareAttach(_ context.Context, spec api.AttachSpec) (session.Launch, error) {
+	path, args, env, err := daptest.Command()
+	if err != nil {
+		return session.Launch{}, err
+	}
+
+	return session.Launch{
+		Adapter: path, AdapterArgs: args, AdapterEnv: env, AdapterID: "fake",
+		Arguments: daptest.ProgramArgs{Program: attachProgram(), Lines: 10, Hang: true, ProcessID: spec.PID}.Map(),
+	}, nil
+}
+
+// attachProgram is the program PrepareAttach attaches to.
+func attachProgram() string { return filepath.Join(os.TempDir(), "eyedbg-daemon-test-attached.txt") }

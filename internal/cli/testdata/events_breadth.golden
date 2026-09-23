@@ -1,0 +1,11 @@
+1  started by agent: attached to pid 4242 (dotnet) (lease policy free)
+2  started by agent: dotnet test tests.csproj --filter Adds (lease policy free)
+3  agent: exceptions all
+4  human:ijat: exceptions none (for every client)
+5  bp 3 added by agent: func:Orders.Price
+6  bp 4 added by agent: Program.cs:20 log "i={i}"
+7  agent: eval Orders.Price(2) (side effects allowed)
+8  human:ijat: set total
+9  output (logpoint): i=3
+10  ended: detached by agent (the program keeps running)
+next: eyedbg events --since 10

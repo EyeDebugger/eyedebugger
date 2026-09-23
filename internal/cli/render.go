@@ -48,6 +48,10 @@ func writeSnapshot(w io.Writer, snap api.Snapshot, asJSON bool, base string) err
 		fmt.Fprintf(&b, "  %s%*d | %s\n", marker, width, l.Line, l.Text)
 	}
 
+	if snap.Exception != nil {
+		writeException(&b, snap.Exception)
+	}
+
 	if snap.Reached != nil && !*snap.Reached && snap.Target != nil {
 		fmt.Fprintf(&b, "  run-until: did not reach %s (the program stopped or exited first)\n",
 			location(snap.Target.File, snap.Target.Line, base))
@@ -57,6 +61,41 @@ func writeSnapshot(w io.Writer, snap api.Snapshot, asJSON bool, base string) err
 	writeSnapshotDump(&b, snap, base)
 
 	return writeText(w, b.String())
+}
+
+// exceptionStackLines is how many stack trace lines a snapshot shows.
+const exceptionStackLines = 5
+
+// writeException writes the exception the program stopped at: type and
+// message, the first stack lines, and inner exceptions.
+func writeException(b *strings.Builder, e *api.ExceptionInfo) {
+	b.WriteString("  exception: " + exceptionLine(e) + "\n")
+
+	if st := strings.TrimRight(e.StackTrace, "\r\n"); st != "" {
+		lines := strings.Split(st, "\n")
+
+		for _, l := range lines[:min(len(lines), exceptionStackLines)] {
+			b.WriteString("    " + strings.TrimSpace(l) + "\n")
+		}
+
+		if more := len(lines) - exceptionStackLines; more > 0 {
+			fmt.Fprintf(b, "    (… %d more lines: eyedbg eval '$exception.StackTrace')\n", more)
+		}
+	}
+
+	for i := range e.Inner {
+		b.WriteString("    inner: " + exceptionLine(&e.Inner[i]) + "\n")
+	}
+}
+
+// exceptionLine is "Type: message" on one line.
+func exceptionLine(e *api.ExceptionInfo) string {
+	s := firstNonEmpty(e.Type, e.ID)
+	if msg := strings.Join(strings.Fields(firstNonEmpty(e.Message, e.Description)), " "); msg != "" {
+		s += ": " + msg
+	}
+
+	return s
 }
 
 // writeSnapshotDump writes what --dump asked for.
@@ -353,12 +392,19 @@ func writeEval(w io.Writer, res api.EvalResult, asJSON bool) error {
 		}{jsonSchemaVersion, res})
 	}
 
-	s := res.Value
+	var b strings.Builder
+
+	b.WriteString(res.Value)
+
 	if res.Type != "" {
-		s += "  (" + res.Type + ")"
+		b.WriteString("  (" + res.Type + ")")
 	}
 
-	return writeText(w, s+"\n")
+	b.WriteString("\n")
+	writeVarList(&b, res.Children, res.More, 1)
+	writeBudgetHint(&b, res.Truncated, 1)
+
+	return writeText(w, b.String())
 }
 
 // writeOutput writes output chunks; a hint about chunks left out goes to
@@ -421,14 +467,10 @@ func writeBreakpoints(w io.Writer, bps []api.Breakpoint, asJSON bool, base strin
 
 	for i := range bps {
 		bp := &bps[i]
-		fmt.Fprintf(&b, "%d  %s  %s", bp.ID, bp.Owner, location(bp.File, bp.Line, base))
+		fmt.Fprintf(&b, "%d  %s  %s", bp.ID, bp.Owner, breakpointSpot(bp, base))
 
 		if bp.Line != bp.RequestedLine {
 			fmt.Fprintf(&b, " (requested line %d)", bp.RequestedLine)
-		}
-
-		if bp.Condition != "" {
-			fmt.Fprintf(&b, " if %s", bp.Condition)
 		}
 
 		if bp.Temporary {
@@ -445,6 +487,10 @@ func writeBreakpoints(w io.Writer, bps []api.Breakpoint, asJSON bool, base strin
 			}
 		}
 
+		if bp.Hits > 0 {
+			fmt.Fprintf(&b, "  hits %d", bp.Hits)
+		}
+
 		if bp.Note != "" {
 			b.WriteString("  note: " + bp.Note)
 		}
@@ -453,6 +499,34 @@ func writeBreakpoints(w io.Writer, bps []api.Breakpoint, asJSON bool, base strin
 	}
 
 	return writeText(w, b.String())
+}
+
+// breakpointSpot is where a breakpoint is and what it does: func:NAME, or
+// file:line with the anchor it was found by; then its condition, hit count
+// and log message.
+func breakpointSpot(bp *api.Breakpoint, base string) string {
+	s := "func:" + bp.Function
+
+	if bp.Function == "" {
+		s = location(bp.File, bp.Line, base)
+		if bp.Anchor != "" {
+			s += ` @"` + bp.Anchor + `"`
+		}
+	}
+
+	if bp.Condition != "" {
+		s += " if " + bp.Condition
+	}
+
+	if bp.HitCondition != "" {
+		s += " hit " + bp.HitCondition
+	}
+
+	if bp.LogMessage != "" {
+		s += ` log "` + bp.LogMessage + `"`
+	}
+
+	return s
 }
 
 // writeRemoved reports what 'bp rm' removed and kept.

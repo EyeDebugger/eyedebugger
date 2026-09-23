@@ -104,17 +104,9 @@ func (s *Session) Expand(ctx context.Context, frameIndex int, path string, depth
 
 	target, err := s.walk(ctx, candidates, segs)
 	if err != nil {
-		// Not a chain of members as the adapter shows them (e.g. an index
-		// into a List, which netcoredbg shows as raw fields): evaluate it.
-		res, evalErr := dap.Call[*godap.EvaluateResponse](ctx, s.client, &godap.EvaluateRequest{
-			Request:   godap.Request{Command: "evaluate"},
-			Arguments: godap.EvaluateArguments{Expression: path, FrameId: fid, Context: "watch"},
-		})
-		if evalErr != nil {
+		if target, err = s.evaluatePath(ctx, fid, path, err); err != nil {
 			return nil, err
 		}
-
-		target = godap.Variable{Name: path, Value: res.Body.Result, Type: res.Body.Type, VariablesReference: res.Body.VariablesReference}
 	}
 
 	v := api.Var{Name: target.Name, Type: target.Type, Value: truncate(target.Value), HasChildren: target.VariablesReference > 0}
@@ -131,6 +123,23 @@ func (s *Session) Expand(ctx context.Context, frameIndex int, path string, depth
 	scope.More = omitted
 
 	return []api.Scope{scope}, nil
+}
+
+// evaluatePath evaluates path, which is not a chain of members as the
+// adapter shows them (e.g. an index into a List, which netcoredbg shows as
+// raw fields), unless that would visibly change the program. walkErr is
+// the error returned when it can't.
+func (s *Session) evaluatePath(ctx context.Context, fid int, path string, walkErr error) (godap.Variable, error) {
+	if _, found := s.sideEffectsOf(path); found {
+		return godap.Variable{}, withHint(walkErr, sideEffectsHint)
+	}
+
+	body, err := s.evalBody(ctx, fid, path, contextWatch)
+	if err != nil {
+		return godap.Variable{}, walkErr
+	}
+
+	return godap.Variable{Name: path, Value: body.Result, Type: body.Type, VariablesReference: body.VariablesReference}, nil
 }
 
 // walk follows segs from candidates (the first segment's siblings) down
@@ -348,30 +357,6 @@ func (s *Session) variables(ctx context.Context, ref, depth int) ([]api.Var, int
 	}
 
 	return out, more, nil
-}
-
-// Eval evaluates expr in frame (an index into the stopped thread's stack).
-func (s *Session) Eval(ctx context.Context, expr string, frameIndex int) (api.EvalResult, error) {
-	fid, err := s.frameID(ctx, frameIndex)
-	if err != nil {
-		return api.EvalResult{}, err
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
-	defer cancel()
-
-	resp, err := dap.Call[*godap.EvaluateResponse](ctx, s.client, &godap.EvaluateRequest{
-		Request:   godap.Request{Command: "evaluate"},
-		Arguments: godap.EvaluateArguments{Expression: expr, FrameId: fid, Context: "watch"},
-	})
-	if err != nil {
-		return api.EvalResult{}, adapterErr(err)
-	}
-
-	return api.EvalResult{
-		Expression: expr, Value: truncate(resp.Body.Result), Type: resp.Body.Type,
-		HasChildren: resp.Body.VariablesReference > 0,
-	}, nil
 }
 
 // Output returns the program's output chunks with Seq > since, at most tail
