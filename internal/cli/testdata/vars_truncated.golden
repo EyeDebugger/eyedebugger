@@ -1,0 +1,4 @@
+Locals:
+  order: Order = {Order} {…}
+  … 4 more
+  (cut to fit --budget: 'eyedbg vars --expand NAME' shows one variable, --budget 0 shows all)

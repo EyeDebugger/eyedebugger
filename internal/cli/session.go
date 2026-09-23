@@ -5,6 +5,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,6 +33,47 @@ const (
 const sessionHelp = `
 Which session: -s/--session <id>, else $EYEDBG_SESSION, else the only session (an error lists them
 if there are several).`
+
+// dumpHelp is appended to every command that prints a stop snapshot.
+const dumpHelp = `
+
+When the program is stopped, the output also has what --dump asks for (comma-separated, default
+"changed"): changed = the current function's locals that changed since the previous stop, with
+their old values (all locals when it is the first stop in this function); locals = every local;
+stack = the top 10 frames; none = only the location. What the program printed since it last
+resumed is always shown (the last 20 chunks). Variables are cut to --budget tokens, saying so.`
+
+// dumpFlag is the --dump flag of commands that print a stop snapshot.
+type dumpFlag struct {
+	what []string
+}
+
+func addDumpFlag(cmd *cobra.Command) *dumpFlag {
+	d := &dumpFlag{}
+	cmd.Flags().StringSliceVar(&d.what, "dump", []string{api.DumpChanged},
+		"what to show when stopped: changed, locals, stack (comma-separated), or none")
+
+	return d
+}
+
+// spec validates the flag and returns the request's DumpSpec.
+func (d *dumpFlag) spec(g *globals) (api.DumpSpec, error) {
+	for _, w := range d.what {
+		switch w {
+		case api.DumpChanged, api.DumpLocals, api.DumpStack:
+		case api.DumpNone:
+			if len(d.what) > 1 {
+				return api.DumpSpec{}, errors.New("--dump none can't be combined with other values")
+			}
+
+			return api.DumpSpec{Budget: g.budget}, nil
+		default:
+			return api.DumpSpec{}, fmt.Errorf("invalid --dump value %q: want changed, locals, stack or none", w)
+		}
+	}
+
+	return api.DumpSpec{Dump: d.what, Budget: g.budget}, nil
+}
 
 // call connects to the running daemon (never starting one) and runs one
 // request. With no daemon there can be no session, so that is NO_SESSION.
@@ -64,6 +106,7 @@ type startFlags struct {
 	env, bps              []string
 	stopOnEntry, noBuild  bool
 	timeout               time.Duration
+	dump                  *dumpFlag
 }
 
 func newStartCommand(info version.Info, g *globals) *cobra.Command {
@@ -86,8 +129,10 @@ first stop and reports where the program stopped; otherwise it returns as soon a
 runs. Starts the daemon if needed. Building can take minutes on a cold machine.
 
 Output: the new session id and its state (text), or the session snapshot in --json. The session id
-is also the value to pass to -s. Exits 0 once the program is running or stopped, 1 on failure
-(BUILD_FAILED with the compiler errors, ADAPTER_NOT_INSTALLED, ...).`,
+is also the value to pass to -s. Exits 0 once the program is running or stopped, non-zero on
+failure (BUILD_FAILED with the compiler errors, ADAPTER_NOT_INSTALLED, ...; see 'eyedbg --help'
+for the exit codes).` + dumpHelp + `
+`,
 		Example: `  eyedbg start dotnet --bp Program.cs:12         # build ./, stop at line 12
   eyedbg start dotnet --project src/App/App.csproj --stop-on-entry
   eyedbg start dotnet --program bin/Debug/net10.0/App.dll -- --verbose input.txt`,
@@ -95,6 +140,10 @@ is also the value to pass to -s. Exits 0 once the program is running or stopped,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			params, err := sf.params(args, cmd.ArgsLenAtDash())
 			if err != nil {
+				return err
+			}
+
+			if params.DumpSpec, err = sf.dump.spec(g); err != nil {
 				return err
 			}
 
@@ -111,6 +160,7 @@ is also the value to pass to -s. Exits 0 once the program is running or stopped,
 	f.BoolVar(&sf.stopOnEntry, "stop-on-entry", false, "stop at the program's entry point")
 	f.BoolVar(&sf.noBuild, "no-build", false, "don't build; requires --program")
 	f.DurationVar(&sf.timeout, "timeout", defaultExecTimeout, "how long to wait for the first stop with --bp or --stop-on-entry")
+	sf.dump = addDumpFlag(cmd)
 
 	return cmd
 }
@@ -217,26 +267,38 @@ Never starts the daemon or affects a session. Prints nothing when there are none
 }
 
 func newStatusCommand(info version.Info, g *globals) *cobra.Command {
-	return &cobra.Command{
+	var dump *dumpFlag
+
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show a session's state and where it is stopped",
 		Long: `Show a session's state; when stopped, also why (breakpoint, step, entry, pause, exception),
 the thread, the current function and file:line, and the source lines around it. When exited, the
 exit code.
 
-Read-only: never resumes the program. Returns at once.` + sessionHelp,
+Read-only: never resumes the program. Returns at once.` + dumpHelp + sessionHelp,
 		Example: `  eyedbg status
+  eyedbg status --dump locals,stack
   eyedbg status -s s-k3f9 --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			spec, err := dump.spec(g)
+			if err != nil {
+				return err
+			}
+
 			var snap api.Snapshot
-			if err := call(cmd, info, daemonCallTimeout, api.MethodSessionStatus, g.ref(), &snap); err != nil {
+			if err := call(cmd, info, daemonCallTimeout, api.MethodSessionStatus,
+				api.StatusParams{SessionRef: g.ref(), DumpSpec: spec}, &snap); err != nil {
 				return err
 			}
 
 			return writeSnapshot(cmd.OutOrStdout(), snap, g.json, workDir())
 		},
 	}
+	dump = addDumpFlag(cmd)
+
+	return cmd
 }
 
 func newStopCommand(info version.Info, g *globals) *cobra.Command {
@@ -286,7 +348,7 @@ func execSpecs() []execSpec {
 			"next", "next", "Step over the current line",
 			`Run the current line, stepping over calls, and stop at the next line of the same function (or
 its caller when the function returns).`,
-			"  eyedbg next\n  eyedbg next --json",
+			"  eyedbg next\n  eyedbg next --dump changed,stack\n  eyedbg next --json",
 		},
 		{
 			"step-in", "stepIn", "Step into the call on the current line",
@@ -316,6 +378,7 @@ func newExecCommands(info version.Info, g *globals) []*cobra.Command {
 		var (
 			timeout time.Duration
 			thread  int
+			dump    *dumpFlag
 		)
 
 		cmd := &cobra.Command{
@@ -328,12 +391,17 @@ an error: the program keeps running, the output says so ("timedOut": true in --j
 'eyedbg wait' or 'eyedbg pause' take it from there.
 
 Output: the resulting state, like 'eyedbg status' (stop reason, function, file:line and source
-around it). Exits 1 if the program isn't in the right state (NOT_STOPPED, NOT_RUNNING,
-SESSION_EXITED).` + sessionHelp,
+around it). Exits 2 if the program isn't in the right state (NOT_STOPPED, NOT_RUNNING,
+SESSION_EXITED).` + dumpHelp + sessionHelp,
 			Example: spec.example,
 			Args:    cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
-				params := api.ExecParams{SessionRef: g.ref(), Kind: spec.kind, ThreadID: thread, Wait: api.Duration(timeout)}
+				ds, err := dump.spec(g)
+				if err != nil {
+					return err
+				}
+
+				params := api.ExecParams{SessionRef: g.ref(), DumpSpec: ds, Kind: spec.kind, ThreadID: thread, Wait: api.Duration(timeout)}
 
 				var snap api.Snapshot
 				if err := call(cmd, info, timeout+callSlack, api.MethodExec, params, &snap); err != nil {
@@ -346,6 +414,7 @@ SESSION_EXITED).` + sessionHelp,
 
 		cmd.Flags().DurationVar(&timeout, "timeout", defaultExecTimeout, "longest time to wait for the program to stop or exit")
 		cmd.Flags().IntVar(&thread, "thread", 0, "thread id to act on (default: the thread that stopped)")
+		dump = addDumpFlag(cmd)
 		cmds = append(cmds, cmd)
 	}
 
@@ -353,7 +422,10 @@ SESSION_EXITED).` + sessionHelp,
 }
 
 func newWaitCommand(info version.Info, g *globals) *cobra.Command {
-	var timeout time.Duration
+	var (
+		timeout time.Duration
+		dump    *dumpFlag
+	)
 
 	cmd := &cobra.Command{
 		Use:   "wait",
@@ -363,15 +435,21 @@ Use it after an execution command timed out, or after 'eyedbg start' without bre
 program is already stopped, returns at once.
 
 Never resumes or pauses the program. Output is the resulting state, like 'eyedbg status';
-timing out is not an error ("timedOut": true in --json).` + sessionHelp,
+timing out is not an error ("timedOut": true in --json).` + dumpHelp + sessionHelp,
 		Example: `  eyedbg wait
   eyedbg wait --timeout 5m`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			params := api.WaitParams{SessionRef: g.ref(), AfterStops: -1, Wait: api.Duration(timeout)}
+			ds, err := dump.spec(g)
+			if err != nil {
+				return err
+			}
+
+			params := api.WaitParams{SessionRef: g.ref(), DumpSpec: ds, AfterStops: -1, Wait: api.Duration(timeout)}
 
 			var snap api.Snapshot
-			if err := call(cmd, info, daemonCallTimeout, api.MethodSessionStatus, g.ref(), &snap); err != nil {
+			if err := call(cmd, info, daemonCallTimeout, api.MethodSessionStatus,
+				api.StatusParams{SessionRef: g.ref(), DumpSpec: ds}, &snap); err != nil {
 				return err
 			}
 
@@ -388,6 +466,7 @@ timing out is not an error ("timedOut": true in --json).` + sessionHelp,
 	}
 
 	cmd.Flags().DurationVar(&timeout, "timeout", defaultExecTimeout, "longest time to wait")
+	dump = addDumpFlag(cmd)
 
 	return cmd
 }
@@ -423,9 +502,8 @@ frame, "#N function file:line".` + sessionHelp,
 	return cmd
 }
 
-//nolint:dupl // Command definitions share a shape; their help, flags and output differ.
 func newVarsCommand(info version.Info, g *globals) *cobra.Command {
-	var frame, depth int
+	var p api.VarsParams
 
 	cmd := &cobra.Command{
 		Use:   "vars",
@@ -435,15 +513,29 @@ grouped by scope (e.g. Locals). --depth expands objects and collections that man
 the top-level values; objects with members are marked {…}). At most 50 members are shown per
 level and values are cut at 200 characters, with the remainder counted.
 
+--expand PATH shows just one variable and its members, e.g. order, order.Items or
+order.Items[0].Name. PATH is first looked up as members as the adapter shows them (arrays have
+members named [N]); if that fails it is evaluated as an expression (so indexers like list[0] work,
+but a getter or indexer runs code in the program). If neither works, the error lists the names
+there. --changed shows only the locals of frame #0 that changed since the previous stop,
+with their old values (compared by value at the top level: a change inside an object whose value
+is only its type name is not seen).
+
+The whole output is cut to --budget tokens (breadth-first: every variable before any member), and
+says so; then use --expand for the part you need, or --budget 0.
+
 Needs a stopped program; read-only (properties are not evaluated beyond what the adapter shows).
 Returns at once.` + sessionHelp,
 		Example: `  eyedbg vars
-  eyedbg vars --frame 1 --depth 2`,
+  eyedbg vars --frame 1 --depth 2
+  eyedbg vars --expand order.Items --depth 2
+  eyedbg vars --changed`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			p.SessionRef, p.Budget = g.ref(), g.budget
+
 			var scopes []api.Scope
-			if err := call(cmd, info, daemonCallTimeout, api.MethodVars,
-				api.VarsParams{SessionRef: g.ref(), Frame: frame, Depth: depth}, &scopes); err != nil {
+			if err := call(cmd, info, daemonCallTimeout, api.MethodVars, p, &scopes); err != nil {
 				return err
 			}
 
@@ -451,8 +543,11 @@ Returns at once.` + sessionHelp,
 		},
 	}
 
-	cmd.Flags().IntVar(&frame, "frame", 0, "frame number from 'eyedbg stack' (0 = innermost)")
-	cmd.Flags().IntVar(&depth, "depth", 1, "levels of members to expand (1 = none)")
+	cmd.Flags().IntVar(&p.Frame, "frame", 0, "frame number from 'eyedbg stack' (0 = innermost)")
+	cmd.Flags().IntVar(&p.Depth, "depth", 1, "levels of members to expand (1 = none)")
+	cmd.Flags().StringVar(&p.Expand, "expand", "", "show only the variable at this path, e.g. order.Items[0]")
+	cmd.Flags().BoolVar(&p.Changed, "changed", false, "show only the locals that changed since the previous stop")
+	cmd.MarkFlagsMutuallyExclusive("expand", "changed")
 
 	return cmd
 }
@@ -488,7 +583,6 @@ state. Needs a stopped program; returns at once.` + sessionHelp,
 	return cmd
 }
 
-//nolint:dupl // Command definitions share a shape; their help, flags and output differ.
 func newOutputCommand(info version.Info, g *globals) *cobra.Command {
 	var since, tail int
 
@@ -542,7 +636,9 @@ Without a subcommand, prints this help and exits 0; an unknown subcommand exits 
 }
 
 func newBreakpointAddCommand(info version.Info, g *globals) *cobra.Command {
-	return &cobra.Command{
+	var cond string
+
+	cmd := &cobra.Command{
 		Use:   "add <file:line>",
 		Short: "Add a line breakpoint",
 		Long: `Add a breakpoint at FILE:LINE (FILE relative to the current directory, or absolute). The adapter
@@ -550,8 +646,14 @@ may move it to the nearest line with code: the output shows the requested and ac
 whether it is verified. An unverified breakpoint is pending (e.g. its module isn't loaded yet) and
 may still bind later; 'eyedbg bp ls' shows the current state.
 
+--if EXPR stops only when EXPR, an expression in the program's language, is true there (e.g.
+'i == 3'). The adapter evaluates it each time the line runs, so it runs code in the program; an
+expression that fails to evaluate stops the program. Adding a breakpoint at a line that already
+has one replaces its condition.
+
 Does not resume the program; returns at once.` + sessionHelp,
 		Example: `  eyedbg bp add Program.cs:12
+  eyedbg bp add Orders.cs:88 --if 'order.Total > 100'
   eyedbg bp add src/App/Orders.cs:88 --json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -559,6 +661,8 @@ Does not resume the program; returns at once.` + sessionHelp,
 			if err != nil {
 				return err
 			}
+
+			spec.Condition = cond
 
 			var bp api.Breakpoint
 			if err := call(cmd, info, daemonCallTimeout, api.MethodBreakpointAdd,
@@ -569,6 +673,71 @@ Does not resume the program; returns at once.` + sessionHelp,
 			return writeBreakpoints(cmd.OutOrStdout(), []api.Breakpoint{bp}, g.json, workDir())
 		},
 	}
+
+	cmd.Flags().StringVar(&cond, "if", "", "stop only when this expression is true")
+
+	return cmd
+}
+
+func newRunUntilCommand(info version.Info, g *globals) *cobra.Command {
+	var (
+		timeout time.Duration
+		thread  int
+		cond    string
+		dump    *dumpFlag
+	)
+
+	cmd := &cobra.Command{
+		Use:   "run-until <file:line>",
+		Short: "Continue to a line, optionally until a condition holds there",
+		Long: `Continue the stopped program until it reaches FILE:LINE; with --if EXPR, until it reaches it
+with EXPR true (an expression in the program's language, e.g. 'i == 3' or 'order.Total > 100';
+evaluating it runs code in the program). Replaces "bp add, continue, bp rm" with one call.
+
+It works through a temporary breakpoint, removed once the program stops or exits. The program may
+stop elsewhere first (another breakpoint, an exception, a pause) or exit: the output says where it
+is. If a breakpoint is already set at that line, that one is used and --if is ignored.
+
+Blocks until the program stops or exits, at most --timeout (default 30s). On a timeout the program
+keeps running and the temporary breakpoint stays (marked in 'eyedbg bp ls') so 'eyedbg wait' can
+still catch it; the next execution command removes it. Exits 2 if the program isn't stopped.` +
+			dumpHelp + sessionHelp,
+		Example: `  eyedbg run-until Program.cs:20
+  eyedbg run-until Orders.cs:88 --if 'order.Id == 42' --timeout 2m
+  eyedbg run-until Program.cs:20 --dump locals`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			spec, err := parseLocation(args[0])
+			if err != nil {
+				return err
+			}
+
+			spec.Condition = cond
+
+			ds, err := dump.spec(g)
+			if err != nil {
+				return err
+			}
+
+			params := api.RunUntilParams{
+				SessionRef: g.ref(), BreakpointSpec: spec, DumpSpec: ds, ThreadID: thread, Wait: api.Duration(timeout),
+			}
+
+			var snap api.Snapshot
+			if err := call(cmd, info, timeout+callSlack, api.MethodRunUntil, params, &snap); err != nil {
+				return err
+			}
+
+			return writeSnapshot(cmd.OutOrStdout(), snap, g.json, workDir())
+		},
+	}
+
+	cmd.Flags().StringVar(&cond, "if", "", "stop there only when this expression is true")
+	cmd.Flags().DurationVar(&timeout, "timeout", defaultExecTimeout, "longest time to wait for the program to stop or exit")
+	cmd.Flags().IntVar(&thread, "thread", 0, "thread id to resume (default: the thread that stopped)")
+	dump = addDumpFlag(cmd)
+
+	return cmd
 }
 
 func newBreakpointListCommand(info version.Info, g *globals) *cobra.Command {

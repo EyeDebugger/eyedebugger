@@ -19,6 +19,7 @@ import (
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/dap"
+	"github.com/eyedebugger/eyedebugger/internal/present"
 )
 
 // Timeouts for talking to an adapter.
@@ -27,6 +28,15 @@ const (
 	shutdownTimeout   = 3 * time.Second
 	maxOutputLines    = 2000
 	maxSourceFileSize = 4 << 20
+	// snapshotOutput is how many output chunks a snapshot carries.
+	snapshotOutput = 20
+	// dumpFrames is how many frames a stack dump carries.
+	dumpFrames = 10
+	// Adapters may send a program's last output after the stopped event: a
+	// stop is reported once output has been quiet for outputQuiet, waiting
+	// at most outputSettleMax.
+	outputQuiet     = 50 * time.Millisecond
+	outputSettleMax = 250 * time.Millisecond
 )
 
 // Session is one debuggee driven through one adapter process.
@@ -58,8 +68,23 @@ type Session struct {
 	nextBP    int
 	output    []api.OutputLine
 	outSeq    int
+	resumedAt int           // outSeq when the program last resumed
 	changed   chan struct{} // closed and replaced on every state change
 	ended     bool          // adapter torn down
+
+	// captureMu serializes fetching stop captures; cur is the capture of
+	// the current (or last) stop, prev the one before it.
+	captureMu sync.Mutex
+	cur, prev *stopCapture
+}
+
+// stopCapture is frame 0's locals at one stop, kept to diff the next stop
+// against.
+type stopCapture struct {
+	stops  int
+	frame  api.Frame
+	locals []api.Var
+	more   int
 }
 
 type breakpoint struct {
@@ -395,20 +420,137 @@ func (s *Session) Info() api.SessionInfo {
 	return info
 }
 
-// Snapshot returns the session state, with the stop location when stopped.
-func (s *Session) Snapshot(ctx context.Context) api.Snapshot {
+// Snapshot returns the session state and the output since the program last
+// resumed; when stopped, also the stop location and what dump asks for.
+// Parts the adapter fails to deliver are left out.
+func (s *Session) Snapshot(ctx context.Context, dump api.DumpSpec) api.Snapshot {
 	snap := api.Snapshot{Session: s.Info()}
+	snap.Output, snap.OutputOmitted = s.outputSinceResume()
 
-	if snap.Session.State == api.StateStopped && snap.Session.Stop != nil {
-		frames, err := s.stack(ctx, snap.Session.Stop.ThreadID, 1)
-		if err == nil && len(frames) > 0 {
-			f := frames[0].Frame
-			snap.Frame = &f
-			snap.Source = readSource(f.File, f.Line, 2)
+	if snap.Session.State != api.StateStopped || snap.Session.Stop == nil {
+		return snap
+	}
+
+	levels := 1
+	if dump.Wants(api.DumpStack) {
+		levels = dumpFrames
+	}
+
+	frames, err := s.stack(ctx, snap.Session.Stop.ThreadID, levels)
+	if err == nil && len(frames) > 0 {
+		f := frames[0].Frame
+		snap.Frame = &f
+		snap.Source = readSource(f.File, f.Line, 2)
+
+		if dump.Wants(api.DumpStack) {
+			for _, fr := range frames {
+				snap.Stack = append(snap.Stack, fr.Frame)
+			}
 		}
 	}
 
+	if !dump.Wants(api.DumpLocals) && !dump.Wants(api.DumpChanged) {
+		return snap
+	}
+
+	cur, prev, err := s.capture(ctx)
+	if err != nil {
+		return snap
+	}
+
+	fitter := present.NewFitter(dump.Budget)
+
+	if dump.Wants(api.DumpChanged) {
+		ch := changes(cur, prev)
+		ch.Vars, ch.More, ch.Truncated = fitter.Fit(ch.Vars)
+		snap.Changes = &ch
+	}
+
+	if dump.Wants(api.DumpLocals) {
+		sc := api.Scope{Name: "Locals"}
+		sc.Vars, sc.More, sc.Truncated = fitter.Fit(cur.locals)
+		sc.More += cur.more
+		snap.Locals = &sc
+	}
+
 	return snap
+}
+
+// changes diffs cur's locals against prev's when both are in the same
+// function; otherwise every local is new.
+func changes(cur, prev *stopCapture) api.Changes {
+	if prev == nil || prev.frame.Name != cur.frame.Name || prev.frame.File != cur.frame.File {
+		return api.Changes{NewFrame: true, Vars: present.Diff(nil, cur.locals)}
+	}
+
+	return api.Changes{Vars: present.Diff(prev.locals, cur.locals)}
+}
+
+// capture returns the capture of the current stop, fetching it if needed,
+// and the one before it.
+func (s *Session) capture(ctx context.Context) (cur, prev *stopCapture, err error) {
+	s.captureMu.Lock()
+	defer s.captureMu.Unlock()
+
+	s.mu.Lock()
+	state, stops, thread := s.state, s.stops, s.stop.ThreadID
+
+	if s.cur != nil && s.cur.stops == stops {
+		cur, prev = s.cur, s.prev
+		s.mu.Unlock()
+
+		return cur, prev, nil
+	}
+	s.mu.Unlock()
+
+	if state != api.StateStopped {
+		return nil, nil, stateError(s.ID, state, "reading locals needs a stopped program")
+	}
+
+	frames, err := s.stack(ctx, thread, 1)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	c := &stopCapture{stops: stops}
+
+	if len(frames) > 0 {
+		c.frame = frames[0].Frame
+
+		if c.locals, c.more, err = s.frameLocals(ctx, frames[0].id); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.stops != stops { // resumed meanwhile: don't record stale values
+		return c, s.cur, nil
+	}
+
+	s.prev, s.cur = s.cur, c
+
+	return s.cur, s.prev, nil
+}
+
+// outputSinceResume returns the last output chunks printed since the
+// program last resumed and how many older ones were left out.
+func (s *Session) outputSinceResume() (lines []api.OutputLine, omitted int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, l := range s.output {
+		if l.Seq > s.resumedAt {
+			lines = append(lines, l)
+		}
+	}
+
+	if len(lines) > snapshotOutput {
+		return lines[len(lines)-snapshotOutput:], len(lines) - snapshotOutput
+	}
+
+	return lines, 0
 }
 
 // waitChange waits until pred holds, ctx ends or the session changes state
@@ -443,8 +585,24 @@ const (
 
 // Resume runs the debuggee (continue or a step), or pauses it, then waits up
 // to wait for it to stop or exit. A timeout is not an error: the result says
-// the program is still running.
-func (s *Session) Resume(ctx context.Context, kind string, threadID int, wait time.Duration) (api.Snapshot, error) {
+// the program is still running. Temporary breakpoints left by a run-until
+// that timed out are removed first.
+func (s *Session) Resume(ctx context.Context, kind string, threadID int, wait time.Duration, dump api.DumpSpec) (api.Snapshot, error) {
+	if kind != ExecPause {
+		if err := s.removeTemporary(ctx); err != nil {
+			return api.Snapshot{}, err
+		}
+	}
+
+	return s.resume(ctx, kind, threadID, wait, dump)
+}
+
+func (s *Session) resume(ctx context.Context, kind string, threadID int, wait time.Duration, dump api.DumpSpec) (api.Snapshot, error) {
+	if kind != ExecPause {
+		// Record where it was, to diff the next stop against.
+		_, _, _ = s.capture(ctx)
+	}
+
 	s.mu.Lock()
 	state, before := s.state, s.stops
 
@@ -464,6 +622,12 @@ func (s *Session) Resume(ctx context.Context, kind string, threadID int, wait ti
 	reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
+	if kind != ExecPause {
+		s.mu.Lock()
+		s.resumedAt = s.outSeq
+		s.mu.Unlock()
+	}
+
 	if err := s.sendExec(reqCtx, kind, threadID); err != nil {
 		return api.Snapshot{}, err
 	}
@@ -474,21 +638,53 @@ func (s *Session) Resume(ctx context.Context, kind string, threadID int, wait ti
 	}
 	s.mu.Unlock()
 
-	return s.Wait(ctx, before, wait), nil
+	return s.Wait(ctx, before, wait, dump), nil
 }
 
 // Wait waits up to wait until the program stops for the (stopsSeen+1)th
 // time or exits, and returns a snapshot. TimedOut is set if neither happened.
-func (s *Session) Wait(ctx context.Context, stopsSeen int, wait time.Duration) api.Snapshot {
+func (s *Session) Wait(ctx context.Context, stopsSeen int, wait time.Duration, dump api.DumpSpec) api.Snapshot {
 	waitCtx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 
 	ok := s.waitUntil(waitCtx, func() bool { return s.stops > stopsSeen || s.state == api.StateExited })
+	if ok {
+		s.settleOutput(ctx)
+	}
 
-	snap := s.Snapshot(ctx)
+	snap := s.Snapshot(ctx, dump)
 	snap.TimedOut = !ok
 
 	return snap
+}
+
+// settleOutput waits until no output has arrived for outputQuiet, at most
+// outputSettleMax.
+func (s *Session) settleOutput(ctx context.Context) {
+	deadline := time.Now().Add(outputSettleMax)
+
+	for {
+		s.mu.Lock()
+		seq := s.outSeq
+		s.mu.Unlock()
+
+		t := time.NewTimer(outputQuiet)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+
+			return
+		case <-t.C:
+		}
+
+		s.mu.Lock()
+		quiet := s.outSeq == seq
+		s.mu.Unlock()
+
+		if quiet || time.Now().After(deadline) {
+			return
+		}
+	}
 }
 
 // Stops returns how many times the program has stopped so far.

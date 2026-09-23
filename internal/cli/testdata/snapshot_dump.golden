@@ -1,0 +1,20 @@
+session s-k3f9 (dotnet) stopped: breakpoint, thread 4242
+  at Program.<Main>$() Program.cs:4
+    3 | {
+  > 4 |     total += i;
+    5 |     Console.WriteLine(total);
+  output since it resumed:
+    (3 earlier chunks not shown: 'eyedbg output')
+    i=1 total=1
+    i=2 total=3
+  changed since the previous stop:
+    total: int = 3  (was 1)
+    line: string = "x"  (new)
+  locals:
+    i: int = 2
+    total: int = 3
+    … 2 more
+    (cut to fit --budget: 'eyedbg vars --expand NAME' shows one variable, --budget 0 shows all)
+  stack:
+    #0 Program.<Main>$() Program.cs:4
+    #1 [External Code]

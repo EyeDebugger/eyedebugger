@@ -46,7 +46,84 @@ func writeSnapshot(w io.Writer, snap api.Snapshot, asJSON bool, base string) err
 		fmt.Fprintf(&b, "  %s%*d | %s\n", marker, width, l.Line, l.Text)
 	}
 
+	if snap.Reached != nil && !*snap.Reached && snap.Target != nil {
+		fmt.Fprintf(&b, "  run-until: did not reach %s (the program stopped or exited first)\n",
+			location(snap.Target.File, snap.Target.Line, base))
+	}
+
+	writeSnapshotOutput(&b, snap)
+	writeSnapshotDump(&b, snap, base)
+
 	return writeText(w, b.String())
+}
+
+// writeSnapshotDump writes what --dump asked for.
+func writeSnapshotDump(b *strings.Builder, snap api.Snapshot, base string) {
+	if c := snap.Changes; c != nil {
+		switch {
+		case c.NewFrame:
+			b.WriteString("  locals (first stop in this function):\n")
+		case len(c.Vars) == 0 && c.More == 0:
+			b.WriteString("  changed since the previous stop: nothing\n")
+		default:
+			b.WriteString("  changed since the previous stop:\n")
+		}
+
+		vars := c.Vars
+		if c.NewFrame { // all new: the header says so
+			vars = make([]api.Var, len(c.Vars))
+			for i, v := range c.Vars {
+				v.Change = ""
+				vars[i] = v
+			}
+		}
+
+		writeVarList(b, vars, c.More, 2)
+		writeBudgetHint(b, c.Truncated, 2)
+	}
+
+	if sc := snap.Locals; sc != nil {
+		b.WriteString("  locals:\n")
+		writeVarList(b, sc.Vars, sc.More, 2)
+		writeBudgetHint(b, sc.Truncated, 2)
+	}
+
+	if len(snap.Stack) > 0 {
+		b.WriteString("  stack:\n")
+
+		for _, f := range snap.Stack {
+			b.WriteString("    " + frameLine(f, base) + "\n")
+		}
+	}
+}
+
+// writeSnapshotOutput writes what the program printed since it resumed.
+func writeSnapshotOutput(b *strings.Builder, snap api.Snapshot) {
+	if len(snap.Output) == 0 {
+		return
+	}
+
+	b.WriteString("  output since it resumed:\n")
+
+	if snap.OutputOmitted > 0 {
+		fmt.Fprintf(b, "    (%d earlier chunks not shown: 'eyedbg output')\n", snap.OutputOmitted)
+	}
+
+	var text strings.Builder
+	for _, l := range snap.Output {
+		text.WriteString(l.Text)
+	}
+
+	for line := range strings.Lines(text.String()) {
+		b.WriteString("    " + strings.TrimRight(line, "\r\n") + "\n")
+	}
+}
+
+func writeBudgetHint(b *strings.Builder, truncated bool, indent int) {
+	if truncated {
+		fmt.Fprintf(b, "%s(cut to fit --budget: 'eyedbg vars --expand NAME' shows one variable, --budget 0 shows all)\n",
+			strings.Repeat("  ", indent))
+	}
 }
 
 // snapshotHeader is the first line: session, state and why.
@@ -132,16 +209,20 @@ func writeStack(w io.Writer, frames []api.Frame, asJSON bool, base string) error
 	var b strings.Builder
 
 	for _, f := range frames {
-		fmt.Fprintf(&b, "#%d %s", f.Index, f.Name)
-
-		if f.File != "" {
-			fmt.Fprintf(&b, " %s", location(f.File, f.Line, base))
-		}
-
-		b.WriteString("\n")
+		b.WriteString(frameLine(f, base) + "\n")
 	}
 
 	return writeText(w, b.String())
+}
+
+// frameLine is "#N function file:line".
+func frameLine(f api.Frame, base string) string {
+	s := fmt.Sprintf("#%d %s", f.Index, f.Name)
+	if f.File != "" {
+		s += " " + location(f.File, f.Line, base)
+	}
+
+	return s
 }
 
 func writeVars(w io.Writer, scopes []api.Scope, asJSON bool) error {
@@ -163,9 +244,12 @@ func writeVars(w io.Writer, scopes []api.Scope, asJSON bool) error {
 
 		if sc.Expensive {
 			b.WriteString("  (not fetched: the adapter marks this scope expensive)\n")
+		} else if len(sc.Vars) == 0 && sc.More == 0 {
+			b.WriteString("  (none)\n")
 		}
 
 		writeVarList(&b, sc.Vars, sc.More, 1)
+		writeBudgetHint(&b, sc.Truncated, 1)
 	}
 
 	return writeText(w, b.String())
@@ -181,10 +265,19 @@ func writeVarList(b *strings.Builder, vars []api.Var, more, indent int) {
 			b.WriteString(": " + v.Type)
 		}
 
-		b.WriteString(" = " + v.Value)
+		if v.Value != "" || v.Type != "" {
+			b.WriteString(" = " + v.Value)
+		}
 
 		if v.HasChildren && len(v.Children) == 0 {
 			b.WriteString(" {…}")
+		}
+
+		switch v.Change {
+		case "changed":
+			b.WriteString("  (was " + v.Previous + ")")
+		case "new":
+			b.WriteString("  (new)")
 		}
 
 		b.WriteString("\n")
@@ -257,6 +350,14 @@ func writeBreakpoints(w io.Writer, bps []api.Breakpoint, asJSON bool, base strin
 
 		if bp.Line != bp.RequestedLine {
 			fmt.Fprintf(&b, " (requested line %d)", bp.RequestedLine)
+		}
+
+		if bp.Condition != "" {
+			fmt.Fprintf(&b, " if %s", bp.Condition)
+		}
+
+		if bp.Temporary {
+			b.WriteString(" (run-until, temporary)")
 		}
 
 		if bp.Verified {

@@ -102,8 +102,8 @@ Design rules:
   `Example` with real invocations; flags document their unit and default. This is how an agent is
   expected to learn the CLI: `eyedbg <command> --help` or `eyedbg help <command>`, reachable at
   every level of the tree, is authoritative and kept in sync by a unit test that walks the whole
-  command tree (`internal/cli`). `eyedbg help --all`, printing the full tree's help in one read, and
-  a `--json` help variant, are planned (§13). Help text is a tested, reviewed artifact — treat a
+  command tree (`internal/cli`). `eyedbg help --all` prints the full tree's help in one read, and
+  `--json` gives any help as structured data. Help text is a tested, reviewed artifact — treat a
   change to it like a change to the output contract (§5).
 
 ## 5. Output contract
@@ -203,7 +203,7 @@ testdata/apps/       sample debuggees per language
 
 1. **Skeleton** (done): daemon auto-start, IPC + token, version handshake, `daemon start/status/stop/logs`.
 2. **DAP core** (done): go-dap client, netcoredbg install/doctor, `start` a console app, `bp add` (line), `continue`, `status`, `stack`, `vars`, `stop`.
-3. **Agent ergonomics:** stop snapshot, `--dump`, `run-until`, `wait`, `--changed`, budgets, JSON
+3. **Agent ergonomics** (done): stop snapshot, `--dump`, `run-until`, `wait`, `--changed`, budgets, JSON
    schema, errors, `eyedbg help --all` (the full command tree's help in one read) and a `--json`
    help variant.
 4. **Model for P2:** client identity, bp ownership merge, lease, event log + `events --since`.

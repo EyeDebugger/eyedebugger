@@ -30,6 +30,27 @@ func stoppedSnapshot() api.Snapshot {
 	}
 }
 
+// dumpSnapshot is a stop with every --dump part, output and a budget cut.
+func dumpSnapshot() api.Snapshot {
+	snap := stoppedSnapshot()
+	snap.Output = []api.OutputLine{{Seq: 7, Category: "stdout", Text: "i=1 total=1\ni=2 "}, {Seq: 8, Category: "stdout", Text: "total=3\n"}}
+	snap.OutputOmitted = 3
+	snap.Changes = &api.Changes{Vars: []api.Var{
+		{Name: "total", Type: "int", Value: "3", Change: "changed", Previous: "1"},
+		{Name: "line", Type: "string", Value: `"x"`, Change: "new"},
+	}}
+	snap.Locals = &api.Scope{Name: "Locals", More: 2, Truncated: true, Vars: []api.Var{
+		{Name: "i", Type: "int", Value: "2"},
+		{Name: "total", Type: "int", Value: "3"},
+	}}
+	snap.Stack = []api.Frame{
+		{Index: 0, Name: "Program.<Main>$()", File: "/work/app/Program.cs", Line: 4},
+		{Index: 1, Name: "[External Code]"},
+	}
+
+	return snap
+}
+
 func TestSessionRendering(t *testing.T) {
 	t.Parallel()
 
@@ -49,6 +70,7 @@ func TestSessionRendering(t *testing.T) {
 		{ID: 1, File: "/work/app/Program.cs", RequestedLine: 4, Line: 4, Verified: true},
 		{ID: 2, File: "/other/Lib.cs", RequestedLine: 10, Line: 12, Verified: true},
 		{ID: 3, File: "/work/app/Late.cs", RequestedLine: 7, Line: 7, Message: "pending until the module loads"},
+		{ID: 4, File: "/work/app/Program.cs", RequestedLine: 9, Line: 9, Verified: true, Condition: "i == 3", Temporary: true},
 	}
 
 	tests := []struct {
@@ -76,6 +98,28 @@ func TestSessionRendering(t *testing.T) {
 			return writeEval(b, api.EvalResult{Expression: "total * 2", Value: "12", Type: "int"}, false)
 		}},
 		{"breakpoints", "breakpoints.golden", func(b *bytes.Buffer) error { return writeBreakpoints(b, bps, false, renderBase) }},
+		{"stopped dump", "snapshot_dump.golden", func(b *bytes.Buffer) error { return writeSnapshot(b, dumpSnapshot(), false, renderBase) }},
+		{"stopped dump json", "snapshot_dump_json.golden", func(b *bytes.Buffer) error { return writeSnapshot(b, dumpSnapshot(), true, renderBase) }},
+		{"new frame", "snapshot_new_frame.golden", func(b *bytes.Buffer) error {
+			snap := stoppedSnapshot()
+			snap.Changes = &api.Changes{NewFrame: true, Vars: []api.Var{{Name: "i", Type: "int", Value: "1", Change: "new"}}}
+
+			return writeSnapshot(b, snap, false, renderBase)
+		}},
+		{"run-until missed", "snapshot_run_until_missed.golden", func(b *bytes.Buffer) error {
+			snap, reached := stoppedSnapshot(), false
+			snap.Reached, snap.Target = &reached, &api.BreakpointSpec{File: "/work/app/Program.cs", Line: 9}
+
+			return writeSnapshot(b, snap, false, renderBase)
+		}},
+		{"vars none changed", "vars_none.golden", func(b *bytes.Buffer) error {
+			return writeVars(b, []api.Scope{{Name: "Changed since the previous stop"}}, false)
+		}},
+		{"vars truncated", "vars_truncated.golden", func(b *bytes.Buffer) error {
+			return writeVars(b, []api.Scope{{Name: "Locals", More: 4, Truncated: true, Vars: []api.Var{
+				{Name: "order", Type: "Order", Value: "{Order}", HasChildren: true},
+			}}}, false)
+		}},
 		{"output", "output.golden", func(b *bytes.Buffer) error {
 			return writeOutput(b, []api.OutputLine{{Seq: 1, Category: "stdout", Text: "i=1\n"}, {Seq: 2, Category: "stderr", Text: "warn"}}, false)
 		}},

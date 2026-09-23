@@ -1,0 +1,7 @@
+session s-k3f9 (dotnet) stopped: breakpoint, thread 4242
+  at Program.<Main>$() Program.cs:4
+    3 | {
+  > 4 |     total += i;
+    5 |     Console.WriteLine(total);
+  locals (first stop in this function):
+    i: int = 1

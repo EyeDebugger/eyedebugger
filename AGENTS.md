@@ -3,8 +3,8 @@
 EyeDebugger (`eyedbg`) is an AI-native, CLI-first debugger; agents and humans share one live debug
 session through a per-user daemon. There is no MCP server by default: the CLI, with complete
 built-in help, is the agent interface. Run `eyedbg --help` / `eyedbg help <command>` for any
-command's own help — treat it as the source of truth over this file for exact flags and behavior.
-(`eyedbg help --all`, the full tree in one read, is planned — docs/DESIGN.md §13 milestone 3.)
+command's own help — treat it as the source of truth over this file for exact flags and behavior;
+`eyedbg help --all` prints the whole tree in one read (add `--json` for structured help).
 `docs/DESIGN.md` is the source of truth for design;
 decisions are recorded in `docs/adr/`.
 

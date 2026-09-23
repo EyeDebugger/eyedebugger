@@ -21,7 +21,8 @@ import (
 // EnvE2E enables tests that need the .NET SDK and netcoredbg installed.
 const envE2E = "EYEDBG_E2E"
 
-const program = `var total = 0;
+const program = `var items = new List<int> { 7, 9 };
+var total = 0;
 for (var i = 1; i <= 3; i++)
 {
     total += i;
@@ -57,7 +58,8 @@ func newApp(t *testing.T) string {
 }
 
 // TestDebugConsoleApp drives a real program through netcoredbg: breakpoints,
-// locals, eval, stepping, output and exit.
+// locals, changed locals, expand, eval, stepping, conditional run-until,
+// output and exit.
 func TestDebugConsoleApp(t *testing.T) {
 	if os.Getenv(envE2E) != "1" {
 		t.Skip("set " + envE2E + "=1 (needs the .NET SDK and 'eyedbg adapters install netcoredbg')")
@@ -72,41 +74,31 @@ func TestDebugConsoleApp(t *testing.T) {
 	sess, err := m.Start(t.Context(), api.StartParams{
 		Lang:        "dotnet",
 		LaunchSpec:  api.LaunchSpec{Project: dir},
-		Breakpoints: []api.BreakpointSpec{{File: src, Line: 4}},
+		Breakpoints: []api.BreakpointSpec{{File: src, Line: 5}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	snap := sess.Wait(t.Context(), 0, time.Minute)
-	expectStop(t, snap, "breakpoint", 4)
+	changed := api.DumpSpec{Dump: []string{api.DumpChanged}}
 
-	scopes, err := sess.Vars(t.Context(), 0, 1)
-	if err != nil {
-		t.Fatal(err)
+	snap := sess.Wait(t.Context(), 0, time.Minute, changed)
+	expectStop(t, snap, "breakpoint", 5)
+
+	if snap.Changes == nil || !snap.Changes.NewFrame || changeOf(snap.Changes.Vars, "i") == nil {
+		t.Errorf("first stop changes = %+v, want every local as new", snap.Changes)
 	}
 
-	if got := varValue(scopes, "i"); got != "1" {
-		t.Errorf("i = %q, want 1", got)
-	}
-
-	res, err := sess.Eval(t.Context(), "total + 41", 0)
-	if err != nil || res.Value != "41" {
-		t.Errorf("eval total + 41 = %+v, %v; want 41", res, err)
-	}
-
-	snap, err = sess.Resume(t.Context(), session.ExecNext, 0, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	expectStop(t, snap, "step", 5)
+	inspectFirstStop(t, sess)
+	stepOverAdd(t, sess)
 
 	if _, err := sess.RemoveBreakpoint(t.Context(), 0); err != nil {
 		t.Fatal(err)
 	}
 
-	snap, err = sess.Resume(t.Context(), session.ExecContinue, 0, time.Minute)
+	runUntilCondition(t, sess, src)
+
+	snap, err = sess.Resume(t.Context(), session.ExecContinue, 0, time.Minute, api.DumpSpec{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,14 +107,97 @@ func TestDebugConsoleApp(t *testing.T) {
 		t.Fatalf("after continue: %+v, want exited with code 0", snap.Session)
 	}
 
-	var out strings.Builder
-	for _, l := range sess.Output(0, 0) {
-		out.WriteString(l.Text)
+	if out := joinOutput(sess.Output(0, 0)); !strings.Contains(out, "done eyedbg 6") {
+		t.Errorf("output = %q, want it to contain %q", out, "done eyedbg 6")
+	}
+}
+
+// stepOverAdd steps over "total += i" (i = 1): only total changed, from 0.
+func stepOverAdd(t *testing.T, sess *session.Session) {
+	t.Helper()
+
+	snap, err := sess.Resume(t.Context(), session.ExecNext, 0, time.Minute, api.DumpSpec{Dump: []string{api.DumpChanged}})
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	if !strings.Contains(out.String(), "done eyedbg 6") {
-		t.Errorf("output = %q, want it to contain %q", out.String(), "done eyedbg 6")
+	expectStop(t, snap, "step", 6)
+
+	if c := snap.Changes; c == nil || c.NewFrame || len(c.Vars) != 1 || c.Vars[0].Name != "total" || c.Vars[0].Previous != "0" {
+		t.Errorf("changes after next = %+v, want only total, from 0", snap.Changes)
 	}
+}
+
+// inspectFirstStop checks vars, expand and eval at the first stop (i = 1).
+func inspectFirstStop(t *testing.T, sess *session.Session) {
+	t.Helper()
+
+	scopes, err := sess.Vars(t.Context(), 0, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := varValue(scopes, "i"); got != "1" {
+		t.Errorf("i = %q, want 1", got)
+	}
+
+	scopes, err = sess.Expand(t.Context(), 0, "items[1]", 1, 0)
+	if err != nil || len(scopes) != 1 || len(scopes[0].Vars) != 1 || scopes[0].Vars[0].Value != "9" {
+		t.Errorf("expand items[1] = %+v, %v; want 9", scopes, err)
+	}
+
+	res, err := sess.Eval(t.Context(), "total + 41", 0)
+	if err != nil || res.Value != "41" {
+		t.Errorf("eval total + 41 = %+v, %v; want 41", res, err)
+	}
+}
+
+// runUntilCondition runs to line 6 with i == 3: the output since the resume
+// is in the snapshot and the temporary breakpoint is gone afterwards.
+func runUntilCondition(t *testing.T, sess *session.Session, src string) {
+	t.Helper()
+
+	snap, err := sess.RunUntil(t.Context(), api.BreakpointSpec{File: src, Line: 6, Condition: "i == 3"}, 0, time.Minute, api.DumpSpec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectStop(t, snap, "breakpoint", 6)
+
+	if snap.Reached == nil || !*snap.Reached {
+		t.Errorf("run-until reached = %v, want true", snap.Reached)
+	}
+
+	if res, err := sess.Eval(t.Context(), "i", 0); err != nil || res.Value != "3" {
+		t.Errorf("i after run-until i == 3: %+v, %v; want 3", res, err)
+	}
+
+	if !strings.Contains(joinOutput(snap.Output), "i=2 total=3") {
+		t.Errorf("snapshot output = %q, want the lines printed since the resume", joinOutput(snap.Output))
+	}
+
+	if bps := sess.Breakpoints(); len(bps) != 0 {
+		t.Errorf("breakpoints after run-until = %+v, want the temporary one removed", bps)
+	}
+}
+
+func joinOutput(lines []api.OutputLine) string {
+	var b strings.Builder
+	for _, l := range lines {
+		b.WriteString(l.Text)
+	}
+
+	return b.String()
+}
+
+func changeOf(vars []api.Var, name string) *api.Var {
+	for i := range vars {
+		if vars[i].Name == name {
+			return &vars[i]
+		}
+	}
+
+	return nil
 }
 
 func expectStop(t *testing.T, snap api.Snapshot, reason string, line int) {
