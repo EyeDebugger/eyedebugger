@@ -1,16 +1,17 @@
 # Agent instructions
 
 EyeDebugger (`eyedbg`) is an AI-native, CLI-first debugger; agents and humans share one live debug
-session through a per-user daemon. `docs/DESIGN.md` is the source of truth; decisions are recorded
-in `docs/adr/`.
+session through a per-user daemon. There is no MCP server by default: the CLI is the agent
+interface. `docs/DESIGN.md` is the source of truth for design; decisions are recorded in
+`docs/adr/`.
 
 ## Repo map
 
-- `cmd/eyedbg/`, `cmd/eyedbgd/`, `cmd/eyedbg-mcp/` — wiring-only entry points for the three binaries.
+- `cmd/eyedbg/`, `cmd/eyedbgd/` — wiring-only entry points for the two binaries.
 - `internal/cli/` — command trees for all binaries; the only importer of cobra/pflag besides `cmd/`
   (enforced by depguard).
 - `internal/version/` — build metadata (ldflags / `debug.ReadBuildInfo`).
-- `internal/api/` — native JSON-RPC schema shared by CLI, MCP and the extension.
+- `internal/api/` — native JSON-RPC schema shared by the CLI and the extension.
 - `internal/daemon/` — daemon lifecycle, IPC, token auth.
 - `internal/session/` — session, lease, breakpoint ownership, event log, stop snapshot.
 - `internal/dap/` — DAP client: framing, seq mapping, reverse requests.

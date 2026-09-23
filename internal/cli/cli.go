@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package cli builds the command trees of the EyeDebugger binaries (eyedbg,
-// eyedbgd, eyedbg-mcp). It owns flag parsing and output rendering; the logic
-// behind each command lives in other internal packages.
+// eyedbgd). It owns flag parsing and output rendering; the logic behind each
+// command lives in other internal packages.
 //
 // Only this package and cmd/ may import the CLI framework.
 package cli
@@ -58,15 +58,6 @@ func NewEyedbgCommand(info version.Info) *cobra.Command {
 func NewDaemonCommand(info version.Info) *cobra.Command {
 	root, g := newRoot("eyedbgd", "EyeDebugger per-user daemon", info)
 	root.RunE = notImplemented("the daemon (docs/DESIGN.md §13, milestone 1)")
-	root.AddCommand(newVersionCommand(info, g))
-
-	return root
-}
-
-// NewMCPCommand returns the root command of the eyedbg-mcp server.
-func NewMCPCommand(info version.Info) *cobra.Command {
-	root, g := newRoot("eyedbg-mcp", "MCP server over the EyeDebugger daemon API", info)
-	root.RunE = notImplemented("the MCP server (docs/DESIGN.md §13, milestone 6)")
 	root.AddCommand(newVersionCommand(info, g))
 
 	return root

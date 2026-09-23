@@ -65,7 +65,6 @@ func TestErrorsExitNonZero(t *testing.T) {
 	}{
 		{name: "unknown command", root: NewEyedbgCommand(testInfo), args: []string{"no-such-command"}, wantStderr: "eyedbg: "},
 		{name: "daemon stub", root: NewDaemonCommand(testInfo), wantStderr: "eyedbgd: the daemon"},
-		{name: "mcp stub", root: NewMCPCommand(testInfo), wantStderr: "eyedbg-mcp: the MCP server"},
 	}
 
 	for _, tt := range tests {

@@ -36,9 +36,10 @@ pluggable policy (`free`, `handoff`, `human-priority`).
 ### Consequences
 
 * Good, because a stateless CLI stays simple: every invocation is just an IPC call.
-* Good, because the same session model supports the CLI, `eyedbg-mcp`, and the phase 2 VS Code
-  extension without redesign — client identity, breakpoint ownership, leases and the event log are
-  built in the MVP even though only the CLI uses them at first (docs/DESIGN.md §9).
+* Good, because the same session model supports the CLI, the phase 2 VS Code extension, and any
+  future MCP wrapper (docs/DESIGN.md §10) without redesign — client identity, breakpoint ownership,
+  leases and the event log are built in the MVP even though only the CLI uses them at first
+  (docs/DESIGN.md §9).
 * Bad, because IPC access control (socket permissions, token file, §6/§11) is required work in the
   MVP, not deferrable to phase 2.
 * Bad, because if the daemon dies, sessions die with it (docs/DESIGN.md §6); this is accepted for

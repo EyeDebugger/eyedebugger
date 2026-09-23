@@ -10,15 +10,16 @@
 
 Every existing agent debugger is either an MCP server or IDE-bound, and none lets an agent and a
 human both *drive* one session: mcp-debugger's IDE view is read-only, and delve's multiclient has
-no event fan-out. EyeDebugger's daemon owns the session, so a stateless CLI, an MCP server and
-(phase 2) a VS Code extension can all attach to the same live debug session.
+no event fan-out. EyeDebugger's daemon owns the session, so a stateless CLI — with complete
+built-in help, the agent interface — and (phase 2) a VS Code extension can both attach to the same
+live debug session.
 
 ## How it works
 
 ```
-eyedbg CLI (stateless) ─────┐
-eyedbg-mcp (thin wrapper) ──┼── local IPC (JSON-RPC 2.0) ──► eyedbgd (daemon, per user)
-VS Code extension (P2) ─────┘   + per-session DAP facade (P2)      │
+eyedbg CLI (stateless) ──┐
+                         ├── local IPC (JSON-RPC 2.0) ──► eyedbgd (daemon, per user)
+VS Code extension (P2) ──┘     + per-session DAP facade (P2)      │
                                                                    ├── Session ── DAP ──► adapter process
                                                                    │   (netcoredbg | sharpdbg | debugpy | dlv | lldb-dap | js-debug)
                                                                    └── Side helpers (JSON-RPC over stdio)
@@ -40,7 +41,7 @@ Full design: [docs/DESIGN.md](docs/DESIGN.md).
 3. Agent ergonomics: stop snapshot, `--dump`, `run-until`, `wait`, `--changed`, budgets, JSON schema, errors.
 4. Model for P2: client identity, breakpoint ownership merge, lease, event log + `events --since`.
 5. Breadth: conditional/log/function/exception breakpoints, eval, set, attach, `test`, anchors.
-6. Ship: SKILL.md, `eyedbg-mcp`, CI matrix (6 os/arch), e2e tests driving sample apps.
+6. Ship: SKILL.md, CI matrix (6 os/arch), e2e tests driving sample apps.
 7. Second language via manifest only (debugpy) to prove the plugin boundary.
 
 Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; more languages.
