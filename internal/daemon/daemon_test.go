@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -271,6 +272,24 @@ func TestIdleExit(t *testing.T) {
 
 	if err := ts.wait(t); err != nil {
 		t.Fatalf("Serve = %v, want nil after idle timeout", err)
+	}
+}
+
+func TestExitsWhenSocketRemoved(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("the removal it guards against is systemd's cleanup of $XDG_RUNTIME_DIR")
+	}
+
+	ts := startServer(t, time.Hour)
+
+	if err := os.Remove(ts.paths.Socket); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ts.wait(t); err != nil {
+		t.Fatalf("Serve = %v, want nil after its socket was removed", err)
 	}
 }
 
