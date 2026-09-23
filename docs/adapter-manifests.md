@@ -113,7 +113,9 @@ Windows), else the first of `commands` that runs. Only that last step moves on w
 fails. On Unix only directories you own are searched for a venv (the walk up stops at the first
 one you don't), and a venv found must pass the manifest permission check (its directory, its
 `bin` or `Scripts` directory and `pyvenv.cfg` yours and not writable by group or others), else the
-start fails: a venv someone else controls is never run. The package root is the installed copy when it
+start fails: a venv someone else controls is never run. Windows has no mode bits to check, so there
+only your profile directory (`%USERPROFILE%`) and what is inside it count as yours: a project outside
+it names its interpreter with `--opt python`. The package root is the installed copy when it
 exists and the interpreter meets `minVersion`, else the interpreter's own copy of `module`.
 
 `install.downloads`: keys `linux`, `darwin` or `windows` / `amd64` or `arm64` (e.g.
