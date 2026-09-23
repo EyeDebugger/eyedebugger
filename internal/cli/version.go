@@ -36,9 +36,10 @@ func newVersionCommand(binName string, info version.Info, g *globals) *cobra.Com
 		Long: fmt.Sprintf(`Print %[1]s's build information: version, commit, build date, Go
 toolchain version and platform.
 
-Never blocks, has no effect on any debug session, and always exits 0. Default output is text for
-LLM/human reading; --json prints the machine-readable form with a stable "schema" field
-(docs/DESIGN.md §5) that only changes on purpose.`, binName),
+Never blocks and has no effect on any debug session. Exits 0 on success, 1 on a usage error (e.g.
+extra arguments) or a write error. Default output is text for LLM/human reading; --json prints the
+machine-readable form with a stable "schema" field (docs/DESIGN.md §5) that only changes on
+purpose.`, binName),
 		Example: fmt.Sprintf("  %[1]s version\n  %[1]s version --json", binName),
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

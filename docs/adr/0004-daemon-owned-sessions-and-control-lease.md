@@ -63,8 +63,8 @@ pluggable policy (`free`, `handoff`, `human-priority`).
 
 ### Daemon as source of truth, with a control lease
 
-* Good, because CLI, MCP and the phase 2 VS Code extension are all thin views/controllers over one
-  model (docs/DESIGN.md §2).
+* Good, because the CLI, the phase 2 VS Code extension and any future MCP wrapper are all thin
+  views/controllers over one model (docs/DESIGN.md §2).
 * Good, because the lease policy is explicit and can evolve (`free` now; `handoff` /
   `human-priority` are open questions for phase 2, docs/DESIGN.md §14).
 * Bad, because it requires solving IPC hardening and daemon lifecycle in the MVP.

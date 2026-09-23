@@ -19,7 +19,7 @@ live debug session.
 ```
 eyedbg CLI (stateless) ──┐
                          ├── local IPC (JSON-RPC 2.0) ──► eyedbgd (daemon, per user)
-VS Code extension (P2) ──┘     + per-session DAP facade (P2)      │
+VS Code extension (P2) ──┘     + per-session DAP facade (P2)       │
                                                                    ├── Session ── DAP ──► adapter process
                                                                    │   (netcoredbg | sharpdbg | debugpy | dlv | lldb-dap | js-debug)
                                                                    └── Side helpers (JSON-RPC over stdio)
