@@ -69,6 +69,7 @@ const eyedbgExample = `  eyedbg version           # build info for this binary
 func NewEyedbgCommand(info version.Info) *cobra.Command {
 	root, g := newRoot("eyedbg", "AI-native, CLI-first debugger", eyedbgLong, eyedbgExample, info)
 	root.AddCommand(newVersionCommand("eyedbg", info, g))
+	finalizeCommandTree(root)
 
 	return root
 }
@@ -87,8 +88,54 @@ func NewDaemonCommand(info version.Info) *cobra.Command {
 	root, g := newRoot("eyedbgd", "EyeDebugger per-user daemon", eyedbgdLong, eyedbgdExample, info)
 	root.RunE = notImplemented("the daemon (docs/DESIGN.md §13, milestone 1)")
 	root.AddCommand(newVersionCommand("eyedbgd", info, g))
+	// eyedbgd is never invoked interactively by a shell (docs/DESIGN.md §6), so shell
+	// completion has no audience here; disabling it keeps eyedbgd --help short.
+	root.CompletionOptions.DisableDefaultCmd = true
+	finalizeCommandTree(root)
 
 	return root
+}
+
+// finalizeCommandTree adds cobra's built-in "help" and "completion" commands
+// up front instead of leaving them to be created lazily inside Execute, and
+// gives each of them its own Example. Without this, a New*Command tree walked
+// without ever calling Execute (as the tests below do) would miss commands
+// that every real 'eyedbg --help' shows (docs/DESIGN.md §4). Call it once, as
+// the last step of building a root command, after every other AddCommand.
+func finalizeCommandTree(root *cobra.Command) {
+	root.InitDefaultHelpCmd()
+	root.InitDefaultCompletionCmd()
+
+	for _, sub := range root.Commands() {
+		switch sub.Name() {
+		case "help":
+			sub.Example = fmt.Sprintf("  %[1]s help version   # same as: %[1]s version --help\n  %[1]s help           # same as: %[1]s --help", root.Name())
+		case "completion":
+			sub.Example = fmt.Sprintf("  %[1]s completion bash   # print the bash completion script (see the shell sub-commands' own help to install it)", root.Name())
+
+			for _, shell := range sub.Commands() {
+				shell.Example = completionExample(root.Name(), shell.Name())
+			}
+		}
+	}
+}
+
+// completionExample returns a one-line install/use example for one of
+// cobra's built-in "completion" shell sub-commands, or "" for a shell this
+// scaffold doesn't know about yet (which TestAllCommandsHaveHelp then flags).
+func completionExample(rootName, shellName string) string {
+	switch shellName {
+	case "bash":
+		return fmt.Sprintf("  %[1]s completion bash > /etc/bash_completion.d/%[1]s", rootName)
+	case "zsh":
+		return fmt.Sprintf(`  %[1]s completion zsh > "${fpath[1]}/_%[1]s"`, rootName)
+	case "fish":
+		return fmt.Sprintf("  %[1]s completion fish > ~/.config/fish/completions/%[1]s.fish", rootName)
+	case "powershell":
+		return fmt.Sprintf("  %[1]s completion powershell | Out-String | Invoke-Expression", rootName)
+	default:
+		return ""
+	}
 }
 
 func newRoot(name, short, long, example string, info version.Info) (*cobra.Command, *globals) {

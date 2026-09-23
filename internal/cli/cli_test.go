@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bytes"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,6 +157,89 @@ func TestHelpReachableForEveryCommand(t *testing.T) {
 			})
 		}
 	}
+}
+
+// TestCommandTreeMatchesHelpOutput guards TestAllCommandsHaveHelp and
+// TestHelpReachableForEveryCommand against going vacuous again the way they
+// did before finalizeCommandTree existed (docs/DESIGN.md §4): it re-derives,
+// from actual '--help' output, the set of sub-commands at every level, and
+// asserts it equals what commandPaths' tree-walk (the thing those two tests
+// rely on) found at that same level. A future cobra-added command that
+// finalizeCommandTree doesn't account for would show up in '--help' but not
+// in the walk, and fail here.
+func TestCommandTreeMatchesHelpOutput(t *testing.T) {
+	t.Parallel()
+
+	for name, newRoot := range rootFactories() {
+		for _, path := range commandPaths(newRoot()) {
+			t.Run(name+"/"+strings.Join(append([]string{"root"}, path...), " "), func(t *testing.T) {
+				t.Parallel()
+
+				assertCommandSetMatchesHelp(t, newRoot, path)
+			})
+		}
+	}
+}
+
+// assertCommandSetMatchesHelp compares the non-hidden sub-commands of the
+// command at path (found via cobra's own tree-walk) against the ones listed
+// in that same command's real '--help' output.
+func assertCommandSetMatchesHelp(t *testing.T, newRoot func() *cobra.Command, path []string) {
+	t.Helper()
+
+	target, _, err := newRoot().Find(path)
+	if err != nil {
+		t.Fatalf("Find(%v): %v", path, err)
+	}
+
+	walked := make(map[string]bool)
+	for _, sub := range target.Commands() {
+		if !sub.Hidden {
+			walked[sub.Name()] = true
+		}
+	}
+
+	stdout, stderr, code := execute(t, newRoot(), append(append([]string{}, path...), "--help"))
+	if code != 0 {
+		t.Fatalf("--help exit code = %d, stderr = %q", code, stderr)
+	}
+
+	fromHelp := availableCommandsIn(string(stdout))
+
+	if !maps.Equal(walked, fromHelp) {
+		t.Errorf("command set mismatch for %q\n  tree-walk: %v\n  --help:    %v", strings.Join(path, " "), walked, fromHelp)
+	}
+}
+
+// availableCommandsIn extracts the command names listed under a rendered
+// help page's "Available Commands:" section (empty if there is none).
+func availableCommandsIn(help string) map[string]bool {
+	names := make(map[string]bool)
+
+	lines := strings.Split(help, "\n")
+	inSection := false
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "Available Commands:") {
+			inSection = true
+
+			continue
+		}
+
+		if !inSection {
+			continue
+		}
+
+		if strings.TrimSpace(line) == "" {
+			break
+		}
+
+		if fields := strings.Fields(line); len(fields) > 0 {
+			names[fields[0]] = true
+		}
+	}
+
+	return names
 }
 
 // commandPaths returns the argument path (one element per level, matching
