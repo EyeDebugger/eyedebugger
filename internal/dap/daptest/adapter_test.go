@@ -33,13 +33,19 @@ type session struct {
 func newSession(t *testing.T) *session {
 	t.Helper()
 
+	return newSessionWith(t, daptest.Options{})
+}
+
+func newSessionWith(t *testing.T, opts daptest.Options) *session {
+	t.Helper()
+
 	toAdapterR, toAdapterW := io.Pipe()
 	toClientR, toClientW := io.Pipe()
 
 	s := &session{t: t, events: make(chan godap.EventMessage, 1000), served: make(chan error, 1)}
 
 	go func() {
-		err := daptest.Serve(toAdapterR, toClientW)
+		err := daptest.ServeWith(toAdapterR, toClientW, opts)
 		_ = toClientW.Close()
 		s.served <- err
 	}()
@@ -129,14 +135,26 @@ func (s *session) setBreakpoints(lines ...godap.SourceBreakpoint) error {
 func (s *session) launch(lines int, stopAtEntry, hang bool, bps ...godap.SourceBreakpoint) {
 	s.t.Helper()
 
+	s.launchWith(daptest.ProgramArgs{Program: prog, Lines: lines, StopAtEntry: stopAtEntry, Hang: hang}, nil, bps...)
+}
+
+// launchWith runs the start-up sequence for args, calling configure (if
+// set) before configurationDone.
+func (s *session) launchWith(pa daptest.ProgramArgs, configure func(), bps ...godap.SourceBreakpoint) {
+	s.t.Helper()
+
 	s.do(&godap.InitializeRequest{Request: godap.Request{Command: "initialize"}})
 
-	args, err := json.Marshal(daptest.Arguments(prog, lines, stopAtEntry, hang))
+	args, err := json.Marshal(pa.Map())
 	if err != nil {
 		s.t.Fatal(err)
 	}
 
 	s.do(&godap.LaunchRequest{Request: godap.Request{Command: "launch"}, Arguments: args})
+
+	if configure != nil {
+		configure()
+	}
 
 	if err := s.setBreakpoints(bps...); err != nil {
 		s.t.Fatal(err)

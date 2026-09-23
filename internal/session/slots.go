@@ -7,12 +7,23 @@ package session
 // breakpoints with a different condition.
 const sharedLineNote = "shares its line with another client's breakpoint that has a different condition: it stops there unconditionally"
 
-// slot is one line of a file as sent to the adapter: every breakpoint
-// requested at that line, merged into one DAP source breakpoint. Adapters
-// keep one breakpoint per line (netcoredbg does), so a file's request never
-// names a line twice.
+// slotKey is where a breakpoint is requested: a function, or a line (of the
+// file whose list it is in).
+type slotKey struct {
+	function string
+	line     int
+}
+
+// key returns b's slot key.
+func (b *breakpoint) key() slotKey { return slotKey{function: b.Function, line: b.RequestedLine} }
+
+// slot is one line of a file (or one function) as sent to the adapter:
+// every breakpoint requested there, merged into one DAP breakpoint.
+// Adapters keep one breakpoint per line or function (netcoredbg does), so a
+// request never names one twice.
 type slot struct {
-	line      int
+	slotKey
+
 	condition string
 	// note means the breakpoints' conditions conflict, so the slot stops
 	// unconditionally.
@@ -20,21 +31,21 @@ type slot struct {
 	bps  []*breakpoint
 }
 
-// slotsFor groups a file's breakpoints by requested line, in order of first
-// appearance. A slot's condition is empty if any of its breakpoints has
-// none, the shared condition if all are equal, and otherwise empty with
-// note set.
+// slotsFor groups a file's (or the function list's) breakpoints by slot
+// key, in order of first appearance. A slot's condition is empty if any of
+// its breakpoints has none, the shared condition if all are equal, and
+// otherwise empty with note set.
 func slotsFor(list []*breakpoint) []slot {
 	var slots []slot
 
-	index := make(map[int]int, len(list))
+	index := make(map[slotKey]int, len(list))
 
 	for _, b := range list {
-		i, ok := index[b.RequestedLine]
+		i, ok := index[b.key()]
 		if !ok {
 			i = len(slots)
-			index[b.RequestedLine] = i
-			slots = append(slots, slot{line: b.RequestedLine, condition: b.Condition})
+			index[b.key()] = i
+			slots = append(slots, slot{slotKey: b.key(), condition: b.Condition})
 		}
 
 		slots[i].bps = append(slots[i].bps, b)

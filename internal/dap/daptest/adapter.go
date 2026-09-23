@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"strconv"
 
 	godap "github.com/google/go-dap"
 )
@@ -19,15 +21,25 @@ import (
 const EnvFakeAdapter = "EYEDBG_TEST_FAKE_ADAPTER"
 
 // MaybeRun serves DAP on stdin and stdout until the client disconnects or
-// closes stdin, and returns true, if this process was started by [Command].
-// Otherwise it returns false at once. Call it first in TestMain and return
-// when it returns true.
+// closes stdin, and returns true, if this process was started by [Command]
+// or [CommandWith]. Otherwise it returns false at once. Call it first in
+// TestMain and return when it returns true.
 func MaybeRun() bool {
 	if os.Getenv(EnvFakeAdapter) != "1" {
 		return false
 	}
 
-	if err := Serve(os.Stdin, os.Stdout); err != nil {
+	var opts Options
+
+	if raw := os.Getenv(EnvFakeOptions); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &opts); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "fake adapter: options:", err)
+
+			return true
+		}
+	}
+
+	if err := ServeWith(os.Stdin, os.Stdout, opts); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "fake adapter:", err)
 	}
 
@@ -37,28 +49,18 @@ func MaybeRun() bool {
 // Command returns how to start the fake adapter: this test binary, with no
 // tests to run and [EnvFakeAdapter] set.
 func Command() (path string, args, env []string, err error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("locate the test binary: %w", err)
-	}
-
-	return exe, []string{"-test.run=^$"}, []string{EnvFakeAdapter + "=1"}, nil
+	return CommandWith(Options{})
 }
 
 // Arguments returns the launch arguments for a fake program: lines 1 to n
 // of the file program. stopAtEntry stops at line 1; hang keeps it running
-// after its last line instead of exiting.
+// after its last line instead of exiting. [ProgramArgs] has more.
 func Arguments(program string, n int, stopAtEntry, hang bool) map[string]any {
-	return map[string]any{"program": program, "lines": n, "stopAtEntry": stopAtEntry, "hang": hang}
+	return ProgramArgs{Program: program, Lines: n, StopAtEntry: stopAtEntry, Hang: hang}.Map()
 }
 
-// launchArgs is the body of the launch request [Arguments] builds.
-type launchArgs struct {
-	Program     string `json:"program"`
-	Lines       int    `json:"lines"`
-	StopAtEntry bool   `json:"stopAtEntry"`
-	Hang        bool   `json:"hang"`
-}
+// launchArgs is the body of a launch or attach request.
+type launchArgs = ProgramArgs
 
 // response and event are DAP messages with any body.
 type response struct {
@@ -75,22 +77,38 @@ type event struct {
 
 // adapter answers one client's requests, one at a time.
 type adapter struct {
+	opts        Options
 	w           io.Writer
 	seq         int
 	err         error // first write error; ends Serve
 	done        bool  // disconnected
 	prog        *program
 	stopAtEntry bool
+	attach      *launchArgs // the attach request's arguments
+	// gate is the connection to a fake test runner this adapter attached
+	// to; the runner waits until it closes.
+	gate net.Conn
 }
 
 // Serve speaks DAP on r and w until the client disconnects or r ends.
 func Serve(r io.Reader, w io.Writer) error {
-	a := &adapter{w: w}
-	a.prog = newProgram(a.emit)
+	return ServeWith(r, w, Options{})
+}
+
+// ServeWith is [Serve] with opts.
+func ServeWith(r io.Reader, w io.Writer, opts Options) error {
+	a := &adapter{opts: opts, w: w}
+	a.prog = newProgram(a.emit, opts.StepHitsBreakpoints)
 	br := bufio.NewReader(r)
 
+	defer func() {
+		if a.gate != nil {
+			_ = a.gate.Close()
+		}
+	}()
+
 	for !a.done && a.err == nil {
-		msg, err := godap.ReadProtocolMessage(br)
+		content, err := godap.ReadBaseMessage(br)
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
@@ -99,8 +117,13 @@ func Serve(r io.Reader, w io.Writer) error {
 			return fmt.Errorf("read request: %w", err)
 		}
 
+		msg, err := godap.DecodeProtocolMessage(content)
+		if err != nil {
+			return fmt.Errorf("decode request: %w", err)
+		}
+
 		if req, ok := msg.(godap.RequestMessage); ok {
-			a.handle(req)
+			a.handle(req, content)
 		}
 	}
 
@@ -142,28 +165,60 @@ func (a *adapter) fail(req godap.RequestMessage, msg string) {
 	})
 }
 
-func (a *adapter) handle(req godap.RequestMessage) {
+// respondOr responds with body, or fails with err.
+func (a *adapter) respondOr(req godap.RequestMessage, body any, err error) {
+	if err != nil {
+		a.fail(req, err.Error())
+
+		return
+	}
+
+	a.respond(req, body)
+}
+
+func (a *adapter) handle(req godap.RequestMessage, raw []byte) {
 	switch r := req.(type) {
 	case *godap.InitializeRequest:
-		a.respond(req, godap.Capabilities{SupportsConfigurationDoneRequest: true, SupportsConditionalBreakpoints: true})
+		a.respond(req, a.opts.caps())
 	case *godap.LaunchRequest:
-		a.launch(r)
-	case *godap.SetBreakpointsRequest:
-		a.setBreakpoints(r)
+		a.launch(req, r.Arguments, false)
+	case *godap.AttachRequest:
+		a.launch(req, r.Arguments, true)
 	case *godap.ConfigurationDoneRequest:
-		a.respond(req, nil)
-		a.prog.start(a.stopAtEntry)
+		a.configurationDone(req)
 	case *godap.ContinueRequest, *godap.NextRequest, *godap.StepInRequest, *godap.StepOutRequest:
 		a.resume(req)
 	case *godap.PauseRequest:
 		a.respond(req, nil)
 		a.prog.pause()
-	case *godap.EvaluateRequest:
-		a.evaluate(r)
 	case *godap.DisconnectRequest:
-		a.respond(req, nil)
-		a.emit("terminated", nil)
-		a.done = true
+		a.disconnect(req, raw)
+	default:
+		a.configure(req)
+	}
+}
+
+// configure answers the requests that set breakpoints or change variables.
+func (a *adapter) configure(req godap.RequestMessage) {
+	switch r := req.(type) {
+	case *godap.SetBreakpointsRequest:
+		got, err := a.prog.setBreakpoints(r.Arguments.Source.Path, r.Arguments.Breakpoints)
+		a.respondOr(req, godap.SetBreakpointsResponseBody{Breakpoints: got}, err)
+	case *godap.SetFunctionBreakpointsRequest:
+		got, err := a.prog.setFunctionBreakpoints(r.Arguments.Breakpoints)
+		a.respondOr(req, godap.SetFunctionBreakpointsResponseBody{Breakpoints: got}, err)
+	case *godap.SetExceptionBreakpointsRequest:
+		a.respondOr(req, nil, a.prog.setFilters(r.Arguments.Filters))
+	case *godap.SetExpressionRequest:
+		err := a.prog.set(r.Arguments.Expression, r.Arguments.Value)
+		a.respondOr(req, godap.SetExpressionResponseBody{Value: a.prog.x, Type: typeInt}, err)
+	case *godap.SetVariableRequest:
+		err := a.prog.set(r.Arguments.Name, r.Arguments.Value)
+		if r.Arguments.VariablesReference != localsRef {
+			err = fmt.Errorf("no variables with reference %d", r.Arguments.VariablesReference)
+		}
+
+		a.respondOr(req, godap.SetVariableResponseBody{Value: a.prog.x, Type: typeInt}, err)
 	default:
 		a.inspect(req)
 	}
@@ -171,9 +226,7 @@ func (a *adapter) handle(req godap.RequestMessage) {
 
 // inspect answers the requests that only read state.
 func (a *adapter) inspect(req godap.RequestMessage) {
-	switch req.(type) {
-	case *godap.SetExceptionBreakpointsRequest:
-		a.respond(req, nil)
+	switch r := req.(type) {
 	case *godap.ThreadsRequest:
 		a.respond(req, godap.ThreadsResponseBody{Threads: []godap.Thread{{Id: threadID, Name: "main"}}})
 	case *godap.StackTraceRequest:
@@ -181,37 +234,90 @@ func (a *adapter) inspect(req godap.RequestMessage) {
 	case *godap.ScopesRequest:
 		a.respond(req, godap.ScopesResponseBody{Scopes: []godap.Scope{{Name: "Locals", VariablesReference: localsRef}}})
 	case *godap.VariablesRequest:
-		a.respond(req, godap.VariablesResponseBody{Variables: a.prog.locals()})
+		vars, ok := a.prog.variables(r.Arguments.VariablesReference)
+		if !ok {
+			a.fail(req, fmt.Sprintf("no variables with reference %d", r.Arguments.VariablesReference))
+
+			return
+		}
+
+		a.respond(req, godap.VariablesResponseBody{Variables: vars})
+	case *godap.EvaluateRequest:
+		a.evaluate(r)
+	case *godap.ExceptionInfoRequest:
+		info, ok := a.prog.exceptionInfo()
+		if !ok {
+			a.fail(req, "no exception")
+
+			return
+		}
+
+		a.respond(req, info)
 	default:
 		a.fail(req, req.GetRequest().Command+" is not supported by the fake adapter")
 	}
 }
 
-func (a *adapter) launch(req *godap.LaunchRequest) {
+// launch loads the program of a launch or attach request.
+func (a *adapter) launch(req godap.RequestMessage, raw []byte, attach bool) {
 	var args launchArgs
-	if err := json.Unmarshal(req.Arguments, &args); err != nil || args.Program == "" || args.Lines < 1 {
-		a.fail(req, "invalid launch arguments: want program and lines")
+	if err := json.Unmarshal(raw, &args); err != nil || args.Program == "" || args.Lines < 1 {
+		a.fail(req, "invalid "+req.GetRequest().Command+" arguments: want program and lines")
 
 		return
 	}
 
-	a.prog.load(args.Program, args.Lines, args.Hang)
-	a.stopAtEntry = args.StopAtEntry
+	a.prog.load(args, attach)
+	a.stopAtEntry = args.StopAtEntry && !attach
+
+	if attach {
+		a.attach = &args
+	}
+
 	a.respond(req, nil)
 	// Only now: configuration must not start before the launch arrived
 	// (the session sends launch without waiting for its answer).
 	a.emit("initialized", nil)
 }
 
-func (a *adapter) setBreakpoints(req *godap.SetBreakpointsRequest) {
-	got, err := a.prog.setBreakpoints(req.Arguments.Source.Path, req.Arguments.Breakpoints)
-	if err != nil {
-		a.fail(req, err.Error())
+// configurationDone starts the program. A failing attach is reported
+// here, as netcoredbg does.
+func (a *adapter) configurationDone(req godap.RequestMessage) {
+	if a.attach != nil && a.attach.FailAttach {
+		a.fail(req, "Failed command 'configurationDone' : 0x80070057")
 
 		return
 	}
 
-	a.respond(req, godap.SetBreakpointsResponseBody{Breakpoints: got})
+	if a.attach != nil && a.attach.ProcessID > 0 {
+		a.gate = dialGate(a.attach.ProcessID)
+	}
+
+	a.respond(req, nil)
+	a.prog.start(a.stopAtEntry)
+}
+
+// disconnect ends the session. An attached one first says how it was asked
+// to end (terminateDebuggee true, false or unset) in an output event.
+func (a *adapter) disconnect(req godap.RequestMessage, raw []byte) {
+	var msg struct {
+		Arguments struct {
+			TerminateDebuggee *bool `json:"terminateDebuggee"`
+		} `json:"arguments"`
+	}
+
+	terminate := "unset"
+	if err := json.Unmarshal(raw, &msg); err == nil && msg.Arguments.TerminateDebuggee != nil {
+		terminate = strconv.FormatBool(*msg.Arguments.TerminateDebuggee)
+	}
+
+	if a.attach != nil {
+		a.emit("output", godap.OutputEventBody{Category: "console", Output: "fake: disconnect terminateDebuggee=" + terminate + "\n"})
+	}
+
+	a.respond(req, nil)
+	a.emit("terminated", nil)
+	a.done = true
 }
 
 // resume answers continue and the steps: continued first, then the
@@ -230,13 +336,21 @@ func (a *adapter) resume(req godap.RequestMessage) {
 	a.prog.step()
 }
 
+// evaluate answers the program's expressions; "$context" is the request's
+// context.
 func (a *adapter) evaluate(req *godap.EvaluateRequest) {
-	value, ok := a.prog.evaluate(req.Arguments.Expression)
+	if req.Arguments.Expression == "$context" {
+		a.respond(req, godap.EvaluateResponseBody{Result: req.Arguments.Context, Type: "string"})
+
+		return
+	}
+
+	value, ref, ok := a.prog.evaluate(req.Arguments.Expression)
 	if !ok {
 		a.fail(req, "cannot evaluate "+req.Arguments.Expression)
 
 		return
 	}
 
-	a.respond(req, godap.EvaluateResponseBody{Result: value, Type: "string"})
+	a.respond(req, godap.EvaluateResponseBody{Result: value, Type: "string", VariablesReference: ref})
 }

@@ -83,3 +83,43 @@ func TestSlotsFor(t *testing.T) {
 		})
 	}
 }
+
+// TestSlotsForFunctions: function breakpoints group per name, apart from
+// line breakpoints.
+func TestSlotsForFunctions(t *testing.T) {
+	t.Parallel()
+
+	list := []*breakpoint{
+		{Breakpoint: api.Breakpoint{ID: 1, Function: "Price", Owner: "agent"}},
+		{Breakpoint: api.Breakpoint{ID: 2, RequestedLine: 5, Owner: "agent"}},
+		{Breakpoint: api.Breakpoint{ID: 3, Function: "Price", Owner: "human:x", Condition: "i > 1"}},
+		{Breakpoint: api.Breakpoint{ID: 4, Function: "Total", Owner: "agent"}},
+	}
+
+	type want struct {
+		key  slotKey
+		cond string
+		ids  []int
+	}
+
+	var got []want
+
+	for _, s := range slotsFor(list) {
+		w := want{key: s.slotKey, cond: s.condition}
+		for _, b := range s.bps {
+			w.ids = append(w.ids, b.ID)
+		}
+
+		got = append(got, w)
+	}
+
+	expected := []want{
+		{key: slotKey{function: "Price"}, ids: []int{1, 3}},
+		{key: slotKey{line: 5}, ids: []int{2}},
+		{key: slotKey{function: "Total"}, ids: []int{4}},
+	}
+
+	if !reflect.DeepEqual(got, expected) {
+		t.Errorf("slotsFor = %+v, want %+v", got, expected)
+	}
+}

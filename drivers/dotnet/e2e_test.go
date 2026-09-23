@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,40 +23,12 @@ const envE2E = "EYEDBG_E2E"
 // agent is the default client.
 var agent = api.Client{ID: api.DefaultClientID, Kind: api.KindAgent}
 
-const program = `var items = new List<int> { 7, 9 };
-var total = 0;
-for (var i = 1; i <= 3; i++)
-{
-    total += i;
-    Console.WriteLine($"i={i} total={total}");
-}
-var name = "eyedbg";
-Console.WriteLine($"done {name} {total}");
-`
-
-// newApp creates a console project with program as Program.cs.
+// newApp copies the console sample app (its Program.cs is the loop these
+// tests debug) to a temporary directory.
 func newApp(t *testing.T) string {
 	t.Helper()
 
-	host, err := dotnet.FindHost()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dir := t.TempDir()
-
-	cmd := exec.CommandContext(t.Context(), host, "new", "console", "-o", dir, "--name", "e2e")
-	cmd.Env = append(os.Environ(), "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_NOLOGO=1")
-
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("dotnet new: %v\n%s", err, out)
-	}
-
-	if err := os.WriteFile(filepath.Join(dir, "Program.cs"), []byte(program), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	return dir
+	return copyApp(t, "console")
 }
 
 // TestDebugConsoleApp drives a real program through netcoredbg: breakpoints,
@@ -234,7 +205,7 @@ func resumeAs(t *testing.T, sess *session.Session, c api.Client) api.Snapshot {
 func expectI(t *testing.T, sess *session.Session, want string) {
 	t.Helper()
 
-	if res, err := sess.Eval(t.Context(), "i", 0); err != nil || res.Value != want {
+	if res, err := sess.Eval(t.Context(), agent, api.EvalParams{Expression: "i"}); err != nil || res.Value != want {
 		t.Errorf("i = %+v, %v; want %s", res, err, want)
 	}
 }
@@ -311,7 +282,7 @@ func inspectFirstStop(t *testing.T, sess *session.Session) {
 		t.Errorf("expand items[1] = %+v, %v; want 9", scopes, err)
 	}
 
-	res, err := sess.Eval(t.Context(), "total + 41", 0)
+	res, err := sess.Eval(t.Context(), agent, api.EvalParams{Expression: "total + 41"})
 	if err != nil || res.Value != "41" {
 		t.Errorf("eval total + 41 = %+v, %v; want 41", res, err)
 	}
@@ -333,7 +304,7 @@ func runUntilCondition(t *testing.T, sess *session.Session, src string) {
 		t.Errorf("run-until reached = %v, want true", snap.Reached)
 	}
 
-	if res, err := sess.Eval(t.Context(), "i", 0); err != nil || res.Value != "3" {
+	if res, err := sess.Eval(t.Context(), agent, api.EvalParams{Expression: "i"}); err != nil || res.Value != "3" {
 		t.Errorf("i after run-until i == 3: %+v, %v; want 3", res, err)
 	}
 

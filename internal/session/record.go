@@ -106,7 +106,7 @@ func recordable(e api.Event) (api.Event, bool) {
 			e.Stop = &api.StopInfo{Reason: e.Stop.Reason, ThreadID: e.Stop.ThreadID}
 		}
 	case api.EventStarted, api.EventClient, api.EventLease, api.EventExec, api.EventContinued,
-		api.EventBreakpoint, api.EventThread, api.EventExited, api.EventEnded:
+		api.EventBreakpoint, api.EventThread, api.EventExited, api.EventEnded, api.EventExceptions:
 	default:
 		return api.Event{}, false
 	}

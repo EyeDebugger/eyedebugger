@@ -7,8 +7,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -29,33 +31,111 @@ var (
 	humanC = api.Client{ID: "human:t", Kind: api.KindHuman, Name: "t"}
 )
 
-// fakeDriver runs programs on the daptest fake adapter. Program arguments:
-// "hang" keeps it running after its last line, "lines=N" sets its length
-// (default 10).
-type fakeDriver struct{}
+// fakeDriver runs programs on the daptest fake adapter, started with opts.
+// Program arguments: "hang" keeps it running after its last line,
+// "lines=N" sets its length (default 10), "laps=N" runs it N times,
+// "throws=L,M" makes lines throw.
+type fakeDriver struct {
+	opts        daptest.Options
+	excFilters  map[api.ExceptionMode][]string
+	sideEffects func(string) (string, bool)
+	// attach is the program an attach attaches to (its ProcessID is the
+	// pid asked for).
+	attach daptest.ProgramArgs
+	// runner is the fake test runner's mode (see daptest.RunnerCommand),
+	// exiting with runnerCode.
+	runner     string
+	runnerCode int
+}
 
 func (fakeDriver) Name() string { return "fake" }
 
-func (fakeDriver) Prepare(_ context.Context, spec LaunchSpec) (Launch, error) {
-	path, args, env, err := daptest.Command()
+func (d fakeDriver) Prepare(_ context.Context, spec LaunchSpec) (Launch, error) {
+	path, args, env, err := daptest.CommandWith(d.opts)
 	if err != nil {
 		return Launch{}, err
 	}
 
-	lines := 10
+	pa := daptest.ProgramArgs{Program: spec.Program, Lines: 10, StopAtEntry: spec.StopOnEntry, Hang: slices.Contains(spec.Args, "hang")}
 
-	for _, a := range spec.Args {
-		if n, ok := strings.CutPrefix(a, "lines="); ok {
-			if lines, err = strconv.Atoi(n); err != nil {
-				return Launch{}, err
-			}
-		}
+	if err := parseProgramArgs(&pa, spec.Args); err != nil {
+		return Launch{}, err
 	}
 
 	return Launch{
 		Adapter: path, AdapterArgs: args, AdapterEnv: env, AdapterID: "fake", Program: spec.Program,
-		Arguments: daptest.Arguments(spec.Program, lines, spec.StopOnEntry, slices.Contains(spec.Args, "hang")),
+		Arguments: pa.Map(), ExceptionFilters: d.excFilters, SideEffects: d.sideEffects,
 	}, nil
+}
+
+func (d fakeDriver) PrepareAttach(_ context.Context, spec api.AttachSpec) (Launch, error) {
+	path, args, env, err := daptest.CommandWith(d.opts)
+	if err != nil {
+		return Launch{}, err
+	}
+
+	pa := d.attach
+	pa.ProcessID = spec.PID
+
+	return Launch{
+		Adapter: path, AdapterArgs: args, AdapterEnv: env, AdapterID: "fake", Request: RequestAttach, PID: spec.PID,
+		Arguments: pa.Map(), AttachHint: "fake attach hint",
+	}, nil
+}
+
+func (d fakeDriver) TestCommand(_ context.Context, spec TestSpec) (TestCommand, error) {
+	path, args, env, err := daptest.RunnerCommand(d.runner, d.runnerCode)
+	if err != nil {
+		return TestCommand{}, err
+	}
+
+	return TestCommand{
+		Path: path, Args: args, Env: env, Program: "fake test " + spec.Filter,
+		HostPID: func(line string) (int, bool) {
+			rest, ok := strings.CutPrefix(line, "Process Id: ")
+			if !ok {
+				return 0, false
+			}
+
+			n, err := strconv.Atoi(strings.Split(rest, ",")[0])
+
+			return n, err == nil
+		},
+		Failure: func(code int, output string) error {
+			return api.NewError(api.CodeBuildFailed, fmt.Sprintf("fake test exited with code %d:\n%s", code, output), "")
+		},
+	}, nil
+}
+
+// parseProgramArgs applies lines=, laps= and throws= arguments.
+func parseProgramArgs(pa *daptest.ProgramArgs, args []string) error {
+	for _, a := range args {
+		name, value, _ := strings.Cut(a, "=")
+
+		var err error
+
+		switch name {
+		case "lines":
+			pa.Lines, err = strconv.Atoi(value)
+		case "laps":
+			pa.Laps, err = strconv.Atoi(value)
+		case "throws":
+			for l := range strings.SplitSeq(value, ",") {
+				n, err := strconv.Atoi(l)
+				if err != nil {
+					return err
+				}
+
+				pa.Throws = append(pa.Throws, n)
+			}
+		}
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // lockedFile is an in-memory recording safe to read while it is written.
@@ -163,8 +243,15 @@ func (st *stubStore) recording(id string) *lockedFile {
 func newTestManager(t *testing.T, store Store) *Manager {
 	t.Helper()
 
+	return newTestManagerWith(t, store, fakeDriver{})
+}
+
+// newTestManagerWith is newTestManager with drv as the fake driver.
+func newTestManagerWith(t *testing.T, store Store, drv Driver) *Manager {
+	t.Helper()
+
 	ctx, cancel := context.WithCancel(context.Background())
-	m := NewManager(ctx, Config{Drivers: []Driver{fakeDriver{}}, Logger: slog.New(slog.DiscardHandler), Stderr: io.Discard, Store: store})
+	m := NewManager(ctx, Config{Drivers: []Driver{drv}, Logger: slog.New(slog.DiscardHandler), Stderr: io.Discard, Store: store})
 
 	t.Cleanup(func() {
 		m.StopAll(context.Background())
@@ -237,12 +324,44 @@ func resume(t *testing.T, s *Session, c api.Client, kind string) api.Snapshot {
 func adapterBPs(t *testing.T, s *Session) string {
 	t.Helper()
 
-	res, err := s.Eval(t.Context(), "$bps", 0)
+	return evalValue(t, s, "$bps")
+}
+
+// evalValue evaluates expr in frame 0 of the stopped program.
+func evalValue(t *testing.T, s *Session, expr string) string {
+	t.Helper()
+
+	res, err := s.Eval(t.Context(), agentC, api.EvalParams{Expression: expr})
 	if err != nil {
-		t.Fatalf("eval $bps: %v", err)
+		t.Fatalf("eval %s: %v", expr, err)
 	}
 
 	return res.Value
+}
+
+// writeProgram writes a fake program file of n lines ("line N" each, or
+// text[N-1] where given and not empty) and returns its path.
+func writeProgram(t *testing.T, n int, text ...string) string {
+	t.Helper()
+
+	var b strings.Builder
+
+	for i := range n {
+		if i < len(text) && text[i] != "" {
+			b.WriteString(text[i])
+		} else {
+			b.WriteString("line " + strconv.Itoa(i+1))
+		}
+
+		b.WriteByte('\n')
+	}
+
+	path := filepath.Join(t.TempDir(), "prog.txt")
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return path
 }
 
 func addBP(t *testing.T, s *Session, c api.Client, file string, line int, cond string) api.Breakpoint {

@@ -1,0 +1,13 @@
+session s-k3f9 (dotnet) stopped: exception (Exception thrown: 'System.InvalidOperationException' in app.dll), thread 4242
+  at Program.<Main>$() Program.cs:4
+    3 | {
+  > 4 |     total += i;
+    5 |     Console.WriteLine(total);
+  exception: System.InvalidOperationException: no orders
+    at Orders.Total() in /work/app/Orders.cs:line 18
+    at Orders.Sum() in /work/app/Orders.cs:line 12
+    at Orders.Run() in /work/app/Orders.cs:line 9
+    at Program.Step(Int32 i) in /work/app/Program.cs:line 30
+    at Program.Loop() in /work/app/Program.cs:line 22
+    (… 2 more lines: eyedbg eval '$exception.StackTrace')
+    inner: System.ArgumentException: bad id

@@ -30,6 +30,22 @@ const (
 	CodeLeaseHeld Code = "LEASE_HELD"
 	// CodeNotOwner: the breakpoint belongs to another client.
 	CodeNotOwner Code = "NOT_OWNER"
+	// CodeUnsupported: the session's debug adapter can't do what was asked.
+	CodeUnsupported Code = "UNSUPPORTED_BY_ADAPTER"
+	// CodeSideEffects: the expression would change the program; evaluating
+	// it needs allowSideEffects.
+	CodeSideEffects Code = "SIDE_EFFECTS"
+	// CodeAttachFailed: attaching to a running process failed.
+	CodeAttachFailed Code = "ATTACH_FAILED"
+	// CodeNoTestHost: a test run ended, or can't run, without a test host
+	// to debug.
+	CodeNoTestHost Code = "NO_TEST_HOST"
+	// CodeAnchorNotFound: no line of the file holds a breakpoint's anchor
+	// text.
+	CodeAnchorNotFound Code = "ANCHOR_NOT_FOUND"
+	// CodeAnchorAmbiguous: several lines of the file hold a breakpoint's
+	// anchor text.
+	CodeAnchorAmbiguous Code = "ANCHOR_AMBIGUOUS"
 )
 
 // Error is a user-facing error: a stable code, a message and an optional hint

@@ -48,9 +48,10 @@ VS Code extension (P2) ──┘     + per-session DAP facade (P2)       │
 |---|---|
 | **Session** | One debuggee + one adapter connection. ID: short, human-typable (`s-7f3k`). May have child sessions (js-debug `startDebugging`). |
 | **Client** | A controller: `{id, kind: agent\|human, name}`, id `KIND[:NAME]` (`agent`, `human:ijat`). Every request names it: CLI calls via `--as` / `EYEDBG_CLIENT`, default `agent` (never a human; not derived from the parent pid, since agent harnesses run each command in a fresh shell). Two agents sharing a session set distinct names. Persistent across calls, not per connection; the session lists each client with when it was first and last seen (ADR 0009). |
-| **Control lease** | Exactly one client holds *execution control* (continue/step/pause/run-until, and terminate while the program is live; setVariable and side-effecting eval when they exist). Others can read, set their own breakpoints, and take or be granted the lease. The starter holds it first. Policies (set at start or by the holder): `free` (anyone takes it, executing takes it automatically; the default), `handoff` (only the holder releases or grants it), `human-priority` (handoff, except that a human may take it from an agent; agents never take it from one another). `--force` overrides the policy; a refusal is `LEASE_HELD`. Lease changes are events. |
+| **Control lease** | Exactly one client holds *execution control* (continue/step/pause/run-until, terminate or detach while the program is live, `set`, and `eval --allow-side-effects`). Others can read, set their own breakpoints, and take or be granted the lease. The starter holds it first. Policies (set at start or by the holder): `free` (anyone takes it, executing takes it automatically; the default), `handoff` (only the holder releases or grants it), `human-priority` (handoff, except that a human may take it from an agent; agents never take it from one another). `--force` overrides the policy; a refusal is `LEASE_HELD`. Lease changes are events. |
 | **Breakpoint ownership** | Every breakpoint records `owner` and `createdAt`. The daemon merges all owners' breakpoints per file into the single `setBreakpoints` DAP call — one source breakpoint per line (adapters keep one per line): any unconditional breakpoint makes the line unconditional, equal conditions are kept, different ones make it unconditional with a note — and maps the adapter's answer back to every breakpoint of the line. Clients can filter by owner (`bp ls --mine`); removing only touches your own unless `--force` (`NOT_OWNER` otherwise). |
-| **Event log** | Per-session in-memory log with a monotonic `seq` from 1, bounded (10000 events, 8 MiB; the oldest are dropped and readers are told): DAP events (stopped, continued, output, breakpoint, thread, exited) plus daemon events (started, client joined, lease, exec by X, bp added/removed by X, ended). `output` and a snapshot's output are views of it (their `seq` is the event's). `eyedbg events --since N` / `--wait` (long-poll) makes stateless CLIs and late joiners consistent. Its control events are also written to disk as the session recording (§11). |
+| **Exception stops** | Per client, like breakpoints: each client picks `none`, `uncaught` or `all` (`bp exceptions`), the adapter gets the union of their filters, and no lease is needed; `--force` sets one mode for every client. Changes are `exceptions` events (ADR 0010). |
+| **Event log** | Per-session in-memory log with a monotonic `seq` from 1, bounded (10000 events, 8 MiB; the oldest are dropped and readers are told): DAP events (stopped, continued, output, breakpoint, thread, exited) plus daemon events (started, client joined, lease, exec by X — including `set` and side-effecting `eval` —, bp added/removed by X, exceptions set by X, ended). `output` and a snapshot's output are views of it (their `seq` is the event's). `eyedbg events --since N` / `--wait` (long-poll) makes stateless CLIs and late joiners consistent. Its control events are also written to disk as the session recording (§11). |
 | **Stop snapshot** | On every `stopped`, the daemon eagerly fetches threads, top K frames of the stopped thread, and scopes/vars of frame 0 to depth D. Cached until the next resume. Most agent reads hit this cache — one call, no round-trips. Invalidated on resume; variable references are never exposed across resumes. |
 
 ### Concurrency rules
@@ -64,15 +65,16 @@ Global flags: `--session/-s <id>` (or `EYEDBG_SESSION`), `--json`, `--as <client
 
 ```
 eyedbg start  <lang> [--program P | --project P.csproj] [--args ...] [--cwd] [--env K=V] [--stop-on-entry] [--no-build]
-              [--lease-policy free|handoff|human-priority] [--no-record]
-eyedbg attach <lang> --pid N
-eyedbg test   <lang> <filter>            # run tests under debugger (dotnet test + VSTEST_HOST_DEBUG attach)
-eyedbg sessions | eyedbg status            # status = state + stop snapshot summary
-eyedbg stop | eyedbg detach
+              [--bp LOC]... [--exceptions all|uncaught|none] [--lease-policy free|handoff|human-priority] [--no-record]
+eyedbg attach <lang> --pid N [--bp LOC]... [--exceptions MODE] [--lease-policy P] [--no-record]
+eyedbg test   <lang> [FILTER] [--project P] [--framework TFM] [--no-build] [--env K=V] [--bp LOC]... [--exceptions MODE]
+                                          # dotnet test (VSTest) + VSTEST_HOST_DEBUG, attached to the test host
+eyedbg sessions | eyedbg status            # status = state + stop snapshot summary (+ the exception at an exception stop)
+eyedbg stop | eyedbg detach                # stop detaches from an attached program; detach only for attached sessions
 
-eyedbg bp add <file:line | func:Name | anchor>  [--if EXPR] [--hit N] [--log "msg {expr}"]
+eyedbg bp add <file:line | file@"text" | func:Name>  [--if EXPR] [--hit N|>=N|%N] [--log "msg {expr}"]
 eyedbg bp ls [--mine] | eyedbg bp rm <id|all> [--force]
-eyedbg bp exceptions [all|uncaught|none]
+eyedbg bp exceptions [all|uncaught|none] [--force]
 
 eyedbg run-until <location|--if EXPR> [--dump locals,stack,args] [--timeout 30s]
 eyedbg continue | next | step-in | step-out | pause     # all accept --dump
@@ -81,8 +83,8 @@ eyedbg wait [--until stopped|exited|output:/regex/] [--timeout 30s]
 eyedbg stack [--thread T] [--frames N]
 eyedbg threads
 eyedbg vars [--frame F] [--depth D] [--expand path.to.field] [--changed]
-eyedbg eval <expr> [--frame F] [--allow-side-effects]
-eyedbg set <var> <value>
+eyedbg eval <expr> [--frame F] [--depth D] [--allow-side-effects]
+eyedbg set <var> <value> [--frame F]
 eyedbg source [--frame F] [--context 5]
 eyedbg output [--since N] [--tail 50]
 eyedbg events [--since N] [--limit N] [--kind k,...] [--wait] [--timeout 30s]
@@ -96,7 +98,8 @@ Design rules:
 - **Every execution command returns the resulting state** (stop reason, location, source excerpt, top frames, locals diff) so the agent never needs a follow-up call just to see where it is.
 - **Blocking is bounded.** Execution commands wait for `stopped|exited|timeout` (default 30 s) and report which happened; the program keeps running after a timeout and `wait` resumes waiting.
 - **`--changed`** shows locals that differ from the previous stop snapshot (highest-signal view for step loops).
-- **Anchors:** `bp add 'Foo.cs@"var total = items.Sum"'` resolves by content, re-resolved when the file changes; the reply always reports the *resolved* line and whether the adapter verified or moved it.
+- **Anchors:** `bp add 'Foo.cs@"var total = items.Sum"'` resolves by content — the one line holding the text, whitespace runs matching one space, case-sensitive; several lines are `ANCHOR_AMBIGUOUS`, none `ANCHOR_NOT_FOUND` with the closest lines — once, when added; the reply reports the *resolved* line and whether the adapter verified or moved it. Anchors are not moved when the file changes mid-session (the program still runs the code it was built from, and the adapter maps lines through that build's symbols); breakpoints in a changed file are noted instead, and adding one again re-resolves it (ADR 0010).
+- **Hit counts and logpoints** (`--hit`, `--log`) are emulated by the daemon for every adapter: the adapter gets a plain breakpoint, and a stop there is counted, logged (output category `logpoint`) and continued unless it should stop. Each hit costs a pause and a few round trips; a step that reaches such a line ends there.
 - **Help is the interface.** Every command and subcommand — including the root command of each
   binary — has a `Short`, a `Long` (what it does, when to use it, whether it blocks and for how
   long, its side effects on the debuggee, its output shape, and its exit codes) and at least one
@@ -111,7 +114,7 @@ Design rules:
 
 - Default: compact text (tuned for LLM reading). `--json`: stable schema, versioned (`"schema": 1`).
 - Budgeting: `--budget` (default ~2k tokens for state dumps) enforced by the daemon via depth, max children per node (default 20), string truncation (default 200 chars), collection summaries (`List<Order> Count=1532 [0..19 shown]`). Truncation is always explicit (`…+1512 more, expand: eyedbg vars --expand orders`).
-- Errors: `{code, message, hint}`; codes are stable (`NO_SESSION`, `NOT_STOPPED`, `LEASE_HELD`, `UNSUPPORTED_BY_ADAPTER`, `TIMEOUT`, …). Exit codes map to classes.
+- Errors: `{code, message, hint}`; codes are stable (`NO_SESSION`, `NOT_STOPPED`, `LEASE_HELD`, `UNSUPPORTED_BY_ADAPTER`, `SIDE_EFFECTS`, `ATTACH_FAILED`, `NO_TEST_HOST`, `ANCHOR_NOT_FOUND`, `ANCHOR_AMBIGUOUS`, …). Exit codes map to classes: 1 usage (incl. `SIDE_EFFECTS`, `ANCHOR_*`), 2 state, 3 setup (incl. `ATTACH_FAILED`, `NO_TEST_HOST`), 4 adapter (incl. `UNSUPPORTED_BY_ADAPTER`).
 - Redaction: values of names matching configurable patterns (`password|secret|token|connectionstring`) masked by default.
 
 ## 6. Daemon
@@ -145,7 +148,9 @@ type Driver interface {
 }
 ```
 
-- **Capability degradation:** the daemon caches the adapter's `initialize` capabilities; commands needing unsupported features fail with `UNSUPPORTED_BY_ADAPTER` + a hint (e.g. `memory read` on netcoredbg → "use `eyedbg dotnet heap`").
+As built (`internal/session/driver.go`): `Prepare(ctx, LaunchSpec) (Launch, error)` returns the adapter command and the DAP request body, plus per-driver behaviour the session applies: `Request` (`launch`/`attach`), `PID`, `ExceptionFilters` (mode → adapter filter ids), `SideEffects` (the eval check), `AttachHint`. Optional interfaces: `Attacher` (`PrepareAttach(ctx, AttachSpec)`) and `Tester` (`TestCommand(ctx, TestSpec)`: the command, how to find the test host's pid in its output, and how to explain an exit without one; a Tester is also an Attacher).
+
+- **Capability degradation:** the daemon caches the adapter's `initialize` capabilities; commands needing unsupported features fail with `UNSUPPORTED_BY_ADAPTER` + a hint (e.g. `memory read` on netcoredbg → "use `eyedbg dotnet heap`"). Checked today: `--if` (conditional breakpoints), `func:` (function breakpoints), exception filters (the error names the adapter's), `set` (setExpression, else setVariable); exception details (exceptionInfo) are left out silently when missing.
 - **Side helpers:** out-of-process, JSON-RPC over stdio, any language. Lets .NET-specific inspection live in C# while the core stays Go.
 
 ## 8. .NET specifics
@@ -157,7 +162,7 @@ type Driver interface {
 | Forbidden | **vsdbg** | License restricts it to Microsoft IDEs. Never download, detect, or drive it. |
 | Non-pausing inspection | `eyedbg-dotnet-helper` (C#): ClrMD, DiagnosticsClient/EventPipe | `eyedbg dotnet counters`, `trace`, `dump`, `heap` (stats, top types, gcroot on a dump), `threads` for a hung process. Live-heap reads without suspension are inconsistent → default to dump-then-analyze. |
 
-Known netcoredbg gaps to surface honestly: no lambda/LINQ-lambda evaluation, no `readMemory`/`disassemble`, no `DebuggerDisplay`. Driver `Prepare` builds with `dotnet build` unless `--no-build`; `test` uses `VSTEST_HOST_DEBUG=1` and attaches to the reported testhost PID (to be validated).
+Known netcoredbg gaps to surface honestly: no lambda/LINQ-lambda evaluation, no `readMemory`/`disassemble`, no `DebuggerDisplay`; no native hit counts or logpoints (emulated by the daemon, §4); `evaluate` ignores its context and always runs code, so eval can't be side-effect free — the driver refuses expressions that visibly change the program (a method call, `new`, assignment, `++`/`--`, interpolated strings) without `--allow-side-effects`, but getters, indexers and operators still run; an unhandled exception always stops the program, whatever the exception mode. A function breakpoint also stops with reason `breakpoint`, so the stop filter can't tell its stops from those of a line breakpoint on the function's first line: a `--hit`/`--log` breakpoint there decides the function breakpoint's stops too (documented in `bp add --help`). Driver `Prepare` builds with `dotnet build` unless `--no-build`. `attach` sends netcoredbg only the pid (Just My Code stays on); an attach failure surfaces at `configurationDone` and becomes `ATTACH_FAILED`. `test` runs `dotnet test -c Debug --tl:off` with `VSTEST_HOST_DEBUG=1 VSTEST_DEBUG_NOBP=1`, reads the `Process Id: N, Name: …` line vstest.console prints (the host runs under `dotnet`), attaches, and ends with `dotnet test`'s exit code — validated on Linux (.NET 10 SDK). Microsoft.Testing.Platform projects are refused (`NO_TEST_HOST`, hint: debug the test app with `start`).
 
 ## 9. Phase 2: VS Code co-debugging (design now, build later)
 
@@ -175,10 +180,11 @@ Known netcoredbg gaps to surface honestly: no lambda/LINQ-lambda evaluation, no 
 
 ## 11. Safety
 
-- `eval` may run code (method calls, property getters). Default: read-only intent (DAP `context: "watch"`); `--allow-side-effects` for calls. How strictly each adapter enforces this is unverified → document per adapter.
+- `eval` may run code (method calls, property getters). Default: read-only intent (DAP `context: "watch"`) plus the driver's syntactic check (`SIDE_EFFECTS`), since netcoredbg enforces nothing; `--allow-side-effects` (context `repl`) is an execution request: it needs the lease and is logged. `vars --expand` doesn't evaluate a path the check flags. Breakpoint conditions and logpoint expressions are not checked: the user wrote them for the program to run.
 - Socket access restricted to the user; token file; no TCP listener by default.
 - Redaction (§5), not implemented yet. Session recordings (`sessions/<id>.jsonl` in the private runtime dir, 0600, never overwritten, capped at 4 MiB, pruned 7 days after the session ended) hold control events only: started, client, lease, exec, continued, stopped (reason and thread only), breakpoints (conditions included), threads, exited, ended — no program output, stop text, launch arguments, environment or variable values, until redaction exists. On by default; `start --no-record` or `EYEDBG_NO_RECORD=1` turns it off.
-- `attach` only to processes owned by the same user; explain macOS `task_for_pid`/Linux ptrace-scope errors with actionable hints.
+- `attach` only to processes owned by the same user (checked first: Linux `/proc`, other Unix `ps`, Windows the process token's SID), shown as `pid N (name)`, never by command line. For .NET the ptrace-scope/`task_for_pid` hints don't apply: CoreCLR's debugger falls back to its pipe transport when it can't read memory directly (dotnet/runtime `shimremotedatatarget.cpp`), so the real failure modes — not a started .NET runtime, `DOTNET_EnableDiagnostics=0`, another debugger attached, a different `TMPDIR`, another user — are what `ATTACH_FAILED`'s hint lists. `stop` detaches from an attached program, never kills it.
+- `test` passes the filter, framework and environment to `dotnet test` as argv, never through a shell, and runs it in its own process group, killed as a whole by `stop`.
 
 ## 12. Repo layout (Go)
 
@@ -192,6 +198,7 @@ internal/dap/        DAP client over go-dap: framing, seq mapping, reverse reque
 internal/facade/     DAP facade (P2)
 internal/present/    budgeting, truncation, text/JSON renderers
 internal/adapters/   manifest loader, installer (download + checksum)
+internal/proc/       process owner lookup (attach), process groups (test runs)
 internal/cli/        command trees for all binaries (only package importing the CLI framework)
 internal/version/    build metadata (ldflags / debug.ReadBuildInfo)
 drivers/dotnet/      Driver impl
@@ -210,7 +217,8 @@ testdata/apps/       sample debuggees per language
    help variant.
 4. **Model for P2** (done): client identity, bp ownership merge, lease, event log + `events --since`,
    lost sessions and recordings (ADR 0009).
-5. **Breadth:** conditional/log/function/exception bps, eval, set, attach, `test`, anchors.
+5. **Breadth** (done): hit counts, logpoints, function and exception breakpoints, eval with side
+   effects, `set`, `attach`/`detach`, `test`, anchors, capability degradation, sample apps (ADR 0010).
 6. **Ship:** SKILL.md, CI matrix (6 os/arch), e2e tests driving sample apps.
 7. **Second language** via manifest only (debugpy) to prove the plugin boundary.
 
@@ -220,9 +228,9 @@ Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; mor
 
 - netcoredbg eval limits and macOS arm64 stability → SharpDbg as fallback; e2e tests on every platform in CI.
 - netcoredbg release cadence (~2/yr, single corporate maintainer) → pin versions, keep our own builds.
-- Test debugging flow (`VSTEST_HOST_DEBUG`) must be validated per platform.
+- Test debugging flow (`VSTEST_HOST_DEBUG`): validated on Linux only; macOS and Windows unexercised, as is attach there.
 - Lease policy default for P2 (`handoff` vs `human-priority`) — decide with real usage.
-- Anchor re-resolution after large edits: fuzzy match strategy TBD.
+- Anchor re-resolution after edits: decided (ADR 0010) — anchors resolve once, exactly; a changed file gets a note, and a future `restart` can re-resolve every anchor against the rebuilt program.
 - Windows: AF_UNIX vs named pipe as primary — prototype both in milestone 1.
 
 ## 15. References

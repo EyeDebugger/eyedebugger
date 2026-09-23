@@ -16,15 +16,16 @@ import (
 	"github.com/eyedebugger/eyedebugger/internal/dap"
 )
 
-// AddBreakpoint adds client c's line breakpoint and, once the session is
-// configured, sends it to the adapter. The result says whether the adapter
-// verified it and on which line it actually landed. Adding one where c
-// already has one replaces its condition; other clients' breakpoints at the
-// same line are separate and share the line (see slotsFor).
+// AddBreakpoint adds client c's breakpoint (at a line, an anchor's line or
+// a function) and, once the session is configured, sends it to the
+// adapter. The result says whether the adapter verified it and on which
+// line it actually landed. Adding one where c already has one replaces its
+// condition; other clients' breakpoints at the same place are separate and
+// share it (see slotsFor).
 func (s *Session) AddBreakpoint(ctx context.Context, c api.Client, spec api.BreakpointSpec) (api.Breakpoint, error) {
-	if !filepath.IsAbs(spec.File) || spec.Line < 1 {
-		return api.Breakpoint{}, api.NewError(api.CodeInvalidRequest,
-			fmt.Sprintf("invalid breakpoint %s:%d", spec.File, spec.Line), "use FILE:LINE with a line number from 1")
+	spec, err := resolveSpec(spec, true)
+	if err != nil {
+		return api.Breakpoint{}, err
 	}
 
 	s.mu.Lock()
@@ -34,15 +35,20 @@ func (s *Session) AddBreakpoint(ctx context.Context, c api.Client, spec api.Brea
 		return api.Breakpoint{}, stateError(s.ID, s.state, "adding a breakpoint needs a live session")
 	}
 
+	if err := s.checkBreakpointCapsLocked(spec); err != nil {
+		s.mu.Unlock()
+
+		return api.Breakpoint{}, err
+	}
+
 	b, isNew, changed := s.addBreakpointLocked(c.ID, spec)
 	s.mu.Unlock()
 
-	if err := s.syncBreakpoints(ctx, spec.File); err != nil {
+	if err := s.syncKey(ctx, spec.File); err != nil {
 		return api.Breakpoint{}, err
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	switch {
 	case isNew:
@@ -51,7 +57,108 @@ func (s *Session) AddBreakpoint(ctx context.Context, c api.Client, spec api.Brea
 		s.logBreakpointLocked("changed", c.ID, b)
 	}
 
-	return b.Breakpoint, nil
+	out := b.Breakpoint
+	s.mu.Unlock()
+
+	return s.annotate([]api.Breakpoint{out})[0], nil
+}
+
+// resolveSpec checks a breakpoint spec by its kind and resolves an anchor
+// (Anchor set, Line 0) to its line. Function breakpoints are refused
+// unless allowFunction.
+func resolveSpec(spec api.BreakpointSpec, allowFunction bool) (api.BreakpointSpec, error) {
+	if spec.Function != "" {
+		switch {
+		case !allowFunction:
+			return spec, api.NewError(api.CodeInvalidRequest, "run-until needs a line, not a function",
+				`use FILE:LINE or FILE@"TEXT"`)
+		case spec.File != "" || spec.Line != 0 || spec.Anchor != "":
+			return spec, api.NewError(api.CodeInvalidRequest, "a function breakpoint has no file, line or anchor", "use func:NAME alone")
+		case spec.HitCondition != "" || spec.LogMessage != "":
+			return spec, api.NewError(api.CodeInvalidRequest, "--hit and --log work on line breakpoints only",
+				"put a FILE:LINE breakpoint on the function's first line instead")
+		}
+
+		return spec, nil
+	}
+
+	if !filepath.IsAbs(spec.File) {
+		return spec, api.NewError(api.CodeInvalidRequest, "invalid breakpoint file "+spec.File+": want an absolute path",
+			`use FILE:LINE, FILE@"TEXT" or func:NAME`)
+	}
+
+	if spec.Anchor != "" && spec.Line == 0 {
+		line, err := resolveAnchor(spec.File, spec.Anchor)
+		if err != nil {
+			return spec, err
+		}
+
+		spec.Line = line
+	}
+
+	if spec.Line < 1 {
+		return spec, api.NewError(api.CodeInvalidRequest,
+			fmt.Sprintf("invalid breakpoint %s:%d", spec.File, spec.Line), "use FILE:LINE with a line number from 1")
+	}
+
+	if _, _, err := parseEmulated(spec); err != nil {
+		return spec, err
+	}
+
+	return spec, nil
+}
+
+// parseEmulated parses spec's hit condition and log message (nil when
+// unset).
+func parseEmulated(spec api.BreakpointSpec) (*hitCondition, []logPart, error) {
+	var (
+		hit  *hitCondition
+		logs []logPart
+		err  error
+	)
+
+	if spec.HitCondition != "" {
+		if hit, err = parseHit(spec.HitCondition); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	if spec.LogMessage != "" {
+		if logs, err = parseLog(spec.LogMessage); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	return hit, logs, nil
+}
+
+// annotate adds a note to line breakpoints whose file changed after the
+// session started (see staleNote); it reads each file's time once.
+func (s *Session) annotate(bps []api.Breakpoint) []api.Breakpoint {
+	notes := map[string]string{}
+
+	for i := range bps {
+		b := &bps[i]
+		if b.File == "" {
+			continue
+		}
+
+		note, ok := notes[b.File]
+		if !ok {
+			note = staleNote(b.File, s.CreatedAt)
+			notes[b.File] = note
+		}
+
+		switch {
+		case note == "":
+		case b.Note == "":
+			b.Note = note
+		default:
+			b.Note += "; " + note
+		}
+	}
+
+	return bps
 }
 
 // RemoveBreakpoint removes breakpoint id for client c. Another client's
@@ -132,8 +239,8 @@ func (s *Session) removeBreakpoints(ctx context.Context, actor string, match fun
 	s.mu.Unlock()
 
 	if !exited {
-		for file := range touched {
-			if err = s.syncBreakpoints(ctx, file); err != nil {
+		for key := range touched {
+			if err = s.syncKey(ctx, key); err != nil {
 				break
 			}
 		}
@@ -150,27 +257,46 @@ func (s *Session) removeBreakpoints(ctx context.Context, actor string, match fun
 	return len(gone), left, err
 }
 
-// addBreakpointLocked adds owner's breakpoint, or updates the condition of
-// the one owner already has at that line (making it permanent). changed
-// reports whether an existing one changed.
+// addBreakpointLocked adds owner's breakpoint, or updates the one owner
+// already has at that line or function (making it permanent). changed
+// reports whether an existing one changed. Function breakpoints are kept
+// under funcKey (their File is empty).
 func (s *Session) addBreakpointLocked(owner string, spec api.BreakpointSpec) (b *breakpoint, isNew, changed bool) {
+	key := slotKey{function: spec.Function, line: spec.Line}
+
 	for _, b := range s.bps[spec.File] {
-		if b.Owner == owner && b.RequestedLine == spec.Line {
-			changed = b.Condition != spec.Condition || b.Temporary
-			b.Condition, b.Temporary = spec.Condition, false
+		if b.Owner == owner && b.key() == key {
+			changed = b.Condition != spec.Condition || b.Temporary || b.Anchor != spec.Anchor ||
+				b.HitCondition != spec.HitCondition || b.LogMessage != spec.LogMessage
+			b.Condition, b.Temporary, b.Anchor = spec.Condition, false, spec.Anchor
+			b.setEmulated(spec)
 
 			return b, false, changed
 		}
 	}
 
+	return s.addNewLocked(owner, spec), true, false
+}
+
+// addNewLocked adds a new breakpoint of owner's, without looking for one
+// to update.
+func (s *Session) addNewLocked(owner string, spec api.BreakpointSpec) *breakpoint {
 	s.nextBP++
-	b = &breakpoint{Breakpoint: api.Breakpoint{
+	b := &breakpoint{Breakpoint: api.Breakpoint{
 		ID: s.nextBP, File: spec.File, RequestedLine: spec.Line, Line: spec.Line, Condition: spec.Condition,
-		Owner: owner, CreatedAt: time.Now(),
+		Function: spec.Function, Anchor: spec.Anchor, Owner: owner, CreatedAt: time.Now(),
 	}}
+	b.setEmulated(spec)
 	s.bps[spec.File] = append(s.bps[spec.File], b)
 
-	return b, true, false
+	return b
+}
+
+// setEmulated sets b's hit condition and log message from spec (checked
+// already) and restarts its hit count.
+func (b *breakpoint) setEmulated(spec api.BreakpointSpec) {
+	b.HitCondition, b.LogMessage, b.Hits = spec.HitCondition, spec.LogMessage, 0
+	b.hit, b.log, _ = parseEmulated(spec)
 }
 
 // logBreakpointLocked logs a breakpoint event with a copy of b as it is now.
@@ -217,27 +343,7 @@ func (s *Session) syncBreakpoints(ctx context.Context, file string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for i, got := range resp.Body.Breakpoints {
-		if i >= len(slots) {
-			break
-		}
-
-		note := ""
-		if slots[i].note {
-			note = sharedLineNote
-		}
-
-		for _, b := range slots[i].bps {
-			b.adapterID = got.Id
-			b.Verified = got.Verified
-			b.Message = got.Message
-			b.Note = note
-
-			if got.Line > 0 {
-				b.Line = got.Line
-			}
-		}
-	}
+	s.applySlotsLocked(slots, resp.Body.Breakpoints)
 
 	return nil
 }
@@ -261,8 +367,12 @@ func (s *Session) updateBreakpointLocked(got godap.Breakpoint) {
 			b.Verified = got.Verified
 			b.Message = got.Message
 
-			if got.Line > 0 {
+			if got.Line > 0 && b.Function == "" {
 				b.Line = got.Line
+			}
+
+			if got.Source != nil && got.Source.Path != "" {
+				b.source = got.Source.Path
 			}
 
 			hit = append(hit, b)
@@ -296,9 +406,19 @@ type setBreakpointsArguments struct {
 // breakpoint is removed when the program stops or exits; after a timeout it
 // stays until the next execution command.
 func (s *Session) RunUntil(ctx context.Context, c api.Client, spec api.BreakpointSpec, threadID int, wait time.Duration, dump api.DumpSpec) (api.Snapshot, error) {
-	if !filepath.IsAbs(spec.File) || spec.Line < 1 {
-		return api.Snapshot{}, api.NewError(api.CodeInvalidRequest,
-			fmt.Sprintf("invalid location %s:%d", spec.File, spec.Line), "use FILE:LINE with a line number from 1")
+	spec, err := resolveSpec(spec, false)
+	if err != nil {
+		return api.Snapshot{}, err
+	}
+
+	spec.HitCondition, spec.LogMessage = "", ""
+
+	s.mu.Lock()
+	err = s.checkBreakpointCapsLocked(spec)
+	s.mu.Unlock()
+
+	if err != nil {
+		return api.Snapshot{}, err
 	}
 
 	x, err := s.execute(ctx, execRequest{client: c, kind: execRunUntil, thread: threadID, target: &spec})
@@ -329,21 +449,22 @@ func (s *Session) RunUntil(ctx context.Context, c api.Client, spec api.Breakpoin
 }
 
 // placeTarget places run-until's breakpoint at spec: c's own breakpoint at
-// that line if it has one, else a new temporary one of c's (returned as
-// temp). It returns where the adapter placed it.
+// that line if it has one that stops (no hit condition or log message),
+// else a new temporary one of c's (returned as temp). It returns where the
+// adapter placed it.
 func (s *Session) placeTarget(ctx context.Context, c api.Client, spec api.BreakpointSpec) (at api.BreakpointSpec, temp *breakpoint, err error) {
 	s.mu.Lock()
 
 	var target *breakpoint
 
 	for _, b := range s.bps[spec.File] {
-		if b.Owner == c.ID && b.RequestedLine == spec.Line {
+		if b.Owner == c.ID && b.key() == (slotKey{line: spec.Line}) && !b.emulated() {
 			target = b
 		}
 	}
 
 	if target == nil {
-		target, _, _ = s.addBreakpointLocked(c.ID, spec)
+		target = s.addNewLocked(c.ID, spec)
 		target.Temporary = true
 		temp = target
 	}

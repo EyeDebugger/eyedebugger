@@ -17,7 +17,8 @@ type EventKind string
 
 // Event kinds and the [Event] fields each one sets.
 const (
-	// EventStarted: Client (who started it), Program, Lease.
+	// EventStarted: Client (who started it), Program, Lease; Action is
+	// attach or test for sessions that did not launch their program.
 	EventStarted EventKind = "started"
 	// EventClient: Client, on its first request to the session.
 	EventClient EventKind = "client"
@@ -25,14 +26,16 @@ const (
 	// release, policy), Lease (after), Previous (the holder before).
 	EventLease EventKind = "lease"
 	// EventExec: Client, Action (continue, next, stepIn, stepOut, pause,
-	// runUntil), ThreadID when one was given.
+	// runUntil, eval, set), ThreadID when one was given; Text is the
+	// expression (eval) or the variable (set).
 	EventExec EventKind = "exec"
 	// EventContinued: ThreadID. The adapter resumed the program without an
 	// execution request in flight.
 	EventContinued EventKind = "continued"
 	// EventStopped: Stop.
 	EventStopped EventKind = "stopped"
-	// EventOutput: Category, Text, Truncated.
+	// EventOutput: Category (stdout, stderr, console, logpoint, ...), Text,
+	// Truncated.
 	EventOutput EventKind = "output"
 	// EventBreakpoint: Action (added, removed, changed), Client (for added
 	// and removed), Breakpoint (as it was then).
@@ -43,6 +46,8 @@ const (
 	EventExited EventKind = "exited"
 	// EventEnded: Reason, Client when a client stopped the session.
 	EventEnded EventKind = "ended"
+	// EventExceptions: Client, Action (the client's new exception mode).
+	EventExceptions EventKind = "exceptions"
 )
 
 // MaxEventsLimit is the most events one [MethodEvents] request returns.
@@ -64,7 +69,7 @@ func EventKindNames() string {
 func EventKinds() []EventKind {
 	return []EventKind{
 		EventStarted, EventClient, EventLease, EventExec, EventContinued, EventStopped,
-		EventOutput, EventBreakpoint, EventThread, EventExited, EventEnded,
+		EventOutput, EventBreakpoint, EventThread, EventExited, EventEnded, EventExceptions,
 	}
 }
 

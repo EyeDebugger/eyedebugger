@@ -79,6 +79,13 @@ func TestSessionRendering(t *testing.T) {
 		{ID: 4, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 9, Line: 9, Verified: true, Condition: "i == 3", Temporary: true},
 		{ID: 5, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 12, Line: 12, Verified: true, Condition: "n > 1", Note: "shares its line with another client's breakpoint that has a different condition: it stops there unconditionally"},
 		{ID: 6, Owner: "human:ijat", File: "/work/app/Program.cs", RequestedLine: 12, Line: 12, Verified: true, Condition: "n > 2", Note: "shares its line with another client's breakpoint that has a different condition: it stops there unconditionally"},
+		{ID: 7, Owner: "agent", Function: "Orders.Price", Verified: true},
+		{ID: 8, Owner: "human:ijat", Function: "Orders.Missing", Message: "no function Orders.Missing"},
+		{ID: 9, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 14, Line: 15, Anchor: "total += price", Verified: true, HitCondition: ">=3", Hits: 4},
+		{
+			ID: 10, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 20, Line: 20, Verified: true, LogMessage: "i={i} total={total}", Hits: 2,
+			Note: "Program.cs changed after the session started: the program runs the code it was built from, so this line may not match it (restart the session to debug the new code)",
+		},
 	}
 
 	tests := []struct {
@@ -156,6 +163,47 @@ func TestSessionRendering(t *testing.T) {
 			return writeVars(b, []api.Scope{{Name: "Locals", More: 4, Truncated: true, Vars: []api.Var{
 				{Name: "order", Type: "Order", Value: "{Order}", HasChildren: true},
 			}}}, false)
+		}},
+		{"exceptions", "exceptions.golden", func(b *bytes.Buffer) error {
+			if err := writeExceptions(b, api.ExceptionsResult{SessionID: "s-k3f9", Modes: []api.ClientExceptionMode{}, Filters: []string{}}, false); err != nil {
+				return err
+			}
+
+			return writeExceptions(b, sampleExceptions(), false)
+		}},
+		{"exceptions json", "exceptions_json.golden", func(b *bytes.Buffer) error { return writeExceptions(b, sampleExceptions(), true) }},
+		{"eval depth", "eval_depth.golden", func(b *bytes.Buffer) error {
+			return writeEval(b, api.EvalResult{
+				Expression: "order", Value: "{Order}", Type: "Order", HasChildren: true, More: 3, Truncated: true,
+				Children: []api.Var{{Name: "Id", Type: "int", Value: "42"}, {Name: "Items", Type: "List<Item>", Value: "Count = 2", HasChildren: true}},
+			}, false)
+		}},
+		{"set", "set.golden", func(b *bytes.Buffer) error {
+			return writeSet(b, api.SetResult{Variable: "total", Value: "100", Type: "int"}, false)
+		}},
+		{"set json", "set_json.golden", func(b *bytes.Buffer) error {
+			return writeSet(b, api.SetResult{Variable: "total", Value: "100", Type: "int"}, true)
+		}},
+		{"snapshot exception", "snapshot_exception.golden", func(b *bytes.Buffer) error { return writeSnapshot(b, exceptionSnapshot(), false, renderBase) }},
+		{"snapshot exception json", "snapshot_exception_json.golden", func(b *bytes.Buffer) error {
+			return writeSnapshot(b, exceptionSnapshot(), true, renderBase)
+		}},
+		{"detach", "detach.golden", func(b *bytes.Buffer) error {
+			if err := writeEnded(b, api.SessionInfo{
+				ID: "s-k3f9", Mode: api.ModeAttach, PID: 4242, State: api.StateExited, EndReason: "detached by agent (the program keeps running)",
+			}); err != nil {
+				return err
+			}
+
+			// An attached program that exited by itself doesn't keep running.
+			if err := writeEnded(b, api.SessionInfo{ID: "s-9x2m", Mode: api.ModeAttach, PID: 4243, State: api.StateExited, EndReason: "the program terminated"}); err != nil {
+				return err
+			}
+
+			return writeEnded(b, api.SessionInfo{ID: "s-7f3k", State: api.StateExited})
+		}},
+		{"events breadth", "events_breadth.golden", func(b *bytes.Buffer) error {
+			return writeEvents(b, breadthEvents(), eventsView{}, false, renderBase)
 		}},
 		{"output", "output.golden", func(b *bytes.Buffer) error {
 			return writeOutput(b, io.Discard, api.OutputResult{Lines: []api.OutputLine{{Seq: 1, Category: "stdout", Text: "i=1\n"}, {Seq: 2, Category: "stderr", Text: "warn"}}}, false, false)
@@ -256,15 +304,79 @@ func otherEvents() api.EventsResult {
 	return api.EventsResult{Events: events, Latest: 54, More: 39}
 }
 
+// sampleExceptions has two clients' exception modes.
+func sampleExceptions() api.ExceptionsResult {
+	return api.ExceptionsResult{
+		SessionID: "s-k3f9",
+		Modes:     []api.ClientExceptionMode{{Client: "agent", Mode: api.ExceptionsAll}, {Client: "human:ijat", Mode: api.ExceptionsUncaught}},
+		Filters:   []string{"all", "user-unhandled"},
+	}
+}
+
+// exceptionSnapshot is a stop at a thrown exception; values are synthetic.
+func exceptionSnapshot() api.Snapshot {
+	snap := stoppedSnapshot()
+	snap.Session.Stop = &api.StopInfo{Reason: "exception", ThreadID: 4242, Text: "Exception thrown: 'System.InvalidOperationException' in app.dll"}
+	snap.Exception = &api.ExceptionInfo{
+		ID: "CLR/System.InvalidOperationException", Description: "no orders", BreakMode: "always",
+		Type: "System.InvalidOperationException", Message: "no orders",
+		StackTrace: "   at Orders.Total() in /work/app/Orders.cs:line 18\n   at Orders.Sum() in /work/app/Orders.cs:line 12\n" +
+			"   at Orders.Run() in /work/app/Orders.cs:line 9\n   at Program.Step(Int32 i) in /work/app/Program.cs:line 30\n" +
+			"   at Program.Loop() in /work/app/Program.cs:line 22\n   at Program.<Main>$(String[] args) in /work/app/Program.cs:line 4\n" +
+			"   at Program.Start() in /work/app/Program.cs:line 2",
+		Inner: []api.ExceptionInfo{{Type: "System.ArgumentException", Message: "bad\nid"}},
+	}
+
+	return snap
+}
+
+// breadthEvents has the event lines of attach, test runs, exception
+// modes, eval and set with side effects, and logpoints.
+func breadthEvents() api.EventsResult {
+	fbp := api.Breakpoint{ID: 3, Owner: "agent", Function: "Orders.Price", Verified: true, CreatedAt: renderTime}
+	lp := api.Breakpoint{ID: 4, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 20, Line: 20, Verified: true, LogMessage: "i={i}", CreatedAt: renderTime}
+	events := []api.Event{
+		{Kind: api.EventStarted, Action: api.ModeAttach, Client: "agent", Program: "pid 4242 (dotnet)", Lease: &api.LeaseInfo{Policy: api.LeaseFree, Holder: "agent", Since: &renderTime}},
+		{Kind: api.EventStarted, Action: api.ModeTest, Client: "agent", Program: "dotnet test tests.csproj --filter Adds", Lease: &api.LeaseInfo{Policy: api.LeaseFree, Holder: "agent", Since: &renderTime}},
+		{Kind: api.EventExceptions, Action: "all", Client: "agent"},
+		{Kind: api.EventExceptions, Action: "none", Client: "human:ijat", Reason: "force"},
+		{Kind: api.EventBreakpoint, Action: "added", Client: "agent", Breakpoint: &fbp},
+		{Kind: api.EventBreakpoint, Action: "added", Client: "agent", Breakpoint: &lp},
+		{Kind: api.EventExec, Action: "eval", Client: "agent", Text: "Orders.Price(2)"},
+		{Kind: api.EventExec, Action: "set", Client: "human:ijat", Text: "total"},
+		{Kind: api.EventOutput, Category: "logpoint", Text: "i=3\n"},
+		{Kind: api.EventEnded, Reason: "detached by agent (the program keeps running)", Client: "agent"},
+	}
+
+	for i := range events {
+		events[i].Seq, events[i].Time = 1+i, renderTime
+	}
+
+	return api.EventsResult{Events: events, Latest: 10}
+}
+
 func TestParseLocation(t *testing.T) {
 	t.Parallel()
 
-	spec, err := parseLocation("src/Program.cs:12")
-	if err != nil || spec.File != absPath("src/Program.cs") || spec.Line != 12 {
-		t.Errorf("parseLocation = %+v, %v", spec, err)
+	tests := []struct {
+		in   string
+		want api.BreakpointSpec
+	}{
+		{"src/Program.cs:12", api.BreakpointSpec{File: absPath("src/Program.cs"), Line: 12}},
+		{`C:\work\app\Program.cs:12`, api.BreakpointSpec{File: absPath(`C:\work\app\Program.cs`), Line: 12}},
+		{"func:Orders.Price", api.BreakpointSpec{Function: "Orders.Price"}},
+		{"func:12", api.BreakpointSpec{File: absPath("func"), Line: 12}},
+		{`Program.cs@"total += price"`, api.BreakpointSpec{File: absPath("Program.cs"), Anchor: "total += price"}},
+		{`Program.cs@"a:1 "quoted""`, api.BreakpointSpec{File: absPath("Program.cs"), Anchor: `a:1 "quoted"`}},
 	}
 
-	for _, bad := range []string{"Program.cs", "Program.cs:0", "Program.cs:x", ":3"} {
+	for _, tt := range tests {
+		if got, err := parseLocation(tt.in); err != nil || got != tt.want {
+			t.Errorf("parseLocation(%q) = %+v, %v; want %+v", tt.in, got, err, tt.want)
+		}
+	}
+
+	for _, bad := range []string{"Program.cs", "Program.cs:0", "Program.cs:x", ":3", `Program.cs@"x`, `Program.cs@""`, `Program.cs@"  "`} {
 		if _, err := parseLocation(bad); err == nil {
 			t.Errorf("parseLocation(%q) succeeded, want an error", bad)
 		}
