@@ -22,11 +22,13 @@ decisions are recorded in `docs/adr/`.
 - `internal/facade/` — per-session DAP facade (phase 2).
 - `internal/present/` — budgeting, truncation, text/JSON renderers.
 - `internal/proc/` — process owner lookup (attach's same-user check) and process groups (test runs).
-- `internal/adapters/` — adapter manifest loader and installer.
-- `drivers/dotnet/`, `drivers/generic/` — language drivers implementing DESIGN §7's `Driver`.
+- `internal/adapters/` — adapter manifests (schema, loader, trust check, templates), installer,
+  Python runtime; bundled manifests in `internal/adapters/manifests/` (`docs/adapter-manifests.md`).
+- `drivers/dotnet/` — the .NET driver (Go); `drivers/generic/` — the manifest-only driver (Python).
 - `helpers/dotnet/` — C# side helper (phase 2).
 - `skill/` — `SKILL.md`, the agent-facing usage guide (milestone 6).
-- `testdata/apps/` — sample debuggees for e2e tests (`dotnet/console`, `dotnet/breadth`, `dotnet/tests`).
+- `testdata/apps/` — sample debuggees for e2e tests (`dotnet/console`, `dotnet/breadth`, `dotnet/tests`,
+  `python/basic`).
 - `docs/adr/` — architecture decision records (MADR 4.0).
 
 ## Commands

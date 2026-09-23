@@ -15,10 +15,11 @@ import (
 
 // The program's only thread, its process id and the variables' references.
 const (
-	threadID  = 1
-	processID = 4242
-	localsRef = 1000
-	objRef    = 2000
+	threadID   = 1
+	processID  = 4242
+	localsRef  = 1000
+	objRef     = 2000
+	globalsRef = 3000
 )
 
 // Program states.
@@ -371,6 +372,8 @@ func (p *program) variables(ref int) ([]godap.Variable, bool) {
 		return p.locals(), true
 	case objRef:
 		return []godap.Variable{{Name: "a", Value: "1", Type: typeInt}, {Name: "b", Value: "2", Type: typeInt}}, true
+	case globalsRef:
+		return []godap.Variable{{Name: "g", Value: "1", Type: typeInt}}, true
 	default:
 		return nil, false
 	}

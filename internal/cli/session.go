@@ -178,23 +178,31 @@ type startFlags struct {
 	sessionFlags
 
 	project, program, cwd string
-	env                   []string
+	env, opts             []string
 	stopOnEntry, noBuild  bool
 }
 
-func newStartCommand(info version.Info, g *globals) *cobra.Command {
-	var sf startFlags
-
-	cmd := &cobra.Command{
-		Use:   "start <lang> [flags] [-- program args...]",
-		Short: "Start a program under the debugger",
-		Long: `Build (unless --program or --no-build) and start a program under the debugger, creating a new
+// startLong is the long help of Start.
+const startLong = `Build (unless --program or --no-build) and start a program under the debugger, creating a new
 session. Languages: dotnet (via netcoredbg; install it once with 'eyedbg adapters install
-netcoredbg').
+netcoredbg') and python (via debugpy: 'eyedbg adapters install python', or your interpreter's
+own debugpy); 'eyedbg adapters ls' lists every language, including ones your own adapter
+manifests add. Everything after "--" is passed to the program.
 
 For dotnet: --project takes a project file or a directory with exactly one project (default: the
 current directory), which is built in Debug; --program takes an already-built .dll (or apphost)
-and skips the build. Everything after "--" is passed to the program.
+and skips the build. dotnet takes no --opt options.
+
+For python: --program takes the script, or --opt module=NAME runs a module like 'python -m NAME'
+(e.g. pytest). Nothing is built (--project and --no-build are ignored). The working directory
+defaults to where you run eyedbg, as with 'python app.py'. The interpreter, which runs both
+debugpy and your program, is --opt python=PATH (relative to the current directory), else
+EYEDBG_PYTHON (as the daemon was started with), else a .venv or venv (with pyvenv.cfg) in the
+working directory or in the program's directory or its parents (only directories you own, and a
+venv others can write is refused), else python3, python or 'py -3' on PATH; it needs Python 3.10+.
+--opt justMyCode=false also stops and steps in library code. Child processes the program
+starts run, but are not debugged. Language options are NAME=VALUE (--opt, repeatable); an
+unknown one is an error that lists the language's options.
 
 Breakpoints given with --bp are set before the program runs, so they can't be missed; --bp takes
 FILE:LINE, FILE@"TEXT" or func:NAME (see 'eyedbg bp add'; conditions, hit counts and logpoints
@@ -216,11 +224,22 @@ Output: the new session id and its state (text), or the session snapshot in --js
 is also the value to pass to -s. Exits 0 once the program is running or stopped, non-zero on
 failure (BUILD_FAILED with the compiler errors, ADAPTER_NOT_INSTALLED, ...; see 'eyedbg --help'
 for the exit codes).` + dumpHelp + `
-`,
+`
+
+func newStartCommand(info version.Info, g *globals) *cobra.Command {
+	var sf startFlags
+
+	cmd := &cobra.Command{
+		Use:   "start <lang> [flags] [-- program args...]",
+		Short: "Start a program under the debugger",
+		Long:  startLong,
 		Example: `  eyedbg start dotnet --bp Program.cs:12         # build ./, stop at line 12
   eyedbg start dotnet --bp 'Program.cs@"return total"' --exceptions all
   eyedbg start dotnet --project src/App/App.csproj --stop-on-entry
-  eyedbg start dotnet --program bin/Debug/net10.0/App.dll -- --verbose input.txt`,
+  eyedbg start dotnet --program bin/Debug/net10.0/App.dll -- --verbose input.txt
+  eyedbg start python --program app.py --bp app.py:12 -- --verbose
+  eyedbg start python --opt module=pytest --bp tests/test_x.py:8 -- -x tests/test_x.py
+  eyedbg start python --program app.py --opt python=.venv/bin/python --opt justMyCode=false`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			params, err := sf.params(args, cmd.ArgsLenAtDash())
@@ -246,10 +265,11 @@ func (sf *startFlags) register(cmd *cobra.Command) {
 	f := cmd.Flags()
 	f.StringVar(&sf.project, "project", "", "project file or directory to build (default: current directory)")
 	f.StringVar(&sf.program, "program", "", "already-built program to run (.dll or apphost); skips the build")
-	f.StringVar(&sf.cwd, "cwd", "", "working directory of the program (default: the project's directory)")
+	f.StringVar(&sf.cwd, "cwd", "", "working directory of the program (default: dotnet the project's directory, python the current one)")
 	f.StringArrayVar(&sf.env, "env", nil, "environment variable KEY=VALUE for the program (repeatable)")
 	f.BoolVar(&sf.stopOnEntry, "stop-on-entry", false, "stop at the program's entry point")
 	f.BoolVar(&sf.noBuild, "no-build", false, "don't build; requires --program")
+	f.StringArrayVar(&sf.opts, "opt", nil, "language option NAME=VALUE, e.g. module=pytest for python (repeatable; see 'eyedbg adapters ls')")
 	sf.sessionFlags.register(cmd)
 }
 
@@ -280,12 +300,16 @@ func (sf *startFlags) params(args []string, dash int) (api.StartParams, error) {
 		Lang: lang,
 		LaunchSpec: api.LaunchSpec{
 			Project: absPath(project), Program: absPath(sf.program), Cwd: absPath(sf.cwd),
-			Args: progArgs, NoBuild: sf.noBuild, StopOnEntry: sf.stopOnEntry,
+			Args: progArgs, NoBuild: sf.noBuild, StopOnEntry: sf.stopOnEntry, ClientDir: workDir(),
 		},
 	}
 
 	var err error
 	if params.Env, err = parseEnv(sf.env); err != nil {
+		return api.StartParams{}, err
+	}
+
+	if params.Options, err = parseOpts(sf.opts); err != nil {
 		return api.StartParams{}, err
 	}
 
@@ -612,7 +636,8 @@ func newVarsCommand(info version.Info, g *globals) *cobra.Command {
 		Use:   "vars",
 		Short: "Show the variables of a stack frame",
 		Long: `Show the variables in scope in a frame of the stopped thread (default: #0, the current one),
-grouped by scope (e.g. Locals). --depth expands objects and collections that many levels (1 = only
+grouped by scope (e.g. Locals; for python Locals and Globals, where special __dunder__ and
+function variables are hidden and class variables grouped). --depth expands objects and collections that many levels (1 = only
 the top-level values; objects with members are marked {…}). At most 50 members are shown per
 level and values are cut at 200 characters, with the remainder counted.
 
@@ -664,16 +689,19 @@ func newEvalCommand(info version.Info, g *globals) *cobra.Command {
 		Long: `Evaluate an expression in the context of a frame of the stopped thread (default: #0) and print
 its value and type. For dotnet, netcoredbg evaluates C# expressions: operators, member and index
 access, method calls and casts; lambdas and LINQ with lambdas are not supported. At an exception
-stop, $exception is the exception (e.g. '$exception.StackTrace'). --depth N also shows the
-result's members, N-1 levels deep, cut to --budget tokens.
+stop, $exception is the exception (e.g. '$exception.StackTrace'). For python, debugpy evaluates
+Python expressions (a string's value is its repr, e.g. 'ab'). --depth N also shows the result's
+members, N-1 levels deep, cut to --budget tokens.
 
-Side effects: an expression that visibly changes the program (for dotnet: a method call, new, an
-assignment, ++ or --, an interpolated string) is refused with SIDE_EFFECTS (exit 1) unless you
-pass --allow-side-effects. That flag makes the eval an execution request: it needs the control
-lease (see below) and is logged in 'eyedbg events'. The check is best-effort, a scan of the
-expression's text: a property getter, indexer or operator still runs code in the program without
-it (netcoredbg can't evaluate without running code), so a getter with side effects is not caught,
-and a delegate called through a parenthesized name, '(f)(1)', passes as a cast.
+Side effects: an expression that visibly changes the program is refused with SIDE_EFFECTS (exit 1)
+unless you pass --allow-side-effects: for dotnet a method call, new, an assignment, ++ or --, an
+interpolated string; for python a call (except read-only builtins such as len, str, repr, type,
+isinstance), = or :=, an f-string. That flag makes the eval an execution request: it needs the
+control lease (see below) and is logged in 'eyedbg events'. The check is best-effort, a scan of
+the expression's text: a property getter, indexer or operator still runs code in the program
+without it (neither adapter can evaluate without running code), so a getter with side effects is
+not caught, and for dotnet a delegate called through a parenthesized name, '(f)(1)', passes as a
+cast.
 
 An evaluation still running when another client resumes the program is canceled (ADAPTER_ERROR).
 Needs a stopped program; returns at once.` + leaseHelp + sessionHelp,
@@ -771,7 +799,9 @@ const bpAddLong = `Add a breakpoint. LOCATION is one of:
                 from) and 'eyedbg bp ls' notes it; add it again to find the text anew;
   func:NAME     a function, by name or a dotted suffix of its full name (Price, Orders.Price or
                 Ns.Orders.Price), bound when its module loads. Needs an adapter that has them
-                (netcoredbg does; UNSUPPORTED_BY_ADAPTER, exit 4, otherwise).
+                (netcoredbg and debugpy do; UNSUPPORTED_BY_ADAPTER, exit 4, otherwise). For
+                python NAME is the bare function name (price, not Orders.price), and debugpy
+                verifies any name, so a misspelled one is "verified" and never stops.
 The adapter may move a line breakpoint to the nearest line with code: the output shows the
 requested and actual line, and whether it is verified. An unverified breakpoint is pending (e.g.
 its module isn't loaded yet) and may still bind later; 'eyedbg bp ls' shows the current state.
@@ -1079,6 +1109,31 @@ func parseEnv(kvs []string) (map[string]string, error) {
 	}
 
 	return env, nil
+}
+
+// parseOpts parses --opt NAME=VALUE flags; VALUE may be empty, a NAME
+// only once.
+func parseOpts(kvs []string) (map[string]string, error) {
+	if len(kvs) == 0 {
+		return nil, nil //nolint:nilnil // No options is a valid, empty result.
+	}
+
+	opts := make(map[string]string, len(kvs))
+
+	for _, kv := range kvs {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" {
+			return nil, fmt.Errorf("invalid --opt %q: want NAME=VALUE", kv)
+		}
+
+		if _, dup := opts[k]; dup {
+			return nil, fmt.Errorf("--opt %s is given twice", k)
+		}
+
+		opts[k] = v
+	}
+
+	return opts, nil
 }
 
 // absPath makes p absolute against the working directory ("" stays "").

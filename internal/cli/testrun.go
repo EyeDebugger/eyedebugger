@@ -29,6 +29,9 @@ NO_TEST_HOST (exit 3): debug the test app with 'eyedbg start' instead. A build e
 BUILD_FAILED, a run that ends without a test host (e.g. no test matches the filter) NO_TEST_HOST,
 both with the end of the output.
 
+Only dotnet has test runs. For python, run pytest as a module under 'eyedbg start':
+'eyedbg start python --opt module=pytest --bp tests/test_x.py:8 -- -x tests/test_x.py'.
+
 Breakpoints, exceptions, the lease policy and recording work as for 'eyedbg start'.` + dumpHelp
 
 func newTestCommand(info version.Info, g *globals) *cobra.Command {

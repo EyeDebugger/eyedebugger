@@ -62,6 +62,14 @@ func serveInProcess(t *testing.T, p daemon.Paths) {
 		}
 	})
 
+	waitForDaemon(t, p, done)
+}
+
+// waitForDaemon waits until the daemon serving p (done receives Serve's
+// result) accepts connections.
+func waitForDaemon(t *testing.T, p daemon.Paths, done <-chan error) {
+	t.Helper()
+
 	ctx2, cancel2 := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel2()
 

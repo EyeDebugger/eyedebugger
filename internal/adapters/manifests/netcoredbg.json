@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "name": "netcoredbg",
+  "description": ".NET debugger by Samsung (MIT)",
+  "homepage": "https://github.com/Samsung/netcoredbg",
+  "license": "MIT",
+  "version": "3.2.0-1092",
+  "adapter": {
+    "id": "coreclr",
+    "transport": "stdio",
+    "entry": "netcoredbg",
+    "args": ["--interpreter=vscode"],
+    "env": "EYEDBG_NETCOREDBG",
+    "path": true,
+    "versionArgs": ["--version"],
+    "notRunningHint": "reinstall it, or check that the .NET runtime it needs is present"
+  },
+  "install": {
+    "downloads": {
+      "linux/amd64": {
+        "url": "https://github.com/Samsung/netcoredbg/releases/download/3.2.0-1092/netcoredbg-linux-amd64.tar.gz",
+        "sha256": "080eb3b2d2152465f599d3b33d1ee6e747794e11cc0a3773ec689f5e5f2c5afa",
+        "archive": "tar.gz",
+        "root": "netcoredbg"
+      },
+      "linux/arm64": {
+        "url": "https://github.com/Samsung/netcoredbg/releases/download/3.2.0-1092/netcoredbg-linux-arm64.tar.gz",
+        "sha256": "065ff49badec8a695dbea2de6ab6a330c774a191e426a217ab8cc05250627ccb",
+        "archive": "tar.gz",
+        "root": "netcoredbg"
+      },
+      "darwin/arm64": {
+        "url": "https://github.com/Samsung/netcoredbg/releases/download/3.2.0-1092/netcoredbg-osx-arm64.zip",
+        "sha256": "f4fa33b3ff874910cc184b4bb3b9c56d0abdf5c6521cee0b144d7c6e4a6e59ea",
+        "archive": "zip",
+        "root": "netcoredbg"
+      },
+      "windows/amd64": {
+        "url": "https://github.com/Samsung/netcoredbg/releases/download/3.2.0-1092/netcoredbg-win64.zip",
+        "sha256": "3c410a45fa502415203a94fcb88654af65bf8e3dac158a5527a722e7a6b9274a",
+        "archive": "zip",
+        "root": "netcoredbg"
+      }
+    }
+  },
+  "language": {
+    "name": "dotnet",
+    "builtin": true,
+    "extensions": [".cs", ".fs", ".vb"],
+    "markers": ["*.csproj", "*.fsproj", "*.vbproj", "*.sln"]
+  }
+}

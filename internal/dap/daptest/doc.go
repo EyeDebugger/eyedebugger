@@ -41,7 +41,9 @@
 // context), "$bps" (the program file's breakpoints, e.g. "3,5 if
 // false,9"), "$fbps" (the function breakpoints) and "$filters" (the
 // exception filters). threads, stackTrace, scopes and variables describe
-// one thread with one frame whose locals are line and x.
+// one thread with one frame whose locals are line and x; with
+// [Options.GlobalsScope] the Locals scope has presentationHint "locals"
+// and a second, cheap Globals scope holds g.
 //
 // [RunnerCommand] starts the test binary as a fake 'dotnet test' run
 // instead (TestMain calls [MaybeRunRunner]): it prints a test host's

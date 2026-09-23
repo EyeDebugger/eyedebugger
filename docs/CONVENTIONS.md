@@ -82,9 +82,15 @@
   `TestMain` that calls `daptest.MaybeRun()` first and returns when it returns true, plus a small
   fake `session.Driver` launching `daptest.Command()` with `daptest.Arguments(...)`. Test runs use
   the fake runner too (`daptest.MaybeRunRunner()` in `TestMain`, `daptest.RunnerCommand`).
-- e2e tests against real adapters (`drivers/dotnet`, `EYEDBG_E2E=1`) need the .NET SDK and
-  netcoredbg. They drive the sample apps in `testdata/apps`, copied to a temporary directory first
-  (`copyApp`), and find lines by their `// marker: NAME` comments, not by number.
+- e2e tests against real adapters (`EYEDBG_E2E=1`) drive the sample apps in `testdata/apps`,
+  copied to a temporary directory first, and find lines by their `// marker: NAME` (`# marker:
+  NAME`) comments, not by number. `drivers/dotnet` needs the .NET SDK and netcoredbg;
+  `drivers/generic` (`TestPython*`) needs Python 3.10+ with debugpy (`EYEDBG_PYTHON=/path/to/venv/
+  bin/python`) or `adapters install debugpy`, and `TestPythonManagedInstall` also
+  `EYEDBG_E2E_NETWORK=1` (it downloads debugpy into a temporary data directory).
+- Bundled adapter manifests are validated by a unit test (`internal/adapters`); a language that
+  needs no Go logic gets a manifest, not a driver, and the generic driver's fake-adapter tests
+  (`drivers/generic`) show how to debug a manifest-only language in tests.
 
 ## Dependencies
 

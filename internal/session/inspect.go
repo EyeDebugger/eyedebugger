@@ -269,8 +269,8 @@ func (s *Session) Changes(ctx context.Context, budget int) ([]api.Scope, error) 
 	return []api.Scope{scope}, nil
 }
 
-// frameLocals returns the variables of every cheap scope of frame fid, one
-// level deep.
+// frameLocals returns the variables of frame fid's local scopes (see
+// localScopes), one level deep.
 func (s *Session) frameLocals(ctx context.Context, fid int) ([]api.Var, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
@@ -285,11 +285,7 @@ func (s *Session) frameLocals(ctx context.Context, fid int) ([]api.Var, int, err
 		more int
 	)
 
-	for _, sc := range scopes {
-		if sc.Expensive {
-			continue
-		}
-
+	for _, sc := range localScopes(scopes) {
 		vars, m, err := s.variables(ctx, sc.VariablesReference, 1)
 		if err != nil {
 			return nil, 0, err
@@ -300,6 +296,29 @@ func (s *Session) frameLocals(ctx context.Context, fid int) ([]api.Var, int, err
 	}
 
 	return all, more, nil
+}
+
+// localScopes picks the scopes a stop capture reads: those the adapter
+// marks with presentationHint "locals" when it marks any (an adapter that
+// also returns globals), else every cheap one.
+func localScopes(scopes []godap.Scope) []godap.Scope {
+	var marked, cheap []godap.Scope
+
+	for _, sc := range scopes {
+		if sc.PresentationHint == "locals" {
+			marked = append(marked, sc)
+		}
+
+		if !sc.Expensive {
+			cheap = append(cheap, sc)
+		}
+	}
+
+	if len(marked) > 0 {
+		return marked
+	}
+
+	return cheap
 }
 
 func (s *Session) scopes(ctx context.Context, fid int) ([]godap.Scope, error) {

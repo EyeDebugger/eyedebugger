@@ -23,3 +23,4 @@ CLAUDE.local.md
 # Builds of the sample apps (tests copy them to a temp dir first)
 /testdata/apps/**/bin/
 /testdata/apps/**/obj/
+/testdata/apps/**/__pycache__/

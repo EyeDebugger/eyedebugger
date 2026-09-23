@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/eyedebugger/eyedebugger/internal/adapters"
@@ -29,19 +30,34 @@ const (
 	adapterType = "coreclr"
 )
 
-// Driver debugs .NET programs with netcoredbg (docs/DESIGN.md §8).
-type Driver struct{}
+// Language is the language name the .NET driver serves.
+const Language = lang
 
-// New returns the .NET driver.
-func New() *Driver { return &Driver{} }
+// Driver debugs .NET programs with netcoredbg (docs/DESIGN.md §8), as
+// described by the adapter manifest serving dotnet.
+type Driver struct {
+	m *adapters.Manifest
+}
+
+// New returns the .NET driver with the manifest the default registry
+// (bundled and user manifests) has for dotnet.
+func New() *Driver { return NewWith(adapters.Default(lang).Language(lang)) }
+
+// NewWith returns the .NET driver for adapter manifest m (nil: none, so
+// every start fails with ADAPTER_NOT_INSTALLED).
+func NewWith(m *adapters.Manifest) *Driver { return &Driver{m: m} }
 
 // Name implements session.Driver.
 func (*Driver) Name() string { return lang }
 
 // Prepare implements session.Driver: it builds the project (unless a program
 // is given) and launches the result under netcoredbg via the dotnet host.
-func (*Driver) Prepare(ctx context.Context, spec session.LaunchSpec) (session.Launch, error) {
-	launch, err := netcoredbg()
+func (d *Driver) Prepare(ctx context.Context, spec session.LaunchSpec) (session.Launch, error) {
+	if len(spec.Options) > 0 {
+		return session.Launch{}, api.NewError(api.CodeInvalidRequest, "dotnet takes no --opt options", "see 'eyedbg help start'")
+	}
+
+	launch, err := d.netcoredbg()
 	if err != nil {
 		return session.Launch{}, err
 	}
@@ -85,12 +101,23 @@ func (*Driver) Prepare(ctx context.Context, spec session.LaunchSpec) (session.La
 	return launch, nil
 }
 
-// netcoredbg returns the Launch fields every netcoredbg session shares.
-func netcoredbg() (session.Launch, error) {
-	dbg, err := adapters.FindNetcoredbg()
+// netcoredbg returns the Launch fields every netcoredbg session shares,
+// from the manifest.
+func (d *Driver) netcoredbg() (session.Launch, error) {
+	m := d.m
+
+	switch {
+	case m == nil:
+		return session.Launch{}, api.NewError(api.CodeAdapterMissing, "no adapter manifest serves dotnet",
+			"see 'eyedbg adapters ls': a user manifest may have replaced netcoredbg's or failed to load")
+	case m.Adapter.Runtime != adapters.RuntimeNative:
+		return session.Launch{}, api.NewError(api.CodeAdapterMissing,
+			"the dotnet adapter manifest "+m.Name+" is not a native executable", "see 'eyedbg adapters ls'")
+	}
+
+	dbg, err := adapters.Find(m)
 	if errors.Is(err, adapters.ErrNotInstalled) {
-		return session.Launch{}, api.NewError(api.CodeAdapterMissing, "netcoredbg is not installed",
-			"run 'eyedbg adapters install netcoredbg', or set "+adapters.EnvNetcoredbg+" to an existing netcoredbg")
+		return session.Launch{}, api.NewError(api.CodeAdapterMissing, m.Name+" is not installed", installHint(m))
 	}
 
 	if err != nil {
@@ -99,8 +126,9 @@ func netcoredbg() (session.Launch, error) {
 
 	return session.Launch{
 		Adapter:     dbg.Path,
-		AdapterArgs: []string{"--interpreter=vscode"},
-		AdapterID:   adapterType,
+		AdapterArgs: slices.Clone(m.Adapter.Args),
+		AdapterEnv:  adapters.Environ(m),
+		AdapterID:   m.Adapter.ID,
 		// netcoredbg's exception filters (docs/adr/0010).
 		ExceptionFilters: map[api.ExceptionMode][]string{
 			api.ExceptionsAll:      {"all"},
@@ -109,6 +137,26 @@ func netcoredbg() (session.Launch, error) {
 		SideEffects: SideEffects,
 		AttachHint:  attachHint,
 	}, nil
+}
+
+// installHint says how to get m's adapter: "run 'eyedbg adapters install
+// netcoredbg', or set EYEDBG_NETCOREDBG to an existing netcoredbg".
+func installHint(m *adapters.Manifest) string {
+	var ways []string
+
+	if m.Install != nil {
+		ways = append(ways, "run 'eyedbg adapters install "+m.Name+"'")
+	}
+
+	if m.Adapter.Env != "" {
+		ways = append(ways, "set "+m.Adapter.Env+" to an existing "+m.Adapter.Entry)
+	}
+
+	if len(ways) == 0 {
+		return "install " + m.Adapter.Entry + " (see 'eyedbg adapters ls')"
+	}
+
+	return strings.Join(ways, ", or ")
 }
 
 // launchArguments builds netcoredbg's launch request. netcoredbg starts

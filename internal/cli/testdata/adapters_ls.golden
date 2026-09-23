@@ -1,0 +1,8 @@
+ADAPTER     VERSION     LANGUAGE           SOURCE   DESCRIPTION
+debugpy     1.8.22      python             bundled  Python debugger by Microsoft (MIT); needs Python 3.10+
+  options: justMyCode=bool (default true), module, python
+netcoredbg  3.2.0-1092  dotnet (built-in)  bundled  .NET debugger by Samsung (MIT)
+toydbg      1.0         toy                user     The fake test adapter
+  file: <config>/adapters/toy.json
+  options: lines=int (default 10)
+ignored: <config>/adapters/broken.json: description: is required

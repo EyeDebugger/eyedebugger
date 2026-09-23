@@ -23,7 +23,12 @@ OS/arch, the debug adapter and its version, a reproduction, and the impact.
 
 - Access control of the daemon IPC endpoint and token file (docs/DESIGN.md §6, §11).
 - Untrusted input: adapter messages, adapter manifests, downloaded adapters and checksum
-  verification (docs/DESIGN.md §7).
+  verification (docs/DESIGN.md §7). Your own adapter manifests are trusted like your shell
+  configuration: they name commands eyedbg runs (ADR 0011). eyedbg reading a manifest from
+  anywhere but your config directory (e.g. from a project), or accepting one that fails its
+  permission check (someone else can write it or its directory), is in scope; so is a Python
+  probe or adapter start that imports code from the program's working directory, or running a
+  project venv another user owns or can write.
 - Eval side effects vs. the read-only default (docs/DESIGN.md §11).
 - Redaction and session recordings (docs/DESIGN.md §5, §11).
 - Build, CI and release supply chain.
