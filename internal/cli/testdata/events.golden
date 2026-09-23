@@ -1,5 +1,5 @@
 (11 older events were dropped: the log keeps only recent events)
-12  started by agent: bin/Debug/net10.0/app.dll (lease policy handoff)
+12  started by agent: app.dll (lease policy handoff)
 13  bp 1 added by agent: Program.cs:5
 14  thread 4242 started
 15  stopped: breakpoint, thread 4242

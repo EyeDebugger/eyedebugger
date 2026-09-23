@@ -203,7 +203,7 @@ func sampleEvents() api.EventsResult {
 	bp1 := api.Breakpoint{ID: 1, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 5, Line: 5, Verified: true, CreatedAt: renderTime}
 	bp2 := api.Breakpoint{ID: 2, Owner: "human:ijat", File: "/work/app/Program.cs", RequestedLine: 9, Line: 9, Verified: true, Condition: "i == 3", CreatedAt: renderTime}
 	events := []api.Event{
-		{Kind: api.EventStarted, Client: "agent", Program: "/work/app/bin/Debug/net10.0/app.dll", Lease: &api.LeaseInfo{Policy: api.LeaseHandoff, Holder: "agent", Since: &renderTime}},
+		{Kind: api.EventStarted, Client: "agent", Program: "/work/app/app.dll", Lease: &api.LeaseInfo{Policy: api.LeaseHandoff, Holder: "agent", Since: &renderTime}},
 		{Kind: api.EventBreakpoint, Action: "added", Client: "agent", Breakpoint: &bp1},
 		{Kind: api.EventThread, Reason: "started", ThreadID: 4242},
 		{Kind: api.EventStopped, Stop: &api.StopInfo{Reason: "breakpoint", ThreadID: 4242}},
