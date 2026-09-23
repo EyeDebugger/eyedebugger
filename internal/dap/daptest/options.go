@@ -14,6 +14,18 @@ import (
 // EnvFakeOptions carries a started adapter's [Options] as JSON.
 const EnvFakeOptions = "EYEDBG_TEST_FAKE_OPTIONS"
 
+// Exception filters the fake adapter declares and understands.
+const (
+	filterAll           = "all"
+	filterUserUnhandled = "user-unhandled"
+)
+
+// Launch (and attach) argument field names, shared with [UserManifest].
+const (
+	argProgram = "program"
+	argLines   = "lines"
+)
+
 // Options change how the fake adapter behaves.
 type Options struct {
 	// Caps replaces the capabilities it declares (nil: [DefaultCaps]).
@@ -38,8 +50,8 @@ func DefaultCaps() godap.Capabilities {
 		SupportsSetExpression:            true,
 		SupportsExceptionInfoRequest:     true,
 		ExceptionBreakpointFilters: []godap.ExceptionBreakpointsFilter{
-			{Filter: "all", Label: "All exceptions"},
-			{Filter: "user-unhandled", Label: "User-unhandled exceptions"},
+			{Filter: filterAll, Label: "All exceptions"},
+			{Filter: filterUserUnhandled, Label: "User-unhandled exceptions"},
 		},
 	}
 }
@@ -64,7 +76,7 @@ func CommandWith(opts Options) (path string, args, env []string, err error) {
 		return "", nil, nil, fmt.Errorf("encode fake adapter options: %w", err)
 	}
 
-	return exe, []string{"-test.run=^$"}, []string{EnvFakeAdapter + "=1", EnvFakeOptions + "=" + string(raw)}, nil
+	return exe, []string{noTestsArg}, []string{EnvFakeAdapter + "=1", EnvFakeOptions + "=" + string(raw)}, nil
 }
 
 // ProgramArgs are a fake program's launch (or attach) arguments.
@@ -87,7 +99,7 @@ type ProgramArgs struct {
 
 // Map returns the arguments as a request body.
 func (a ProgramArgs) Map() map[string]any {
-	m := map[string]any{"program": a.Program, "lines": a.Lines, "stopAtEntry": a.StopAtEntry, "hang": a.Hang}
+	m := map[string]any{argProgram: a.Program, argLines: a.Lines, "stopAtEntry": a.StopAtEntry, "hang": a.Hang}
 
 	if a.Laps > 0 {
 		m["laps"] = a.Laps

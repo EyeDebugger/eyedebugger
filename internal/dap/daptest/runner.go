@@ -63,7 +63,7 @@ func RunnerCommand(mode string, code int) (path string, args, env []string, err 
 		return "", nil, nil, fmt.Errorf("locate the test binary: %w", err)
 	}
 
-	return exe, []string{"-test.run=^$"}, []string{EnvFakeRunner + "=" + mode, EnvFakeRunnerCode + "=" + strconv.Itoa(code)}, nil
+	return exe, []string{noTestsArg}, []string{EnvFakeRunner + "=" + mode, EnvFakeRunnerCode + "=" + strconv.Itoa(code)}, nil
 }
 
 func runRunner(mode string) error {

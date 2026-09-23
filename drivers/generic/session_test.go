@@ -37,35 +37,7 @@ func fakeManifest(t *testing.T, attached string) map[string]any {
 		t.Fatal(err)
 	}
 
-	m := map[string]any{
-		"schema": 1, "name": "fakedbg", "description": "The fake test adapter", "version": "1.0",
-		"adapter": map[string]any{
-			"id": "fake", "entry": exe, "args": []any{"-test.run=^$"},
-			"environment": map[string]any{daptest.EnvFakeAdapter: "1"},
-		},
-		"language": map[string]any{"name": "fakelang", "extensions": []any{".fake"}},
-		"options": map[string]any{
-			"lines": map[string]any{"type": "int", "default": "10", "help": "the program's length"},
-			"laps":  map[string]any{"type": "int", "help": "how often it runs"},
-		},
-		"launch": map[string]any{
-			"require": []any{"program"},
-			"arguments": map[string]any{
-				"program": "${program}", "lines": "${opt.lines}", "stopAtEntry": "${stopOnEntry}", "laps": "${opt.laps}",
-			},
-		},
-		"attachUnsupported": "start it with 'eyedbg start fakelang'",
-		"exceptions":        map[string]any{"all": []any{"all"}, "uncaught": []any{"user-unhandled"}},
-		"evalGuard":         map[string]any{"nonCallWords": []any{"not"}, "safeCalls": []any{"len"}, "assignOps": []any{"="}},
-	}
-
-	if attached != "" {
-		m["attach"] = map[string]any{"arguments": map[string]any{
-			"program": attached, "lines": 10, "hang": true, "processId": "${pid}",
-		}}
-	}
-
-	return m
+	return daptest.UserManifest(exe, attached)
 }
 
 // privateDir is a new temporary directory only the user can write: under

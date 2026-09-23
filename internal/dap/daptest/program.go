@@ -203,7 +203,7 @@ func (p *program) pause() {
 // exec runs line l, or stops at its throw when the "all" filter is on; it
 // reports whether it stopped.
 func (p *program) exec(l int) bool {
-	if !p.thrown && slices.Contains(p.throws, l) && slices.Contains(p.filters, "all") {
+	if !p.thrown && slices.Contains(p.throws, l) && slices.Contains(p.filters, filterAll) {
 		p.thrown = true
 		p.line, p.state = l, stateStopped
 		p.emit("stopped", godap.StoppedEventBody{Reason: reasonException, ThreadId: threadID, AllThreadsStopped: true, Text: exceptionText})
@@ -342,7 +342,7 @@ func (p *program) setFunctionBreakpoints(req []godap.FunctionBreakpoint) ([]goda
 // setFilters sets the exception filters: "all" and "user-unhandled".
 func (p *program) setFilters(filters []string) error {
 	for _, f := range filters {
-		if f != "all" && f != "user-unhandled" {
+		if f != filterAll && f != filterUserUnhandled {
 			return fmt.Errorf("unknown exception filter %q", f)
 		}
 	}
