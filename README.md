@@ -36,7 +36,7 @@ Full design: [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Roadmap
 
-1. Skeleton: daemon auto-start, IPC + token, version handshake, `daemon status/stop`.
+1. ✅ Skeleton: daemon auto-start, IPC + token, version handshake, `daemon start/status/stop/logs`.
 2. DAP core: go-dap client, netcoredbg install/doctor, `start` a console app, `bp add` (line), `continue`, `status`, `stack`, `vars`, `stop`.
 3. Agent ergonomics: stop snapshot, `--dump`, `run-until`, `wait`, `--changed`, budgets, JSON schema, errors.
 4. Model for P2: client identity, breakpoint ownership merge, lease, event log + `events --since`.

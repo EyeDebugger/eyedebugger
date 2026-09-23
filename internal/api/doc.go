@@ -1,10 +1,13 @@
 // Copyright The EyeDebugger Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package api defines the native JSON-RPC 2.0 API shared by the CLI and the
-// VS Code extension (and any future MCP wrapper, docs/DESIGN.md §10):
-// request and response types, stable error codes and the protocol version
-// (docs/DESIGN.md §2, §5).
+// Package api defines the native JSON-RPC 2.0 API between eyedbgd and its
+// clients (the CLI now, the VS Code extension in phase 2): wire types, method
+// names, stable error codes, the protocol version and the newline-delimited
+// JSON framing (docs/DESIGN.md §2, §5, §6).
 //
-// Not implemented yet (docs/DESIGN.md §13, milestone 1).
+// Every connection starts with a [MethodHello] request carrying the per-user
+// token; the daemon rejects anything else. The hello exchange is frozen across
+// protocol versions so that any client can talk to any daemon well enough to
+// detect a mismatch and restart it.
 package api

@@ -65,7 +65,8 @@ func TestErrorsExitNonZero(t *testing.T) {
 		wantStderr string
 	}{
 		{name: "unknown command", root: NewEyedbgCommand(testInfo), args: []string{"no-such-command"}, wantStderr: "eyedbg: "},
-		{name: "daemon stub", root: NewDaemonCommand(testInfo), wantStderr: "eyedbgd: the daemon"},
+		{name: "unknown daemon subcommand", root: NewEyedbgCommand(testInfo), args: []string{"daemon", "bogus"}, wantStderr: "eyedbg: unknown command"},
+		{name: "daemon extra args", root: NewDaemonCommand(testInfo), args: []string{"bogus"}, wantStderr: "eyedbgd: unknown command"},
 	}
 
 	for _, tt := range tests {
