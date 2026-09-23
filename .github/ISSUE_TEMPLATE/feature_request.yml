@@ -1,0 +1,34 @@
+name: Feature request
+description: Propose a command, flag, adapter, language or behavior change.
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [docs/DESIGN.md](https://github.com/EyeDebugger/eyedebugger/blob/main/docs/DESIGN.md) first; architectural changes also need an ADR (see docs/adr/README.md).
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [CLI, Daemon, Sessions and leases, DAP and adapters, .NET driver, MCP server, VS Code (phase 2), Documentation, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you (or your agent) trying to do, and what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: The command surface and output you would expect.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
