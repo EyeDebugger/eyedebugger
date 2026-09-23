@@ -1,0 +1,59 @@
+# GoReleaser v2 configuration. Docs: https://goreleaser.com/customization/
+# Publishing is disabled (release.disable) until the project cuts its first release;
+# use `goreleaser release --snapshot --clean` for a local dry run.
+version: 2
+
+project_name: eyedebugger
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - &build
+    id: eyedbg
+    main: ./cmd/eyedbg
+    binary: eyedbg
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X {{ .ModulePath }}/internal/version.version={{ .Version }}
+      - -X {{ .ModulePath }}/internal/version.commit={{ .FullCommit }}
+      - -X {{ .ModulePath }}/internal/version.date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+  - <<: *build
+    id: eyedbgd
+    main: ./cmd/eyedbgd
+    binary: eyedbgd
+
+archives:
+  - id: default
+    ids: [eyedbg, eyedbgd]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - NOTICE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot+{{ .ShortCommit }}"
+
+changelog:
+  disable: true # CHANGELOG.md (Keep a Changelog) is the source of release notes
+
+release:
+  disable: true # no publishing yet
