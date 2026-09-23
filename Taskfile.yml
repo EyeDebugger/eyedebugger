@@ -1,0 +1,107 @@
+# Developer tasks. Requires Task v3 (https://taskfile.dev); see CONTRIBUTING.md.
+# CI (.github/workflows/ci.yml) runs the same commands; keep the two in sync.
+version: '3'
+
+vars:
+  MODULE: github.com/eyedebugger/eyedebugger
+  # Pinned tool versions. Bump together with .github/workflows/ci.yml.
+  GOLANGCI_LINT_VERSION: v2.13.2
+  GOVULNCHECK_VERSION: v1.8.0
+  VERSION:
+    sh: git describe --tags --always --dirty
+  LDFLAGS: -X {{.MODULE}}/internal/version.version={{.VERSION}}
+
+tasks:
+  default:
+    desc: List tasks
+    cmds:
+      - task --list
+    silent: true
+
+  build:
+    desc: Build all binaries for this platform into ./bin
+    cmds:
+      - go build -trimpath -ldflags "{{.LDFLAGS}}" -o bin/ ./cmd/...
+
+  build:cross:
+    desc: Compile every package for linux, darwin, windows x amd64, arm64 (CGO disabled)
+    env:
+      CGO_ENABLED: '0'
+    cmds:
+      - for:
+          matrix:
+            OS: [linux, darwin, windows]
+            ARCH: [amd64, arm64]
+        cmd: GOOS={{.ITEM.OS}} GOARCH={{.ITEM.ARCH}} go build ./...
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test -shuffle=on ./...
+
+  test:race:
+    desc: Run unit tests with the race detector (needs cgo and a C compiler)
+    cmds:
+      - go test -race -shuffle=on ./...
+
+  test:golden:
+    desc: Rewrite golden files from current output; review the diff before committing
+    env:
+      EYEDBG_UPDATE_GOLDEN: '1'
+    cmds:
+      - go test ./...
+
+  fmt:
+    desc: Format code (gofumpt, goimports)
+    preconditions:
+      - sh: command -v golangci-lint
+        msg: golangci-lint not found; install {{.GOLANGCI_LINT_VERSION}} (see CONTRIBUTING.md)
+    cmds:
+      - golangci-lint fmt
+
+  lint:
+    desc: Run golangci-lint
+    preconditions:
+      - sh: command -v golangci-lint
+        msg: golangci-lint not found; install {{.GOLANGCI_LINT_VERSION}} (see CONTRIBUTING.md)
+    cmds:
+      - golangci-lint run
+
+  vuln:
+    desc: Scan for known vulnerabilities with govulncheck
+    cmds:
+      - go run golang.org/x/vuln/cmd/govulncheck@{{.GOVULNCHECK_VERSION}} ./...
+
+  tidy:
+    desc: Tidy go.mod and go.sum
+    cmds:
+      - go mod tidy
+
+  tidy:check:
+    desc: Fail if go.mod or go.sum is not tidy
+    cmds:
+      - go mod tidy -diff
+
+  release:check:
+    desc: Validate .goreleaser.yaml (needs goreleaser v2)
+    cmds:
+      - goreleaser check
+
+  snapshot:
+    desc: Build release archives locally into ./dist without publishing (needs goreleaser v2)
+    cmds:
+      - goreleaser release --snapshot --clean
+
+  clean:
+    desc: Remove build output
+    cmds:
+      - rm -rf bin dist
+
+  ci:
+    desc: Run the checks CI runs
+    cmds:
+      - task: tidy:check
+      - task: lint
+      - task: test:race
+      - task: build:cross
+      - task: vuln
