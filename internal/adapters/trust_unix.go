@@ -66,3 +66,10 @@ func (c trustChecker) check(p string, info fs.FileInfo) error {
 
 	return nil
 }
+
+// openManifest opens a user manifest for reading without blocking: a FIFO
+// swapped in after the regular-file check fails the check on the opened
+// file instead of hanging the loader.
+func openManifest(p string) (*os.File, error) {
+	return os.OpenFile(p, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+}

@@ -250,7 +250,7 @@ func readUserFile(p string) (*Manifest, error) {
 		return nil, err
 	}
 
-	f, err := os.Open(p)
+	f, err := openManifest(p)
 	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
 	}
