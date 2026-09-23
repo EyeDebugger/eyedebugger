@@ -1,0 +1,21 @@
+# Build output
+/bin/
+/dist/
+
+# Go test and profiling artifacts
+*.test
+*.out
+*.prof
+/coverage.*
+
+# Editors and OS files
+/.idea/
+/.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local, per-user agent state (shared agent instructions live in AGENTS.md)
+/.claude/settings.local.json
+/.claude/worktrees/
+CLAUDE.local.md
