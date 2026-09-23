@@ -175,6 +175,8 @@ internal/dap/        DAP client over go-dap: framing, seq mapping, reverse reque
 internal/facade/     DAP facade (P2)
 internal/present/    budgeting, truncation, text/JSON renderers
 internal/adapters/   manifest loader, installer (download + checksum)
+internal/cli/        command trees for all binaries (only package importing the CLI framework)
+internal/version/    build metadata (ldflags / debug.ReadBuildInfo)
 drivers/dotnet/      Driver impl
 drivers/generic/     manifest-only driver
 helpers/dotnet/      C# side helper (ClrMD, EventPipe)

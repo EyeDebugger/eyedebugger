@@ -1,0 +1,27 @@
+# Architecture Decision Records
+
+An ADR records a hard-to-reverse decision: its context, the options considered, and the outcome.
+This project uses [MADR 4.0](https://github.com/adr/madr) ([template.md](template.md)).
+
+Write an ADR for hard-to-reverse choices: language, protocols, wire and persisted formats, the
+security model, major dependencies, licensing and the contribution process.
+
+## Index
+
+| # | Title | Status |
+|---|---|---|
+| [0001](0001-record-architecture-decisions.md) | Record architecture decisions | accepted |
+| [0002](0002-implement-in-go.md) | Implement in Go | accepted |
+| [0003](0003-drive-debuggers-through-dap-adapters.md) | Drive debuggers through DAP adapters | accepted |
+| [0004](0004-daemon-owned-sessions-and-control-lease.md) | Daemon-owned sessions and control lease | accepted |
+| [0005](0005-never-use-vsdbg.md) | Never use vsdbg | accepted |
+| [0006](0006-use-cobra-for-the-cli.md) | Use cobra for the CLI | accepted |
+| [0007](0007-use-task-as-the-task-runner.md) | Use Task as the task runner | accepted |
+| [0008](0008-apache-2-license-and-dco.md) | Apache-2.0 license and DCO | accepted |
+
+## Process
+
+Copy `template.md` to `NNNN-kebab-title.md` with the next number and `status: proposed`, open a
+PR, and a maintainer marks it `accepted`.
+
+Accepted decisions aren't edited; a new ADR supersedes them (`superseded by ADR-NNNN`).
