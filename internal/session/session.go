@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -22,14 +23,17 @@ import (
 	"github.com/eyedebugger/eyedebugger/internal/present"
 )
 
-// Timeouts for talking to an adapter.
+// Timeouts for talking to an adapter, and size limits.
 const (
 	requestTimeout    = 30 * time.Second
 	shutdownTimeout   = 3 * time.Second
-	maxOutputLines    = 2000
 	maxSourceFileSize = 4 << 20
-	// snapshotOutput is how many output chunks a snapshot carries.
-	snapshotOutput = 20
+	// maxOutputChunk cuts one output event's text.
+	maxOutputChunk = 64 << 10
+	// snapshotOutput is how many output chunks a snapshot carries, in at
+	// most snapshotOutputBytes.
+	snapshotOutput      = 20
+	snapshotOutputBytes = 16 << 10
 	// dumpFrames is how many frames a stack dump carries.
 	dumpFrames = 10
 	// Adapters may send a program's last output after the stopped event: a
@@ -39,16 +43,23 @@ const (
 	outputSettleMax = 250 * time.Millisecond
 )
 
-// Session is one debuggee driven through one adapter process.
+// Session is one debuggee driven through one adapter process, shared by
+// any number of clients.
+//
+// Lock order: execMu, syncMu, captureMu, mu, then the event log's and the
+// recorder's own locks. The DAP read goroutine (onEvent) takes only mu and
+// below, never execMu or syncMu, and nothing holds mu while it waits on the
+// adapter.
 type Session struct {
 	ID        string
 	Lang      string
 	Program   string
 	CreatedAt time.Time
 
-	cmd    *exec.Cmd
-	client *dap.Client
-	logger *slog.Logger
+	cmd     *exec.Cmd
+	client  *dap.Client
+	logger  *slog.Logger
+	starter api.Client
 	// life is the manager's context; shutdown work started by adapter
 	// events (not by a request) runs under it.
 	life context.Context //nolint:containedctx // Outlives requests by design, like the adapter it tears down.
@@ -56,6 +67,19 @@ type Session struct {
 	caps        godap.Capabilities
 	initialized chan struct{}
 	initOnce    sync.Once
+
+	// execMu serializes execution-changing requests (docs/DESIGN.md §3):
+	// each checks the state, then the lease, then sends, all under it.
+	execMu sync.Mutex
+	// syncMu serializes setBreakpoints round trips (snapshot, request,
+	// apply), so the adapter always ends up with the newest list.
+	syncMu sync.Mutex
+
+	log *eventLog
+	// rec records the session's control events; nil when not recording.
+	// Both are set before the session is shared.
+	rec     *recorder
+	recPath string
 
 	mu        sync.Mutex
 	state     api.SessionState
@@ -66,11 +90,19 @@ type Session struct {
 	endReason string
 	bps       map[string][]*breakpoint // by absolute file path
 	nextBP    int
-	output    []api.OutputLine
-	outSeq    int
-	resumedAt int           // outSeq when the program last resumed
-	changed   chan struct{} // closed and replaced on every state change
-	ended     bool          // adapter torn down
+	lease     lease
+	clients   []api.ClientInfo // by first seen
+	resumedAt int              // log seq when the program last resumed
+	// lastOutput is the seq of the newest output event.
+	lastOutput int
+	// execInFlight is set while an execution request is sent: the
+	// adapter's continued event for it is not logged.
+	execInFlight bool
+	// stopping is the client that ended the session, and stopReason why;
+	// the ended event says so rather than what the adapter reported.
+	stopping, stopReason string
+	changed              chan struct{} // closed and replaced on every state change
+	ended                bool          // adapter torn down
 
 	// captureMu serializes fetching stop captures; cur is the capture of
 	// the current (or last) stop, prev the one before it.
@@ -93,19 +125,43 @@ type breakpoint struct {
 	adapterID int
 }
 
-func newSession(life context.Context, id, lang string, launch Launch, logger *slog.Logger) *Session {
+// newSession returns a session started by starter, who holds its lease.
+func newSession(life context.Context, id, lang string, launch Launch, logger *slog.Logger, starter api.Client, policy api.LeasePolicy) *Session {
+	now := time.Now()
+
 	return &Session{
 		life:        life,
 		ID:          id,
 		Lang:        lang,
 		Program:     launch.Program,
-		CreatedAt:   time.Now(),
+		CreatedAt:   now,
 		logger:      logger.With(slog.String("session", id)),
+		starter:     starter,
 		initialized: make(chan struct{}),
+		log:         newEventLog(maxEvents, maxEventBytes, time.Now),
 		state:       api.StateStarting,
 		bps:         make(map[string][]*breakpoint),
+		lease:       lease{policy: policy, holder: starter, since: now},
+		clients:     []api.ClientInfo{{Client: starter, FirstSeen: now, LastSeen: now}},
 		changed:     make(chan struct{}),
 	}
+}
+
+// attachRecorder records the session's control events to w from now on.
+// Call it before the session is shared.
+func (s *Session) attachRecorder(w io.WriteCloser, path string) {
+	s.rec = newRecorder(w, maxRecording, s.logger)
+	s.recPath = path
+	s.log.setSink(s.rec.record)
+}
+
+// logStarted appends the started event, the log's first.
+func (s *Session) logStarted() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	info := s.lease.info()
+	s.log.append(api.Event{Kind: api.EventStarted, Client: s.starter.ID, Program: s.Program, Lease: &info})
 }
 
 // startAdapter launches the adapter process and connects a DAP client to it.
@@ -136,8 +192,8 @@ func (s *Session) startAdapter(ctx context.Context, launch Launch, stderr io.Wri
 	return nil
 }
 
-// configure runs the DAP start-up sequence: initialize, launch, breakpoints,
-// configurationDone.
+// configure runs the DAP start-up sequence: initialize, launch, breakpoints
+// (owned by the starter), configurationDone.
 func (s *Session) configure(ctx context.Context, launch Launch, bps []api.BreakpointSpec) error {
 	if err := s.initialize(ctx, launch.AdapterID); err != nil {
 		return err
@@ -231,8 +287,13 @@ func (s *Session) waitInitialized(ctx context.Context, launchDone chan error) er
 // configurationDone.
 func (s *Session) configurationPhase(ctx context.Context, bps []api.BreakpointSpec) error {
 	s.mu.Lock()
-	for _, b := range bps {
-		s.addBreakpointLocked(b)
+
+	added := make([]*breakpoint, 0, len(bps))
+
+	for _, spec := range bps {
+		if b, isNew, _ := s.addBreakpointLocked(s.starter.ID, spec); isNew {
+			added = append(added, b)
+		}
 	}
 
 	files := make([]string, 0, len(s.bps))
@@ -246,6 +307,12 @@ func (s *Session) configurationPhase(ctx context.Context, bps []api.BreakpointSp
 			return err
 		}
 	}
+
+	s.mu.Lock()
+	for _, b := range added {
+		s.logBreakpointLocked("added", s.starter.ID, b)
+	}
+	s.mu.Unlock()
 
 	if _, err := s.client.Do(ctx, &godap.SetExceptionBreakpointsRequest{
 		Request:   godap.Request{Command: "setExceptionBreakpoints"},
@@ -275,14 +342,26 @@ func (s *Session) onEvent(ev godap.EventMessage) {
 		s.stops++
 		s.stop = api.StopInfo{Reason: e.Body.Reason, ThreadID: e.Body.ThreadId, Description: e.Body.Description, Text: e.Body.Text}
 		s.setStateLocked(api.StateStopped)
+
+		stop := s.stop
+		s.log.append(api.Event{Kind: api.EventStopped, Stop: &stop})
 	case *godap.ContinuedEvent:
 		if s.state == api.StateStopped {
 			s.setStateLocked(api.StateRunning)
 		}
+
+		// Adapters (netcoredbg) also send it for our own requests, before
+		// answering them: only an adapter-initiated resume is news.
+		if !s.execInFlight {
+			s.log.append(api.Event{Kind: api.EventContinued, ThreadID: e.Body.ThreadId})
+		}
 	case *godap.ExitedEvent:
-		code := e.Body.ExitCode
+		code, logged := e.Body.ExitCode, e.Body.ExitCode
 		s.exitCode = &code
 		s.bump()
+		s.log.append(api.Event{Kind: api.EventExited, ExitCode: &logged})
+	case *godap.ThreadEvent:
+		s.log.append(api.Event{Kind: api.EventThread, Reason: e.Body.Reason, ThreadID: e.Body.ThreadId})
 	case *godap.TerminatedEvent:
 		s.endLocked("the program terminated")
 	case *godap.ProcessEvent:
@@ -292,11 +371,12 @@ func (s *Session) onEvent(ev godap.EventMessage) {
 	case *godap.BreakpointEvent:
 		s.updateBreakpointLocked(e.Body.Breakpoint)
 	default:
-		// module, thread, capabilities, ... carry nothing a client needs yet.
+		// module, capabilities, ... carry nothing a client needs yet.
 	}
 }
 
-// watchAdapter marks the session exited when the adapter goes away.
+// watchAdapter marks the session exited when the adapter goes away, and
+// ends the recording.
 func (s *Session) watchAdapter() {
 	<-s.client.Done()
 
@@ -305,18 +385,35 @@ func (s *Session) watchAdapter() {
 	s.mu.Unlock()
 
 	_ = s.cmd.Wait()
+
+	s.closeRecording()
 }
 
-// endLocked moves the session to exited (once) and tears down the adapter.
+// closeRecording ends the recording, if any.
+func (s *Session) closeRecording() {
+	if s.rec != nil {
+		s.rec.close()
+	}
+}
+
+// endLocked moves the session to exited (once), logs the ended event and
+// tears down the adapter. A client's stop overrides the adapter's reason.
 func (s *Session) endLocked(reason string) {
 	if s.state == api.StateExited {
 		return
 	}
 
+	if s.stopReason != "" {
+		reason = s.stopReason
+	}
+
 	s.endReason = reason
 	s.setStateLocked(api.StateExited)
+	s.log.append(api.Event{Kind: api.EventEnded, Reason: reason, Client: s.stopping})
 
-	go s.shutdownAdapter(s.life, false)
+	if s.client != nil {
+		go s.shutdownAdapter(s.life, false)
+	}
 }
 
 // shutdownAdapter disconnects from the adapter (asking it to kill the
@@ -352,16 +449,43 @@ func (s *Session) shutdownAdapter(ctx context.Context, terminate bool) {
 	}
 }
 
-// Terminate ends the session: the debuggee is killed and the adapter exits.
-func (s *Session) Terminate(ctx context.Context) {
+// Terminate ends the session for client c: the debuggee is killed and the
+// adapter exits. While the program is live this is an execution request: it
+// needs the lease (LEASE_HELD otherwise).
+func (s *Session) Terminate(ctx context.Context, c api.Client) error {
+	s.execMu.Lock()
+	defer s.execMu.Unlock()
+
+	s.mu.Lock()
+	if s.state != api.StateExited {
+		if err := s.acquireLocked(c); err != nil {
+			s.mu.Unlock()
+
+			return err
+		}
+	}
+	s.mu.Unlock()
+
+	s.terminate(ctx, c.ID, "stopped by "+c.ID)
+
+	return nil
+}
+
+// terminate ends the session without checking the lease: by names the
+// client (empty: the daemon), reason goes to the ended event.
+func (s *Session) terminate(ctx context.Context, by, reason string) {
 	s.mu.Lock()
 	running := s.state != api.StateExited
+
+	if running && s.stopReason == "" {
+		s.stopping, s.stopReason = by, reason
+	}
 	s.mu.Unlock()
 
 	s.shutdownAdapter(ctx, running)
 
 	s.mu.Lock()
-	s.endLocked("stopped by a client")
+	s.endLocked(reason)
 	s.mu.Unlock()
 }
 
@@ -376,6 +500,7 @@ func (s *Session) bump() {
 	s.changed = make(chan struct{})
 }
 
+// appendOutputLocked logs a chunk of output, cut to maxOutputChunk.
 func (s *Session) appendOutputLocked(category, text string) {
 	if category == "telemetry" || text == "" {
 		return
@@ -385,18 +510,17 @@ func (s *Session) appendOutputLocked(category, text string) {
 		category = "console"
 	}
 
-	s.outSeq++
-	s.output = append(s.output, api.OutputLine{Seq: s.outSeq, Category: category, Text: text})
-
-	if len(s.output) > maxOutputLines {
-		s.output = s.output[len(s.output)-maxOutputLines:]
-	}
+	cut := present.CutText(text, maxOutputChunk, false)
+	e := s.log.append(api.Event{Kind: api.EventOutput, Category: category, Text: cut, Truncated: len(cut) < len(text)})
+	s.lastOutput = e.Seq
 }
 
 // Info returns the session's summary.
 func (s *Session) Info() api.SessionInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	leaseInfo := s.lease.info()
 
 	info := api.SessionInfo{
 		ID:        s.ID,
@@ -406,6 +530,9 @@ func (s *Session) Info() api.SessionInfo {
 		PID:       s.pid,
 		CreatedAt: s.CreatedAt,
 		ExitCode:  s.exitCode,
+		Lease:     &leaseInfo,
+		Clients:   slices.Clone(s.clients),
+		Recording: s.recPath,
 	}
 
 	if s.state == api.StateStopped {
@@ -535,22 +662,23 @@ func (s *Session) capture(ctx context.Context) (cur, prev *stopCapture, err erro
 }
 
 // outputSinceResume returns the last output chunks printed since the
-// program last resumed and how many older ones were left out.
+// program last resumed (at most snapshotOutput, in snapshotOutputBytes) and
+// how many older ones were left out.
 func (s *Session) outputSinceResume() (lines []api.OutputLine, omitted int) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	since := s.resumedAt
+	s.mu.Unlock()
 
-	for _, l := range s.output {
-		if l.Seq > s.resumedAt {
-			lines = append(lines, l)
-		}
-	}
+	lines = s.log.outputSince(since)
 
 	if len(lines) > snapshotOutput {
-		return lines[len(lines)-snapshotOutput:], len(lines) - snapshotOutput
+		omitted = len(lines) - snapshotOutput
+		lines = lines[omitted:]
 	}
 
-	return lines, 0
+	lines, cut := present.CapOutput(lines, snapshotOutputBytes, true)
+
+	return lines, omitted + cut
 }
 
 // waitChange waits until pred holds, ctx ends or the session changes state
@@ -583,62 +711,148 @@ const (
 	ExecPause    = "pause"
 )
 
-// Resume runs the debuggee (continue or a step), or pauses it, then waits up
-// to wait for it to stop or exit. A timeout is not an error: the result says
-// the program is still running. Temporary breakpoints left by a run-until
-// that timed out are removed first.
-func (s *Session) Resume(ctx context.Context, kind string, threadID int, wait time.Duration, dump api.DumpSpec) (api.Snapshot, error) {
-	if kind != ExecPause {
-		if err := s.removeTemporary(ctx); err != nil {
-			return api.Snapshot{}, err
+// Resume runs the debuggee (continue or a step), or pauses it, for client
+// c, then waits up to wait for it to stop or exit. A timeout is not an
+// error: the result says the program is still running. Temporary
+// breakpoints left by a run-until that timed out are removed first.
+//
+// Only the sending is serialized with other clients' execution requests:
+// while this one waits, another client may pause the program.
+func (s *Session) Resume(ctx context.Context, c api.Client, kind string, threadID int, wait time.Duration, dump api.DumpSpec) (api.Snapshot, error) {
+	switch kind {
+	case ExecContinue, ExecNext, ExecStepIn, ExecStepOut, ExecPause:
+	default:
+		return api.Snapshot{}, api.NewError(api.CodeInvalidRequest, "unknown execution kind "+kind,
+			"use continue, next, stepIn, stepOut or pause")
+	}
+
+	x, err := s.execute(ctx, execRequest{client: c, kind: kind, thread: threadID})
+	if err != nil {
+		return api.Snapshot{}, err
+	}
+
+	return s.Wait(ctx, x.before, wait, dump), nil
+}
+
+// execRunUntil is run-until's kind in exec events: a continue to a target.
+const execRunUntil = "runUntil"
+
+// execRequest is one execution-changing request.
+type execRequest struct {
+	client api.Client
+	kind   string // an Exec* kind or execRunUntil
+	thread int
+	target *api.BreakpointSpec // run-until's location
+}
+
+// execution is what an accepted request leaves for its caller to wait on.
+type execution struct {
+	before int                // stops seen when it was accepted
+	target api.BreakpointSpec // where run-until's breakpoint landed
+	temp   *breakpoint        // run-until's temporary breakpoint, if it placed one
+}
+
+// execute runs an execution request under execMu, in the order: state
+// check, lease, then side effects (the exec event, removing run-until's
+// leftovers, placing its target, capturing the stop) and the send. A
+// request refused by the state or the lease has no side effect.
+func (s *Session) execute(ctx context.Context, r execRequest) (execution, error) {
+	s.execMu.Lock()
+	defer s.execMu.Unlock()
+
+	x, thread, err := s.admit(r)
+	if err != nil {
+		return execution{}, err
+	}
+
+	if r.kind != ExecPause {
+		if err := s.removeTemporary(ctx, r.client.ID); err != nil {
+			return execution{}, err
 		}
 	}
 
-	return s.resume(ctx, kind, threadID, wait, dump)
-}
+	if r.target != nil {
+		if x.target, x.temp, err = s.placeTarget(ctx, r.client, *r.target); err != nil {
+			return execution{}, err
+		}
+	}
 
-func (s *Session) resume(ctx context.Context, kind string, threadID int, wait time.Duration, dump api.DumpSpec) (api.Snapshot, error) {
-	if kind != ExecPause {
+	if r.kind != ExecPause {
 		// Record where it was, to diff the next stop against.
 		_, _, _ = s.capture(ctx)
 	}
 
-	s.mu.Lock()
-	state, before := s.state, s.stops
-
-	if threadID == 0 {
-		threadID = s.stop.ThreadID
-	}
-	s.mu.Unlock()
-
-	if kind == ExecPause {
-		if state != api.StateRunning {
-			return api.Snapshot{}, stateError(s.ID, state, "pause needs a running program")
+	if err := s.send(ctx, r.kind, thread, x.before); err != nil {
+		if x.temp != nil {
+			_, _, _ = s.removeBreakpoints(ctx, r.client.ID, stillTemporary(x.temp))
 		}
-	} else if state != api.StateStopped {
-		return api.Snapshot{}, stateError(s.ID, state, kind+" needs a stopped program")
+
+		return execution{}, err
 	}
+
+	return x, nil
+}
+
+// admit checks the state and the lease (taking it when the policy allows)
+// and logs the exec event. It returns the thread to act on.
+func (s *Session) admit(r execRequest) (execution, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	switch {
+	case r.kind == ExecPause && s.state != api.StateRunning:
+		return execution{}, 0, stateError(s.ID, s.state, "pause needs a running program")
+	case r.kind == execRunUntil && s.state != api.StateStopped:
+		return execution{}, 0, stateError(s.ID, s.state, "run-until needs a stopped program")
+	case r.kind != ExecPause && s.state != api.StateStopped:
+		return execution{}, 0, stateError(s.ID, s.state, r.kind+" needs a stopped program")
+	}
+
+	if err := s.acquireLocked(r.client); err != nil {
+		return execution{}, 0, err
+	}
+
+	thread := r.thread
+	if thread == 0 {
+		thread = s.stop.ThreadID
+	}
+
+	s.log.append(api.Event{Kind: api.EventExec, Client: r.client.ID, Action: r.kind, ThreadID: r.thread})
+
+	return execution{before: s.stops}, thread, nil
+}
+
+// send sends the request to the adapter; a resume marks the program
+// running unless it already stopped again.
+func (s *Session) send(ctx context.Context, kind string, thread, before int) error {
+	s.mu.Lock()
+	if kind != ExecPause {
+		s.resumedAt = s.log.latest()
+	}
+
+	s.execInFlight = true
+	s.mu.Unlock()
 
 	reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
-	if kind != ExecPause {
-		s.mu.Lock()
-		s.resumedAt = s.outSeq
-		s.mu.Unlock()
+	dapKind := kind
+	if kind == execRunUntil {
+		dapKind = ExecContinue
 	}
 
-	if err := s.sendExec(reqCtx, kind, threadID); err != nil {
-		return api.Snapshot{}, err
-	}
+	err := s.sendExec(reqCtx, dapKind, thread)
 
 	s.mu.Lock()
-	if kind != ExecPause && s.state == api.StateStopped && s.stops == before {
+	defer s.mu.Unlock()
+
+	s.execInFlight = false
+
+	if err == nil && kind != ExecPause && s.state == api.StateStopped && s.stops == before {
 		s.setStateLocked(api.StateRunning)
 	}
-	s.mu.Unlock()
 
-	return s.Wait(ctx, before, wait, dump), nil
+	return err
 }
 
 // Wait waits up to wait until the program stops for the (stopsSeen+1)th
@@ -665,7 +879,7 @@ func (s *Session) settleOutput(ctx context.Context) {
 
 	for {
 		s.mu.Lock()
-		seq := s.outSeq
+		seq := s.lastOutput
 		s.mu.Unlock()
 
 		t := time.NewTimer(outputQuiet)
@@ -678,7 +892,7 @@ func (s *Session) settleOutput(ctx context.Context) {
 		}
 
 		s.mu.Lock()
-		quiet := s.outSeq == seq
+		quiet := s.lastOutput == seq
 		s.mu.Unlock()
 
 		if quiet || time.Now().After(deadline) {
@@ -807,15 +1021,18 @@ func (s *Session) frameID(ctx context.Context, index int) (int, error) {
 	return frames[index].id, nil
 }
 
-// Breakpoints returns every breakpoint, ordered by id.
-func (s *Session) Breakpoints() []api.Breakpoint {
+// Breakpoints returns the breakpoints of owner (a client id; "" for every
+// client's), ordered by id.
+func (s *Session) Breakpoints(owner string) []api.Breakpoint {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	var out []api.Breakpoint
 	for _, list := range s.bps {
 		for _, b := range list {
-			out = append(out, b.Breakpoint)
+			if owner == "" || b.Owner == owner {
+				out = append(out, b.Breakpoint)
+			}
 		}
 	}
 

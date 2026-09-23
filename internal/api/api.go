@@ -11,7 +11,7 @@ import (
 // ProtocolVersion is the version of the native API. Bump it on any
 // incompatible change to a method other than [MethodHello], whose shape is
 // frozen.
-const ProtocolVersion = 1
+const ProtocolVersion = 2
 
 // Method names.
 const (

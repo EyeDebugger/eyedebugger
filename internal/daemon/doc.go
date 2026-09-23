@@ -7,5 +7,7 @@
 // authentication, idle exit, and the client's auto-start and version
 // handshake.
 //
-// Sessions arrive in milestone 2; until then a daemon always has zero.
+// It serves the session methods of internal/api on top of a session.Manager,
+// identifying each request's client, and keeps session metadata and
+// recordings in the runtime directory's sessions/ ([FileStore]).
 package daemon

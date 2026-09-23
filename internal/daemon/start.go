@@ -24,6 +24,10 @@ const (
 	EnvNoAutostart = "EYEDBG_NO_AUTOSTART"
 	// EnvDaemonPath is the eyedbgd executable to start.
 	EnvDaemonPath = "EYEDBG_DAEMON_PATH"
+	// EnvAutostarted is set to "1" for a daemon a client starts: one that
+	// then finds another daemon running lost a start race, which is normal,
+	// and exits quietly.
+	EnvAutostarted = "EYEDBG_AUTOSTARTED"
 )
 
 const (
@@ -240,7 +244,7 @@ func spawn(ctx context.Context, p Paths, exe string) (pid int, exited <-chan err
 	cmd.Stdout = logf
 	cmd.Stderr = logf
 	cmd.Dir = p.Dir // don't pin the caller's working directory
-	cmd.Env = append(os.Environ(), EnvRuntimeDir+"="+p.Dir)
+	cmd.Env = append(os.Environ(), EnvRuntimeDir+"="+p.Dir, EnvAutostarted+"=1")
 	detach(cmd)
 
 	if err := cmd.Start(); err != nil {

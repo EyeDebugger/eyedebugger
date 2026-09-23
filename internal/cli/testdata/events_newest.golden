@@ -1,0 +1,17 @@
+(39 earlier events not shown: 'eyedbg events --since 0' pages from the oldest)
+40  lease: human:ijat took it
+41  lease: agent took it from human:ijat (forced)
+42  lease: agent released it
+43  lease: agent set the policy to human-priority
+44  agent: step-in (thread 4243)
+45  agent: run-until
+46  bp 4 added by agent: Program.cs:20 (run-until)
+47  continued (thread 4242)
+48  stopped: exception (System.InvalidOperationException: synthetic), thread 4242
+49  bp 3 removed by agent (owner human:ijat)
+50  bp 1 changed: Program.cs:6 verified
+51  bp 3 changed: Late.cs:7 pending: pending until the module loads
+52  output (stderr): warn (cut)
+53  thread 4243 exited
+54  ended: stopped by human:ijat
+next: eyedbg events --since 54

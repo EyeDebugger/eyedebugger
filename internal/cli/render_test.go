@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"path/filepath"
 	"testing"
 	"time"
@@ -14,12 +15,17 @@ import (
 
 const renderBase = "/work/app"
 
+// renderTime is the time in every rendering fixture.
+var renderTime = time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+
 func stoppedSnapshot() api.Snapshot {
 	return api.Snapshot{
 		Session: api.SessionInfo{
 			ID: "s-k3f9", Lang: "dotnet", Program: "/work/app/bin/Debug/net10.0/app.dll", State: api.StateStopped,
-			PID: 4242, CreatedAt: time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC),
-			Stop: &api.StopInfo{Reason: "breakpoint", ThreadID: 4242},
+			PID: 4242, CreatedAt: renderTime,
+			Stop:    &api.StopInfo{Reason: "breakpoint", ThreadID: 4242},
+			Lease:   &api.LeaseInfo{Policy: api.LeaseFree, Holder: "agent", Since: &renderTime},
+			Clients: []api.ClientInfo{{Client: api.Client{ID: "agent", Kind: api.KindAgent}, FirstSeen: renderTime, LastSeen: renderTime}},
 		},
 		Frame: &api.Frame{Name: "Program.<Main>$()", File: "/work/app/Program.cs", Line: 4, Column: 5},
 		Source: []api.SourceLine{
@@ -67,10 +73,12 @@ func TestSessionRendering(t *testing.T) {
 		}},
 	}}}
 	bps := []api.Breakpoint{
-		{ID: 1, File: "/work/app/Program.cs", RequestedLine: 4, Line: 4, Verified: true},
-		{ID: 2, File: "/other/Lib.cs", RequestedLine: 10, Line: 12, Verified: true},
-		{ID: 3, File: "/work/app/Late.cs", RequestedLine: 7, Line: 7, Message: "pending until the module loads"},
-		{ID: 4, File: "/work/app/Program.cs", RequestedLine: 9, Line: 9, Verified: true, Condition: "i == 3", Temporary: true},
+		{ID: 1, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 4, Line: 4, Verified: true},
+		{ID: 2, Owner: "agent", File: "/other/Lib.cs", RequestedLine: 10, Line: 12, Verified: true},
+		{ID: 3, Owner: "human:ijat", File: "/work/app/Late.cs", RequestedLine: 7, Line: 7, Message: "pending until the module loads"},
+		{ID: 4, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 9, Line: 9, Verified: true, Condition: "i == 3", Temporary: true},
+		{ID: 5, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 12, Line: 12, Verified: true, Condition: "n > 1", Note: "shares its line with another client's breakpoint that has a different condition: it stops there unconditionally"},
+		{ID: 6, Owner: "human:ijat", File: "/work/app/Program.cs", RequestedLine: 12, Line: 12, Verified: true, Condition: "n > 2", Note: "shares its line with another client's breakpoint that has a different condition: it stops there unconditionally"},
 	}
 
 	tests := []struct {
@@ -86,6 +94,35 @@ func TestSessionRendering(t *testing.T) {
 			return writeSessions(b, []api.SessionInfo{stoppedSnapshot().Session, exited.Session}, false)
 		}},
 		{"sessions empty json", "sessions_empty_json.golden", func(b *bytes.Buffer) error { return writeSessions(b, nil, true) }},
+		{"sessions lost", "sessions_lost.golden", func(b *bytes.Buffer) error {
+			return writeSessions(b, []api.SessionInfo{stoppedSnapshot().Session, lostSession()}, false)
+		}},
+		{"sessions json clients", "sessions_json_clients.golden", func(b *bytes.Buffer) error {
+			return writeSessions(b, []api.SessionInfo{sharedSnapshot().Session}, true)
+		}},
+		{"snapshot shared", "snapshot_shared.golden", func(b *bytes.Buffer) error { return writeSnapshot(b, sharedSnapshot(), false, renderBase) }},
+		{"events", "events.golden", func(b *bytes.Buffer) error {
+			return writeEvents(b, sampleEvents(), eventsView{}, false, renderBase)
+		}},
+		{"events json", "events_json.golden", func(b *bytes.Buffer) error {
+			return writeEvents(b, sampleEvents(), eventsView{}, true, renderBase)
+		}},
+		{"events newest", "events_newest.golden", func(b *bytes.Buffer) error {
+			return writeEvents(b, otherEvents(), eventsView{newest: true}, false, renderBase)
+		}},
+		{"events timeout", "events_timeout.golden", func(b *bytes.Buffer) error {
+			return writeEvents(b, api.EventsResult{Latest: 25, TimedOut: true}, eventsView{wait: true, timeout: 30 * time.Second}, false, renderBase)
+		}},
+		{"lease", "lease.golden", func(b *bytes.Buffer) error {
+			if err := writeLease(b, api.LeaseResult{SessionID: "s-k3f9", Lease: api.LeaseInfo{Policy: api.LeaseFree, Holder: "agent", Since: &renderTime}}, false); err != nil {
+				return err
+			}
+
+			return writeLease(b, api.LeaseResult{SessionID: "s-k3f9", Lease: api.LeaseInfo{Policy: api.LeaseHandoff}}, false)
+		}},
+		{"lease json", "lease_json.golden", func(b *bytes.Buffer) error {
+			return writeLease(b, api.LeaseResult{SessionID: "s-k3f9", Lease: api.LeaseInfo{Policy: api.LeaseHandoff, Holder: "human:ijat", Since: &renderTime}}, true)
+		}},
 		{"stack", "stack.golden", func(b *bytes.Buffer) error {
 			return writeStack(b, []api.Frame{
 				{Index: 0, Name: "App.Orders.Total()", File: "/work/app/Orders.cs", Line: 18},
@@ -121,7 +158,7 @@ func TestSessionRendering(t *testing.T) {
 			}}}, false)
 		}},
 		{"output", "output.golden", func(b *bytes.Buffer) error {
-			return writeOutput(b, []api.OutputLine{{Seq: 1, Category: "stdout", Text: "i=1\n"}, {Seq: 2, Category: "stderr", Text: "warn"}}, false)
+			return writeOutput(b, io.Discard, api.OutputResult{Lines: []api.OutputLine{{Seq: 1, Category: "stdout", Text: "i=1\n"}, {Seq: 2, Category: "stderr", Text: "warn"}}}, false, false)
 		}},
 	}
 
@@ -137,6 +174,86 @@ func TestSessionRendering(t *testing.T) {
 			assertGolden(t, filepath.Join("testdata", tt.golden), b.Bytes())
 		})
 	}
+}
+
+// lostSession is a session of a daemon that crashed.
+func lostSession() api.SessionInfo {
+	return api.SessionInfo{
+		ID: "s-7f3k", Lang: "dotnet", Program: "/work/old/bin/Debug/net10.0/old.dll", State: api.StateLost,
+		CreatedAt: renderTime.Add(-time.Hour), Recording: "/run/user/1000/eyedbg/sessions/s-7f3k.jsonl",
+	}
+}
+
+// sharedSnapshot is a stop in a session two clients use, under handoff.
+func sharedSnapshot() api.Snapshot {
+	snap := stoppedSnapshot()
+	snap.Session.Lease = &api.LeaseInfo{Policy: api.LeaseHandoff, Holder: "human:ijat", Since: &renderTime}
+	snap.Session.Clients = append(snap.Session.Clients, api.ClientInfo{
+		Client: api.Client{ID: "human:ijat", Kind: api.KindHuman, Name: "ijat"}, FirstSeen: renderTime, LastSeen: renderTime.Add(time.Minute),
+	})
+	snap.Session.Recording = "/run/user/1000/eyedbg/sessions/s-k3f9.jsonl"
+
+	return snap
+}
+
+// sampleEvents is the example of the events help: two clients, a lease
+// handed over and taken back, the program's end. Values are synthetic.
+func sampleEvents() api.EventsResult {
+	code := 0
+	bp1 := api.Breakpoint{ID: 1, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 5, Line: 5, Verified: true, CreatedAt: renderTime}
+	bp2 := api.Breakpoint{ID: 2, Owner: "human:ijat", File: "/work/app/Program.cs", RequestedLine: 9, Line: 9, Verified: true, Condition: "i == 3", CreatedAt: renderTime}
+	events := []api.Event{
+		{Kind: api.EventStarted, Client: "agent", Program: "/work/app/bin/Debug/net10.0/app.dll", Lease: &api.LeaseInfo{Policy: api.LeaseHandoff, Holder: "agent", Since: &renderTime}},
+		{Kind: api.EventBreakpoint, Action: "added", Client: "agent", Breakpoint: &bp1},
+		{Kind: api.EventThread, Reason: "started", ThreadID: 4242},
+		{Kind: api.EventStopped, Stop: &api.StopInfo{Reason: "breakpoint", ThreadID: 4242}},
+		{Kind: api.EventClient, Client: "human:ijat"},
+		{Kind: api.EventBreakpoint, Action: "added", Client: "human:ijat", Breakpoint: &bp2},
+		{Kind: api.EventLease, Action: "grant", Client: "agent", Previous: "agent", Lease: &api.LeaseInfo{Policy: api.LeaseHandoff, Holder: "human:ijat", Since: &renderTime}},
+		{Kind: api.EventExec, Action: "continue", Client: "human:ijat"},
+		{Kind: api.EventOutput, Category: "stdout", Text: "i=1 total=1\ni=2 total=3\n"},
+		{Kind: api.EventBreakpoint, Action: "removed", Client: "agent", Breakpoint: &bp1},
+		{Kind: api.EventLease, Action: "auto", Client: "agent", Previous: "human:ijat", Lease: &api.LeaseInfo{Policy: api.LeaseHandoff, Holder: "agent", Since: &renderTime}},
+		{Kind: api.EventExec, Action: "continue", Client: "agent"},
+		{Kind: api.EventExited, ExitCode: &code},
+		{Kind: api.EventEnded, Reason: "the program terminated"},
+	}
+
+	for i := range events {
+		events[i].Seq, events[i].Time = 12+i, renderTime
+	}
+
+	return api.EventsResult{Events: events, Latest: 25, Dropped: 11}
+}
+
+// otherEvents has every other form of event line, as the newest of more.
+func otherEvents() api.EventsResult {
+	pending := api.Breakpoint{ID: 3, Owner: "human:ijat", File: "/work/app/Late.cs", RequestedLine: 7, Line: 7, Message: "pending until the module loads"}
+	moved := api.Breakpoint{ID: 1, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 5, Line: 6, Verified: true}
+	temp := api.Breakpoint{ID: 4, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 20, Line: 20, Verified: true, Temporary: true}
+	events := []api.Event{
+		{Kind: api.EventLease, Action: "take", Client: "human:ijat"},
+		{Kind: api.EventLease, Action: "force", Client: "agent", Previous: "human:ijat"},
+		{Kind: api.EventLease, Action: "release", Client: "agent"},
+		{Kind: api.EventLease, Action: "policy", Client: "agent", Lease: &api.LeaseInfo{Policy: api.LeaseHumanPriority}},
+		{Kind: api.EventExec, Action: "stepIn", Client: "agent", ThreadID: 4243},
+		{Kind: api.EventExec, Action: "runUntil", Client: "agent"},
+		{Kind: api.EventBreakpoint, Action: "added", Client: "agent", Breakpoint: &temp},
+		{Kind: api.EventContinued, ThreadID: 4242},
+		{Kind: api.EventStopped, Stop: &api.StopInfo{Reason: "exception", ThreadID: 4242, Text: "System.InvalidOperationException: synthetic"}},
+		{Kind: api.EventBreakpoint, Action: "removed", Client: "agent", Breakpoint: &pending},
+		{Kind: api.EventBreakpoint, Action: "changed", Breakpoint: &moved},
+		{Kind: api.EventBreakpoint, Action: "changed", Breakpoint: &pending},
+		{Kind: api.EventOutput, Category: "stderr", Text: "warn", Truncated: true},
+		{Kind: api.EventThread, Reason: "exited", ThreadID: 4243},
+		{Kind: api.EventEnded, Reason: "stopped by human:ijat", Client: "human:ijat"},
+	}
+
+	for i := range events {
+		events[i].Seq, events[i].Time = 40+i, renderTime
+	}
+
+	return api.EventsResult{Events: events, Latest: 54, More: 39}
 }
 
 func TestParseLocation(t *testing.T) {

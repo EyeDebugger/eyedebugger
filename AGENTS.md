@@ -18,6 +18,7 @@ decisions are recorded in `docs/adr/`.
 - `internal/daemon/` — daemon lifecycle, IPC, token auth.
 - `internal/session/` — session, lease, breakpoint ownership, event log, stop snapshot.
 - `internal/dap/` — DAP client: framing, seq mapping, reverse requests.
+- `internal/dap/daptest/` — fake DAP adapter for tests (the test binary re-executes itself as it).
 - `internal/facade/` — per-session DAP facade (phase 2).
 - `internal/present/` — budgeting, truncation, text/JSON renderers.
 - `internal/adapters/` — adapter manifest loader and installer.

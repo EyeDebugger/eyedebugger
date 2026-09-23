@@ -395,6 +395,9 @@ func TestExitCodeClasses(t *testing.T) {
 		{fmt.Errorf("wrapped: %w", api.NewError(api.CodeNoSession, "", "")), exitState},
 		{api.NewError(api.CodeBuildFailed, "", ""), exitEnvironment},
 		{api.NewError(api.CodeAdapterFailed, "", ""), exitAdapter},
+		{api.NewError(api.CodeLeaseHeld, "", ""), exitState},
+		{api.NewError(api.CodeNotOwner, "", ""), exitState},
+		{api.NewError(api.CodeVersionMismatch, "", ""), exitEnvironment},
 	}
 
 	for _, tt := range tests {

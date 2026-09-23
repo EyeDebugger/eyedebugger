@@ -21,6 +21,9 @@ import (
 // EnvE2E enables tests that need the .NET SDK and netcoredbg installed.
 const envE2E = "EYEDBG_E2E"
 
+// agent is the default client.
+var agent = api.Client{ID: api.DefaultClientID, Kind: api.KindAgent}
+
 const program = `var items = new List<int> { 7, 9 };
 var total = 0;
 for (var i = 1; i <= 3; i++)
@@ -68,10 +71,12 @@ func TestDebugConsoleApp(t *testing.T) {
 	dir := newApp(t)
 	src := filepath.Join(dir, "Program.cs")
 
-	m := session.NewManager(t.Context(), []session.Driver{dotnet.New()}, slog.New(slog.DiscardHandler), io.Discard, nil)
+	m := session.NewManager(t.Context(), session.Config{
+		Drivers: []session.Driver{dotnet.New()}, Logger: slog.New(slog.DiscardHandler), Stderr: io.Discard,
+	})
 	defer m.StopAll(t.Context())
 
-	sess, err := m.Start(t.Context(), api.StartParams{
+	sess, err := m.Start(t.Context(), agent, api.StartParams{
 		Lang:        "dotnet",
 		LaunchSpec:  api.LaunchSpec{Project: dir},
 		Breakpoints: []api.BreakpointSpec{{File: src, Line: 5}},
@@ -92,13 +97,13 @@ func TestDebugConsoleApp(t *testing.T) {
 	inspectFirstStop(t, sess)
 	stepOverAdd(t, sess)
 
-	if _, err := sess.RemoveBreakpoint(t.Context(), 0); err != nil {
+	if _, _, err := sess.RemoveBreakpoint(t.Context(), agent, 0, false); err != nil {
 		t.Fatal(err)
 	}
 
 	runUntilCondition(t, sess, src)
 
-	snap, err = sess.Resume(t.Context(), session.ExecContinue, 0, time.Minute, api.DumpSpec{})
+	snap, err = sess.Resume(t.Context(), agent, session.ExecContinue, 0, time.Minute, api.DumpSpec{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,8 +112,168 @@ func TestDebugConsoleApp(t *testing.T) {
 		t.Fatalf("after continue: %+v, want exited with code 0", snap.Session)
 	}
 
-	if out := joinOutput(sess.Output(0, 0)); !strings.Contains(out, "done eyedbg 6") {
+	if out := joinOutput(sess.Output(0, 0).Lines); !strings.Contains(out, "done eyedbg 6") {
 		t.Errorf("output = %q, want it to contain %q", out, "done eyedbg 6")
+	}
+}
+
+// TestTwoClients shares one real session between an agent and a human:
+// breakpoint ownership, one shared line, the handoff lease and the event
+// log, through netcoredbg.
+func TestTwoClients(t *testing.T) {
+	if os.Getenv(envE2E) != "1" {
+		t.Skip("set " + envE2E + "=1 (needs the .NET SDK and 'eyedbg adapters install netcoredbg')")
+	}
+
+	agentE2E := api.Client{ID: "agent:e2e", Kind: api.KindAgent, Name: "e2e"}
+	humanE2E := api.Client{ID: "human:e2e", Kind: api.KindHuman, Name: "e2e"}
+
+	dir := newApp(t)
+	src := filepath.Join(dir, "Program.cs")
+
+	m := session.NewManager(t.Context(), session.Config{
+		Drivers: []session.Driver{dotnet.New()}, Logger: slog.New(slog.DiscardHandler), Stderr: io.Discard,
+	})
+	defer m.StopAll(t.Context())
+
+	sess, err := m.Start(t.Context(), agentE2E, api.StartParams{
+		Lang: "dotnet", LaunchSpec: api.LaunchSpec{Project: dir}, LeasePolicy: api.LeaseHandoff,
+		Breakpoints: []api.BreakpointSpec{{File: src, Line: 5}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectStop(t, sess.Wait(t.Context(), 0, time.Minute, api.DumpSpec{}), "breakpoint", 5)
+	expectI(t, sess, "1")
+
+	sess.Touch(humanE2E)
+
+	h5 := addE2EBreakpoint(t, sess, humanE2E, src, 5)
+	addE2EBreakpoint(t, sess, humanE2E, src, 8)
+
+	for _, b := range sess.Breakpoints("") {
+		if !b.Verified {
+			t.Errorf("breakpoint %+v is not verified", b)
+		}
+	}
+
+	if _, _, err := sess.RemoveBreakpoint(t.Context(), agentE2E, h5.ID, false); api.CodeOf(err) != api.CodeNotOwner {
+		t.Errorf("agent removing the human's breakpoint: %v, want NOT_OWNER", err)
+	}
+
+	handOver(t, sess, agentE2E, humanE2E)
+
+	expectStop(t, resumeAs(t, sess, humanE2E), "breakpoint", 5)
+	expectI(t, sess, "2")
+
+	if removed, kept, err := sess.RemoveBreakpoint(t.Context(), agentE2E, 0, false); err != nil || removed != 1 || kept != 2 {
+		t.Errorf("agent rm all = removed %d, kept %d, %v; want 1 and 2", removed, kept, err)
+	}
+
+	// The line the agent shared with the human still stops.
+	expectStop(t, resumeAs(t, sess, humanE2E), "breakpoint", 5)
+	expectI(t, sess, "3")
+
+	if _, _, err := sess.RemoveBreakpoint(t.Context(), humanE2E, h5.ID, false); err != nil {
+		t.Fatal(err)
+	}
+
+	expectStop(t, resumeAs(t, sess, humanE2E), "breakpoint", 8)
+	expectTwoClientEvents(t, sess)
+
+	if _, err := m.Stop(t.Context(), agentE2E, sess.ID); api.CodeOf(err) != api.CodeLeaseHeld {
+		t.Errorf("agent stop while the human holds the lease: %v, want LEASE_HELD", err)
+	}
+
+	if _, err := m.Stop(t.Context(), humanE2E, sess.ID); err != nil {
+		t.Errorf("human stop: %v", err)
+	}
+}
+
+// handOver checks that under handoff the human can neither run nor take
+// the lease until the agent grants it.
+func handOver(t *testing.T, sess *session.Session, from, to api.Client) {
+	t.Helper()
+
+	if _, err := sess.Resume(t.Context(), to, session.ExecContinue, 0, time.Minute, api.DumpSpec{}); api.CodeOf(err) != api.CodeLeaseHeld {
+		t.Fatalf("continue without the lease: %v, want LEASE_HELD", err)
+	}
+
+	if _, err := sess.TakeLease(to, false); api.CodeOf(err) != api.CodeLeaseHeld {
+		t.Fatalf("take under handoff: %v, want LEASE_HELD", err)
+	}
+
+	if _, err := sess.GrantLease(from, to.ID, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func addE2EBreakpoint(t *testing.T, sess *session.Session, c api.Client, file string, line int) api.Breakpoint {
+	t.Helper()
+
+	b, err := sess.AddBreakpoint(t.Context(), c, api.BreakpointSpec{File: file, Line: line})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return b
+}
+
+func resumeAs(t *testing.T, sess *session.Session, c api.Client) api.Snapshot {
+	t.Helper()
+
+	snap, err := sess.Resume(t.Context(), c, session.ExecContinue, 0, time.Minute, api.DumpSpec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return snap
+}
+
+func expectI(t *testing.T, sess *session.Session, want string) {
+	t.Helper()
+
+	if res, err := sess.Eval(t.Context(), "i", 0); err != nil || res.Value != want {
+		t.Errorf("i = %+v, %v; want %s", res, err, want)
+	}
+}
+
+// expectTwoClientEvents checks the log has what the two clients did, in
+// order.
+func expectTwoClientEvents(t *testing.T, sess *session.Session) {
+	t.Helper()
+
+	res, err := sess.Events(t.Context(), api.EventsParams{Limit: 1000, Kinds: []api.EventKind{
+		api.EventStarted, api.EventClient, api.EventLease, api.EventExec, api.EventBreakpoint,
+	}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{
+		"started agent:e2e", "breakpoint:added agent:e2e", "client human:e2e", "breakpoint:added human:e2e",
+		"breakpoint:added human:e2e", "lease:grant agent:e2e", "exec:continue human:e2e", "breakpoint:removed agent:e2e",
+		"exec:continue human:e2e", "breakpoint:removed human:e2e", "exec:continue human:e2e",
+	}
+
+	next := 0
+
+	for i := range res.Events {
+		e := &res.Events[i]
+
+		got := string(e.Kind)
+		if e.Action != "" {
+			got += ":" + e.Action
+		}
+
+		if next < len(want) && got+" "+e.Client == want[next] {
+			next++
+		}
+	}
+
+	if next != len(want) {
+		t.Errorf("events lack %q (and what follows it) in order", want[next])
 	}
 }
 
@@ -116,7 +281,7 @@ func TestDebugConsoleApp(t *testing.T) {
 func stepOverAdd(t *testing.T, sess *session.Session) {
 	t.Helper()
 
-	snap, err := sess.Resume(t.Context(), session.ExecNext, 0, time.Minute, api.DumpSpec{Dump: []string{api.DumpChanged}})
+	snap, err := sess.Resume(t.Context(), agent, session.ExecNext, 0, time.Minute, api.DumpSpec{Dump: []string{api.DumpChanged}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +322,7 @@ func inspectFirstStop(t *testing.T, sess *session.Session) {
 func runUntilCondition(t *testing.T, sess *session.Session, src string) {
 	t.Helper()
 
-	snap, err := sess.RunUntil(t.Context(), api.BreakpointSpec{File: src, Line: 6, Condition: "i == 3"}, 0, time.Minute, api.DumpSpec{})
+	snap, err := sess.RunUntil(t.Context(), agent, api.BreakpointSpec{File: src, Line: 6, Condition: "i == 3"}, 0, time.Minute, api.DumpSpec{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +341,7 @@ func runUntilCondition(t *testing.T, sess *session.Session, src string) {
 		t.Errorf("snapshot output = %q, want the lines printed since the resume", joinOutput(snap.Output))
 	}
 
-	if bps := sess.Breakpoints(); len(bps) != 0 {
+	if bps := sess.Breakpoints(""); len(bps) != 0 {
 		t.Errorf("breakpoints after run-until = %+v, want the temporary one removed", bps)
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
+	"github.com/eyedebugger/eyedebugger/internal/session"
 	"github.com/eyedebugger/eyedebugger/internal/version"
 )
 
@@ -48,8 +49,15 @@ type testServer struct {
 func startServer(t *testing.T, idle time.Duration) *testServer {
 	t.Helper()
 
+	return startServerIn(t, PathsIn(shortTempDir(t)), idle)
+}
+
+// startServerIn is startServer with the fake driver, in paths.
+func startServerIn(t *testing.T, paths Paths, idle time.Duration) *testServer {
+	t.Helper()
+
 	ctx, cancel := context.WithCancel(context.Background())
-	ts := &testServer{paths: PathsIn(shortTempDir(t)), done: make(chan error, 1), stop: cancel}
+	ts := &testServer{paths: paths, done: make(chan error, 1), stop: cancel}
 
 	go func() {
 		ts.done <- Serve(ctx, Config{
@@ -57,6 +65,7 @@ func startServer(t *testing.T, idle time.Duration) *testServer {
 			IdleTimeout: idle,
 			Info:        testInfo,
 			Logger:      slog.New(slog.DiscardHandler),
+			Drivers:     []session.Driver{fakeDriver{}},
 		})
 	}()
 

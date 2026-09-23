@@ -20,30 +20,60 @@ import (
 // startTimeout bounds building plus the DAP start-up sequence.
 const startTimeout = 5 * time.Minute
 
-// Manager owns every session of the daemon.
+// Config configures a [Manager].
+type Config struct {
+	// Drivers are the languages sessions can debug.
+	Drivers []Driver
+	Logger  *slog.Logger
+	// Stderr receives the adapters' stderr.
+	Stderr io.Writer
+	// OnLive is called with the number of live sessions whenever it may
+	// have changed (for the daemon's idle timer); nil for none.
+	OnLive func(int)
+	// Store persists session metadata and recordings; nil for none.
+	Store Store
+}
+
+// Manager owns every session of the daemon, and knows the sessions an
+// earlier daemon lost.
 type Manager struct {
 	// ctx outlives requests: adapters are killed when it ends.
 	ctx     context.Context //nolint:containedctx // The daemon's lifetime context, not a request's.
 	drivers map[string]Driver
 	logger  *slog.Logger
 	stderr  io.Writer
-	// onLive is called with the number of live sessions whenever it may
-	// have changed (for the daemon's idle timer).
-	onLive func(int)
+	onLive  func(int)
+	store   Store
 
 	mu       sync.Mutex
 	sessions map[string]*Session
+	// lost are the sessions of earlier daemons, read once at start; they
+	// leave only when forgotten.
+	lost map[string]api.SessionInfo
 }
 
-// NewManager returns a manager. Adapters' stderr goes to stderr.
-func NewManager(ctx context.Context, drivers []Driver, logger *slog.Logger, stderr io.Writer, onLive func(int)) *Manager {
+// NewManager returns a manager. With a Store it reads the sessions earlier
+// daemons lost, once, now.
+func NewManager(ctx context.Context, cfg Config) *Manager {
 	m := &Manager{
-		ctx: ctx, drivers: make(map[string]Driver), logger: logger, stderr: stderr, onLive: onLive,
-		sessions: make(map[string]*Session),
+		ctx: ctx, drivers: make(map[string]Driver), logger: cfg.Logger, stderr: cfg.Stderr, onLive: cfg.OnLive,
+		store: cfg.Store, sessions: make(map[string]*Session), lost: make(map[string]api.SessionInfo),
 	}
 
-	for _, d := range drivers {
+	for _, d := range cfg.Drivers {
 		m.drivers[d.Name()] = d
+	}
+
+	if m.store != nil {
+		lost, err := m.store.Lost()
+		if err != nil {
+			m.logger.WarnContext(ctx, "read lost sessions", slog.Any("error", err))
+		}
+
+		for i := range lost {
+			lost[i].State = api.StateLost
+			m.lost[lost[i].ID] = lost[i]
+		}
 	}
 
 	return m
@@ -61,13 +91,19 @@ func (m *Manager) Languages() []string {
 	return names
 }
 
-// Start prepares and launches a new session. It returns once the program is
-// running (or stopped at an entry or early breakpoint, if wait allows).
-func (m *Manager) Start(ctx context.Context, p api.StartParams) (*Session, error) {
+// Start prepares and launches a new session for client c, who holds its
+// lease. It returns once the program is running (or stopped at an entry or
+// early breakpoint, if wait allows).
+func (m *Manager) Start(ctx context.Context, c api.Client, p api.StartParams) (*Session, error) {
 	drv, ok := m.drivers[p.Lang]
 	if !ok {
 		return nil, api.NewError(api.CodeInvalidRequest, "unknown language "+p.Lang,
 			"supported: "+strings.Join(m.Languages(), ", "))
+	}
+
+	policy, err := api.ParseLeasePolicy(string(p.LeasePolicy))
+	if err != nil {
+		return nil, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, startTimeout)
@@ -78,19 +114,31 @@ func (m *Manager) Start(ctx context.Context, p api.StartParams) (*Session, error
 		return nil, err
 	}
 
-	s := newSession(m.ctx, m.newID(), p.Lang, launch, m.logger) //nolint:contextcheck // The session outlives this request.
+	s := newSession(m.ctx, m.newID(), p.Lang, launch, m.logger, c, policy) //nolint:contextcheck // The session outlives this request.
+
+	// Recording starts before anything can be logged, so it begins with
+	// the started event.
+	if !p.NoRecord {
+		m.record(ctx, s)
+	}
+
+	s.logStarted()
 
 	// The adapter lives as long as the daemon, not this request.
 	if err := s.startAdapter(m.ctx, launch, m.stderr); err != nil { //nolint:contextcheck // Deliberately not the request's context.
+		s.closeRecording()
+
 		return nil, err
 	}
 
 	m.add(s)
+	m.saveIfLive(s)
 
 	if err := s.configure(ctx, launch, p.Breakpoints); err != nil {
 		m.logger.WarnContext(ctx, "session start failed", slog.String("session", s.ID), slog.Any("error", err))
-		s.Terminate(ctx)
+		s.terminate(ctx, "", "its start failed")
 		m.remove(s.ID)
+		m.forget(ctx, s.ID)
 
 		return nil, err
 	}
@@ -102,13 +150,64 @@ func (m *Manager) Start(ctx context.Context, p api.StartParams) (*Session, error
 	return s, nil
 }
 
-// watch reports live-count changes when s ends on its own.
+// record attaches a recording to s; failing to is not fatal.
+func (m *Manager) record(ctx context.Context, s *Session) {
+	if m.store == nil {
+		return
+	}
+
+	w, path, err := m.store.Record(s.ID)
+	if err != nil {
+		m.logger.WarnContext(ctx, "session not recorded", slog.String("session", s.ID), slog.Any("error", err))
+
+		return
+	}
+
+	s.attachRecorder(w, path)
+}
+
+// watch saves s's final state and reports live-count changes when s ends
+// on its own.
 func (m *Manager) watch(s *Session) {
 	s.waitUntil(m.ctx, func() bool { return s.state == api.StateExited })
+	m.saveIfLive(s)
 	m.notify()
 }
 
-// Get returns the session with id, or the only session when id is empty.
+// saveIfLive saves s's metadata if s is still in the session map. It holds
+// m.mu while saving, and Stop and StopAll unmap a session under m.mu before
+// removing its metadata, so a late save can't bring back the metadata of a
+// stopped session.
+func (m *Manager) saveIfLive(s *Session) {
+	if m.store == nil {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.sessions[s.ID] != s {
+		return
+	}
+
+	if err := m.store.Save(s.Info()); err != nil {
+		m.logger.WarnContext(m.ctx, "save session metadata", slog.String("session", s.ID), slog.Any("error", err))
+	}
+}
+
+// forget removes a session's metadata (not its recording).
+func (m *Manager) forget(ctx context.Context, id string) {
+	if m.store == nil {
+		return
+	}
+
+	if err := m.store.Remove(id); err != nil {
+		m.logger.WarnContext(ctx, "remove session metadata", slog.String("session", id), slog.Any("error", err))
+	}
+}
+
+// Get returns the live session with id, or the only live session when id is
+// empty. A lost session is NO_SESSION, with a hint.
 func (m *Manager) Get(id string) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -116,6 +215,15 @@ func (m *Manager) Get(id string) (*Session, error) {
 	if id != "" {
 		if s, ok := m.sessions[id]; ok {
 			return s, nil
+		}
+
+		if info, ok := m.lost[id]; ok {
+			hint := "'eyedbg stop -s " + id + "' forgets it"
+			if info.Recording != "" {
+				hint += "; its recording: " + info.Recording
+			}
+
+			return nil, api.NewError(api.CodeNoSession, "session "+id+" was lost: eyedbgd exited while it was live", hint)
 		}
 
 		return nil, api.NewError(api.CodeNoSession, "no session "+id, "see 'eyedbg sessions'")
@@ -141,16 +249,20 @@ func (m *Manager) Get(id string) (*Session, error) {
 		"pick one with -s <id> or EYEDBG_SESSION")
 }
 
-// List returns every session, oldest first.
+// List returns every live and lost session, oldest first.
 func (m *Manager) List() []api.SessionInfo {
 	m.mu.Lock()
 	all := make([]*Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		all = append(all, s)
 	}
+
+	out := make([]api.SessionInfo, 0, len(m.sessions)+len(m.lost))
+	for id := range m.lost {
+		out = append(out, m.lost[id])
+	}
 	m.mu.Unlock()
 
-	out := make([]api.SessionInfo, 0, len(all))
 	for _, s := range all {
 		out = append(out, s.Info())
 	}
@@ -160,32 +272,56 @@ func (m *Manager) List() []api.SessionInfo {
 	return out
 }
 
-// Stop terminates a session and forgets it.
-func (m *Manager) Stop(ctx context.Context, id string) (api.SessionInfo, error) {
+// Stop ends a live session for client c (LEASE_HELD while another client
+// holds its lease and the program is live) and forgets it; a lost session
+// is just forgotten.
+func (m *Manager) Stop(ctx context.Context, c api.Client, id string) (api.SessionInfo, error) {
+	m.mu.Lock()
+	info, lost := m.lost[id]
+
+	if lost {
+		delete(m.lost, id)
+	}
+	m.mu.Unlock()
+
+	if lost {
+		m.forget(ctx, id)
+		m.logger.InfoContext(ctx, "lost session forgotten", slog.String("session", id))
+
+		return info, nil
+	}
+
 	s, err := m.Get(id)
 	if err != nil {
 		return api.SessionInfo{}, err
 	}
 
-	s.Terminate(ctx)
+	if err := s.Terminate(ctx, c); err != nil {
+		return api.SessionInfo{}, err
+	}
+
 	m.remove(s.ID)
+	m.forget(ctx, s.ID)
 	m.logger.InfoContext(ctx, "session stopped", slog.String("session", s.ID))
 
 	return s.Info(), nil
 }
 
-// StopAll terminates every session.
+// StopAll ends every session, whoever holds its lease.
 func (m *Manager) StopAll(ctx context.Context) int {
 	m.mu.Lock()
 	all := make([]*Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		all = append(all, s)
 	}
+
+	clear(m.sessions)
 	m.mu.Unlock()
+	m.notify()
 
 	for _, s := range all {
-		s.Terminate(ctx)
-		m.remove(s.ID)
+		s.terminate(ctx, "", "stopped by the daemon")
+		m.forget(ctx, s.ID)
 	}
 
 	return len(all)
@@ -231,14 +367,18 @@ func (m *Manager) notify() {
 	}
 }
 
-// newID returns an unused short id like "s-k3f9".
+// newID returns an id like "s-k3f9" that no live or lost session has.
 func (m *Manager) newID() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	for {
 		id := "s-" + strings.ToLower(rand.Text()[:4])
-		if _, taken := m.sessions[id]; !taken {
+
+		_, live := m.sessions[id]
+		_, lost := m.lost[id]
+
+		if !live && !lost {
 			return id
 		}
 	}

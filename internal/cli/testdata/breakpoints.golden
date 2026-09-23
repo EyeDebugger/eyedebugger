@@ -1,4 +1,6 @@
-1  Program.cs:4  verified
-2  /other/Lib.cs:12 (requested line 10)  verified
-3  Late.cs:7  pending: pending until the module loads
-4  Program.cs:9 if i == 3 (run-until, temporary)  verified
+1  agent  Program.cs:4  verified
+2  agent  /other/Lib.cs:12 (requested line 10)  verified
+3  human:ijat  Late.cs:7  pending: pending until the module loads
+4  agent  Program.cs:9 if i == 3 (run-until, temporary)  verified
+5  agent  Program.cs:12 if n > 1  verified  note: shares its line with another client's breakpoint that has a different condition: it stops there unconditionally
+6  human:ijat  Program.cs:12 if n > 2  verified  note: shares its line with another client's breakpoint that has a different condition: it stops there unconditionally

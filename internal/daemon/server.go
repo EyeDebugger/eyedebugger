@@ -47,6 +47,7 @@ type server struct {
 	startedAt time.Time
 	shutdown  context.CancelFunc
 	sessions  *session.Manager
+	handlers  map[string]handler // session methods
 
 	mu        sync.Mutex
 	live      int // sessions that have not exited
@@ -88,7 +89,7 @@ func Serve(ctx context.Context, cfg Config) error {
 	adapterCtx, stopAdapters := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopAdapters()
 
-	s.sessions = session.NewManager(adapterCtx, cfg.Drivers, cfg.Logger, os.Stderr, s.setLive)
+	s.startSessions(adapterCtx)
 
 	ln, err := s.listen(ctx)
 	if err != nil {
@@ -122,6 +123,27 @@ func Serve(ctx context.Context, cfg Config) error {
 	cfg.Logger.InfoContext(ctx, "daemon stopped")
 
 	return nil
+}
+
+// startSessions creates the session store, the session manager and its
+// request handlers. Sessions live under adapterCtx. Without a usable
+// sessions directory the daemon runs without persistence.
+func (s *server) startSessions(adapterCtx context.Context) {
+	cfg := session.Config{Drivers: s.cfg.Drivers, Logger: s.cfg.Logger, Stderr: os.Stderr, OnLive: s.setLive}
+
+	if err := os.MkdirAll(s.cfg.Paths.Sessions, 0o700); err != nil {
+		s.cfg.Logger.WarnContext(adapterCtx, "sessions are not persisted", slog.Any("error", err))
+	} else {
+		store := NewFileStore(s.cfg.Paths.Sessions, os.Getpid())
+		if err := store.Prune(time.Now(), RecordingMaxAge); err != nil {
+			s.cfg.Logger.WarnContext(adapterCtx, "prune recordings", slog.Any("error", err))
+		}
+
+		cfg.Store = store
+	}
+
+	s.sessions = session.NewManager(adapterCtx, cfg)
+	s.handlers = sessionHandlers(s.sessions)
 }
 
 // listen removes stale files, publishes a fresh token and opens the socket.
@@ -248,7 +270,7 @@ func (s *server) dispatch(ctx context.Context, req api.Request, authed *bool) (r
 
 		return s.result(req.ID, result), true
 	default:
-		if h, ok := s.sessionHandler(req.Method); ok {
+		if h, ok := s.handlers[req.Method]; ok {
 			result, err := h(ctx, req.Params)
 			if err != nil {
 				return api.NewErrorResponse(req.ID, toAPIError(err)), false

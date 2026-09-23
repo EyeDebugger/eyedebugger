@@ -21,6 +21,9 @@ import (
 // daemonCallTimeout bounds each round trip to a running daemon.
 const daemonCallTimeout = 10 * time.Second
 
+// statusUse is the name of the status commands (daemon, session, lease).
+const statusUse = "status"
+
 func newDaemonCommand(info version.Info, g *globals) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
@@ -34,7 +37,9 @@ them to check on it, to stop it, or to read its log when something goes wrong.
 
 Set EYEDBG_NO_AUTOSTART=1 to make eyedbg fail instead of starting the daemon, and
 EYEDBG_RUNTIME_DIR to move its socket, token, lock and log files (default: the user cache
-directory, or $XDG_RUNTIME_DIR/eyedbg when set).
+directory, or $XDG_RUNTIME_DIR/eyedbg when set). Its sessions/ subdirectory holds each live
+session's metadata (so the sessions of a daemon that crashed are listed as lost) and each session's
+recording of control events (no program output), kept 7 days after the session ended.
 
 Without a subcommand, prints this help and exits 0; an unknown subcommand exits 1.`,
 		Example: `  eyedbg daemon status          # is it running, and when will it exit?
@@ -103,7 +108,7 @@ Exits 0 on success, 1 on failure (codes DAEMON_START_FAILED, VERSION_MISMATCH).`
 
 func newDaemonStatusCommand(info version.Info, g *globals) *cobra.Command {
 	return &cobra.Command{
-		Use:   "status",
+		Use:   statusUse,
 		Short: "Show whether the daemon is running, and its state",
 		Long: `Show whether eyedbgd is running and, if it is: pid, build, uptime, number of sessions, when it
 will exit if idle, and where its files are.

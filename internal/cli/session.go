@@ -32,7 +32,15 @@ const (
 // sessionHelp is appended to every command that acts on a session.
 const sessionHelp = `
 Which session: -s/--session <id>, else $EYEDBG_SESSION, else the only session (an error lists them
-if there are several).`
+if there are several). Who you are: --as agent[:NAME] or human[:NAME], else $EYEDBG_CLIENT, else
+agent; two agents sharing a session need different names (e.g. EYEDBG_CLIENT=agent:claude).`
+
+// leaseHelp is appended to every command that changes the program's execution.
+const leaseHelp = `
+
+It needs the session's control lease: under the default policy (free) it takes the lease from
+whoever holds it; under handoff or human-priority it fails with LEASE_HELD (exit 2) while another
+client holds it. See 'eyedbg lease --help'.`
 
 // dumpHelp is appended to every command that prints a stop snapshot.
 const dumpHelp = `
@@ -75,8 +83,13 @@ func (d *dumpFlag) spec(g *globals) (api.DumpSpec, error) {
 	return api.DumpSpec{Dump: d.what, Budget: g.budget}, nil
 }
 
+// errNoDaemon marks the NO_SESSION error of a call that found no daemon.
+var errNoDaemon = errors.New("the daemon is not running")
+
 // call connects to the running daemon (never starting one) and runs one
-// request. With no daemon there can be no session, so that is NO_SESSION.
+// request. With no daemon there can be no session, so that is NO_SESSION
+// (also matching errNoDaemon). A daemon of another protocol version is
+// VERSION_MISMATCH: it would misread the request.
 func call(cmd *cobra.Command, info version.Info, timeout time.Duration, method string, params, result any) error {
 	p, err := daemon.DefaultPaths()
 	if err != nil {
@@ -88,8 +101,8 @@ func call(cmd *cobra.Command, info version.Info, timeout time.Duration, method s
 
 	cl, err := daemon.Dial(ctx, p, info)
 	if api.CodeOf(err) == api.CodeDaemonNotRunning {
-		return api.NewError(api.CodeNoSession, "there are no debug sessions (the daemon is not running)",
-			"start one with 'eyedbg start'")
+		return errors.Join(api.NewError(api.CodeNoSession, "there are no debug sessions (the daemon is not running)",
+			"start one with 'eyedbg start'"), errNoDaemon)
 	}
 
 	if err != nil {
@@ -97,16 +110,25 @@ func call(cmd *cobra.Command, info version.Info, timeout time.Duration, method s
 	}
 	defer cl.Close()
 
+	if cl.Hello.ProtocolVersion != api.ProtocolVersion {
+		return api.NewError(api.CodeVersionMismatch,
+			fmt.Sprintf("eyedbgd %s speaks protocol %d but this eyedbg speaks %d", cl.Hello.Version, cl.Hello.ProtocolVersion, api.ProtocolVersion),
+			"stop it with 'eyedbg daemon stop' (--force ends its sessions); 'eyedbg start' then starts a matching one")
+	}
+
 	return cl.Call(ctx, method, params, result)
 }
 
+// envNoRecord, when "1", turns recording off for new sessions.
+const envNoRecord = "EYEDBG_NO_RECORD"
+
 // startFlags are the flags of 'eyedbg start'.
 type startFlags struct {
-	project, program, cwd string
-	env, bps              []string
-	stopOnEntry, noBuild  bool
-	timeout               time.Duration
-	dump                  *dumpFlag
+	project, program, cwd, leasePolicy string
+	env, bps                           []string
+	stopOnEntry, noBuild, noRecord     bool
+	timeout                            time.Duration
+	dump                               *dumpFlag
 }
 
 func newStartCommand(info version.Info, g *globals) *cobra.Command {
@@ -128,6 +150,13 @@ later with 'eyedbg bp add'. With --stop-on-entry or --bp, start waits (up to --t
 first stop and reports where the program stopped; otherwise it returns as soon as the program
 runs. Starts the daemon if needed. Building can take minutes on a cold machine.
 
+The starting client (--as) owns the --bp breakpoints and holds the control lease first;
+--lease-policy decides whether other clients can take it (free, the default: anyone, by just
+running a command; handoff: only when granted; human-priority: handoff, but a human may take it from
+an agent). The session's control events (not the program's output) are recorded to a file in the
+daemon's runtime directory, shown in 'eyedbg sessions --json'; --no-record or EYEDBG_NO_RECORD=1
+turns that off.
+
 Output: the new session id and its state (text), or the session snapshot in --json. The session id
 is also the value to pass to -s. Exits 0 once the program is running or stopped, non-zero on
 failure (BUILD_FAILED with the compiler errors, ADAPTER_NOT_INSTALLED, ...; see 'eyedbg --help'
@@ -143,6 +172,8 @@ for the exit codes).` + dumpHelp + `
 				return err
 			}
 
+			params.Client = g.clientID()
+
 			if params.DumpSpec, err = sf.dump.spec(g); err != nil {
 				return err
 			}
@@ -151,6 +182,13 @@ for the exit codes).` + dumpHelp + `
 		},
 	}
 
+	sf.register(cmd)
+
+	return cmd
+}
+
+// register adds the flags to cmd.
+func (sf *startFlags) register(cmd *cobra.Command) {
 	f := cmd.Flags()
 	f.StringVar(&sf.project, "project", "", "project file or directory to build (default: current directory)")
 	f.StringVar(&sf.program, "program", "", "already-built program to run (.dll or apphost); skips the build")
@@ -159,10 +197,10 @@ for the exit codes).` + dumpHelp + `
 	f.StringArrayVar(&sf.bps, "bp", nil, "breakpoint FILE:LINE set before the program runs (repeatable)")
 	f.BoolVar(&sf.stopOnEntry, "stop-on-entry", false, "stop at the program's entry point")
 	f.BoolVar(&sf.noBuild, "no-build", false, "don't build; requires --program")
+	f.StringVar(&sf.leasePolicy, "lease-policy", string(api.LeaseFree), "who may take the control lease: free, handoff or human-priority")
+	f.BoolVar(&sf.noRecord, "no-record", false, "don't record the session's control events (also EYEDBG_NO_RECORD=1)")
 	f.DurationVar(&sf.timeout, "timeout", defaultExecTimeout, "how long to wait for the first stop with --bp or --stop-on-entry")
 	sf.dump = addDumpFlag(cmd)
-
-	return cmd
 }
 
 // params turns the flags and arguments (<lang> [-- program args]) into a
@@ -188,16 +226,22 @@ func (sf *startFlags) params(args []string, dash int) (api.StartParams, error) {
 		project = "."
 	}
 
+	policy, err := api.ParseLeasePolicy(sf.leasePolicy)
+	if err != nil {
+		return api.StartParams{}, err
+	}
+
 	params := api.StartParams{
 		Lang: lang,
 		LaunchSpec: api.LaunchSpec{
 			Project: absPath(project), Program: absPath(sf.program), Cwd: absPath(sf.cwd),
 			Args: progArgs, NoBuild: sf.noBuild, StopOnEntry: sf.stopOnEntry,
 		},
-		Wait: api.Duration(sf.timeout),
+		Wait:        api.Duration(sf.timeout),
+		LeasePolicy: policy,
+		NoRecord:    sf.noRecord || os.Getenv(envNoRecord) == "1",
 	}
 
-	var err error
 	if params.Env, err = parseEnv(sf.env); err != nil {
 		return api.StartParams{}, err
 	}
@@ -242,10 +286,14 @@ func newSessionsCommand(info version.Info, g *globals) *cobra.Command {
 		Use:   "sessions",
 		Short: "List debug sessions",
 		Long: `List every debug session of the daemon: id, language, state (starting, running, stopped,
-exited) and program. Exited sessions stay listed, with their exit code, until 'eyedbg stop'.
+exited, lost), who holds its control lease, and program, under a header line. Exited sessions stay
+listed, with their exit code, until 'eyedbg stop'. A lost session belonged to a daemon that exited
+while it was live: only its metadata and recording are left, and 'eyedbg stop -s ID' forgets it.
+With no daemon running, the lost sessions are read from the runtime directory.
 
 Never starts the daemon or affects a session. Prints nothing when there are none (an empty
-"sessions" array in --json) and exits 0.`,
+"sessions" array in --json) and exits 0. --json adds each session's lease, clients (who used it,
+first and last seen) and recording file.`,
 		Example: `  eyedbg sessions
   eyedbg sessions --json`,
 		Args: cobra.NoArgs,
@@ -253,8 +301,8 @@ Never starts the daemon or affects a session. Prints nothing when there are none
 			var list []api.SessionInfo
 
 			err := call(cmd, info, daemonCallTimeout, api.MethodSessionList, nil, &list)
-			if api.CodeOf(err) == api.CodeNoSession {
-				list, err = nil, nil
+			if errors.Is(err, errNoDaemon) {
+				list, err = lostSessions()
 			}
 
 			if err != nil {
@@ -270,7 +318,7 @@ func newStatusCommand(info version.Info, g *globals) *cobra.Command {
 	var dump *dumpFlag
 
 	cmd := &cobra.Command{
-		Use:   "status",
+		Use:   statusUse,
 		Short: "Show a session's state and where it is stopped",
 		Long: `Show a session's state; when stopped, also why (breakpoint, step, entry, pause, exception),
 the thread, the current function and file:line, and the source lines around it. When exited, the
@@ -307,15 +355,28 @@ func newStopCommand(info version.Info, g *globals) *cobra.Command {
 		Short: "End a debug session (kills the program)",
 		Long: `End a session: the program is terminated if it is still running, the debug adapter exits, and
 the session is removed from 'eyedbg sessions'. Use it when done debugging; the daemon exits by
-itself once no session is left for its idle timeout.
+itself once no session is left for its idle timeout. While the program is live this needs the
+control lease, like the execution commands (LEASE_HELD, exit 2, if the policy keeps you from
+taking it); once it has exited, anyone may stop the session.
+
+A lost session (see 'eyedbg sessions') is forgotten instead: its metadata is deleted, its recording
+kept; that also works with no daemon running, given -s ID.
 
 Returns within a few seconds.` + sessionHelp,
 		Example: `  eyedbg stop
   eyedbg stop -s s-k3f9`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			ref := g.ref()
+
 			var info2 api.SessionInfo
-			if err := call(cmd, info, daemonCallTimeout, api.MethodSessionStop, g.ref(), &info2); err != nil {
+
+			err := call(cmd, info, daemonCallTimeout, api.MethodSessionStop, ref, &info2)
+			if errors.Is(err, errNoDaemon) && ref.SessionID != "" {
+				info2, err = forgetLost(ref.SessionID, err)
+			}
+
+			if err != nil {
 				return err
 			}
 
@@ -324,6 +385,10 @@ Returns within a few seconds.` + sessionHelp,
 					Schema  int             `json:"schema"`
 					Session api.SessionInfo `json:"session"`
 				}{jsonSchemaVersion, info2})
+			}
+
+			if info2.State == api.StateLost {
+				return writeText(cmd.OutOrStdout(), "session "+info2.ID+" forgotten (it was lost)\n")
 			}
 
 			return writeText(cmd.OutOrStdout(), "session "+info2.ID+" ended\n")
@@ -392,7 +457,7 @@ an error: the program keeps running, the output says so ("timedOut": true in --j
 
 Output: the resulting state, like 'eyedbg status' (stop reason, function, file:line and source
 around it). Exits 2 if the program isn't in the right state (NOT_STOPPED, NOT_RUNNING,
-SESSION_EXITED).` + dumpHelp + sessionHelp,
+SESSION_EXITED) or another client holds the lease (LEASE_HELD).` + leaseHelp + dumpHelp + sessionHelp,
 			Example: spec.example,
 			Args:    cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
@@ -599,13 +664,13 @@ Read-only; works in any state, including after the program exited.` + sessionHel
   eyedbg output --since 42 --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			var lines []api.OutputLine
+			var res api.OutputResult
 			if err := call(cmd, info, daemonCallTimeout, api.MethodOutput,
-				api.OutputParams{SessionRef: g.ref(), Since: since, Tail: tail}, &lines); err != nil {
+				api.OutputParams{SessionRef: g.ref(), Since: since, Tail: tail}, &res); err != nil {
 				return err
 			}
 
-			return writeOutput(cmd.OutOrStdout(), lines, g.json)
+			return writeOutput(cmd.OutOrStdout(), cmd.ErrOrStderr(), res, tail > 0, g.json)
 		},
 	}
 
@@ -648,8 +713,13 @@ may still bind later; 'eyedbg bp ls' shows the current state.
 
 --if EXPR stops only when EXPR, an expression in the program's language, is true there (e.g.
 'i == 3'). The adapter evaluates it each time the line runs, so it runs code in the program; an
-expression that fails to evaluate stops the program. Adding a breakpoint at a line that already
-has one replaces its condition.
+expression that fails to evaluate stops the program. Adding a breakpoint at a line where you
+already have one replaces its condition.
+
+The breakpoint is yours (--as): only you remove it, unless 'bp rm --force'. Other clients'
+breakpoints at the same line share it: the program stops there if any of them would (a
+breakpoint without a condition wins; different conditions make it stop unconditionally, which
+'eyedbg bp ls' notes). Needs no lease.
 
 Does not resume the program; returns at once.` + sessionHelp,
 		Example: `  eyedbg bp add Program.cs:12
@@ -696,12 +766,14 @@ evaluating it runs code in the program). Replaces "bp add, continue, bp rm" with
 
 It works through a temporary breakpoint, removed once the program stops or exits. The program may
 stop elsewhere first (another breakpoint, an exception, a pause) or exit: the output says where it
-is. If a breakpoint is already set at that line, that one is used and --if is ignored.
+is. If you already have a breakpoint at that line, that one is used and --if is ignored; another
+client's breakpoint there is not (your temporary one shares the line with it).
 
 Blocks until the program stops or exits, at most --timeout (default 30s). On a timeout the program
 keeps running and the temporary breakpoint stays (marked in 'eyedbg bp ls') so 'eyedbg wait' can
-still catch it; the next execution command removes it. Exits 2 if the program isn't stopped.` +
-			dumpHelp + sessionHelp,
+still catch it; the next execution command, whoever sends it, removes it. Exits 2 if the program
+isn't stopped or another client holds the lease (LEASE_HELD).` +
+			leaseHelp + dumpHelp + sessionHelp,
 		Example: `  eyedbg run-until Program.cs:20
   eyedbg run-until Orders.cs:88 --if 'order.Id == 42' --timeout 2m
   eyedbg run-until Program.cs:20 --dump locals`,
@@ -741,36 +813,53 @@ still catch it; the next execution command removes it. Exits 2 if the program is
 }
 
 func newBreakpointListCommand(info version.Info, g *globals) *cobra.Command {
-	return &cobra.Command{
+	var mine bool
+
+	cmd := &cobra.Command{
 		Use:   "ls",
 		Short: "List breakpoints",
-		Long: `List the session's breakpoints: id, file:line (and the requested line if the adapter moved it),
-and whether each is verified.
+		Long: `List the session's breakpoints, every client's (--mine: only yours): id, owner (the client that
+added it), file:line (and the requested line if the adapter moved it), condition, and whether each
+is verified. A note says when a breakpoint shares its line with another client's breakpoint whose
+condition differs (it then stops unconditionally).
 
 Read-only; returns at once. Prints nothing when there are none.` + sessionHelp,
 		Example: `  eyedbg bp ls
+  eyedbg bp ls --mine
   eyedbg bp ls --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var bps []api.Breakpoint
-			if err := call(cmd, info, daemonCallTimeout, api.MethodBreakpointLs, g.ref(), &bps); err != nil {
+			if err := call(cmd, info, daemonCallTimeout, api.MethodBreakpointLs,
+				api.BreakpointListParams{SessionRef: g.ref(), Mine: mine}, &bps); err != nil {
 				return err
 			}
 
 			return writeBreakpoints(cmd.OutOrStdout(), bps, g.json, workDir())
 		},
 	}
+
+	cmd.Flags().BoolVar(&mine, "mine", false, "list only your breakpoints (see --as)")
+
+	return cmd
 }
 
 func newBreakpointRemoveCommand(info version.Info, g *globals) *cobra.Command {
-	return &cobra.Command{
-		Use:   "rm <id|all>",
-		Short: "Remove a breakpoint, or all of them",
-		Long: `Remove the breakpoint with the given id (from 'eyedbg bp ls'), or every breakpoint with "all".
+	var force bool
 
-Does not resume the program; returns at once. Exits 1 if there is no such breakpoint.` + sessionHelp,
+	cmd := &cobra.Command{
+		Use:   "rm <id|all>",
+		Short: "Remove a breakpoint, or all of yours",
+		Long: `Remove the breakpoint with the given id (from 'eyedbg bp ls'), or with "all" every breakpoint of
+yours (--as), including your run-until breakpoints. Another client's breakpoint is refused with
+NOT_OWNER (exit 2); --force removes it anyway, and with "all" removes everyone's. Removing all never
+fails for finding none: it says how many were removed and how many of other clients were kept.
+
+Does not resume the program and needs no lease; returns at once. Exits 1 if there is no such
+breakpoint.` + sessionHelp,
 		Example: `  eyedbg bp rm 2
-  eyedbg bp rm all`,
+  eyedbg bp rm all
+  eyedbg bp rm all --force   # every client's`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := 0
@@ -785,20 +874,65 @@ Does not resume the program; returns at once. Exits 1 if there is no such breakp
 
 			var res api.BreakpointRemoveResult
 			if err := call(cmd, info, daemonCallTimeout, api.MethodBreakpointRm,
-				api.BreakpointRemoveParams{SessionRef: g.ref(), ID: id}, &res); err != nil {
+				api.BreakpointRemoveParams{SessionRef: g.ref(), ID: id, Force: force}, &res); err != nil {
 				return err
 			}
 
-			if g.json {
-				return writeJSON(cmd.OutOrStdout(), struct {
-					Schema  int `json:"schema"`
-					Removed int `json:"removed"`
-				}{jsonSchemaVersion, res.Removed})
-			}
-
-			return writeText(cmd.OutOrStdout(), fmt.Sprintf("removed %d breakpoint(s)\n", res.Removed))
+			return writeRemoved(cmd.OutOrStdout(), res, g.json)
 		},
 	}
+
+	cmd.Flags().BoolVar(&force, "force", false, "remove other clients' breakpoints too")
+
+	return cmd
+}
+
+// lostSessions lists the sessions a crashed daemon left, read from the
+// runtime directory (no daemon runs).
+func lostSessions() ([]api.SessionInfo, error) {
+	p, err := daemon.DefaultPaths()
+	if err != nil {
+		return nil, err
+	}
+
+	list, err := daemon.NewFileStore(p.Sessions, 0).Lost()
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range list {
+		list[i].State = api.StateLost
+	}
+
+	return list, nil
+}
+
+// forgetLost forgets lost session id with no daemon running; if there is no
+// such lost session it returns notFound, the error that led here.
+func forgetLost(id string, notFound error) (api.SessionInfo, error) {
+	list, err := lostSessions()
+	if err != nil {
+		return api.SessionInfo{}, err
+	}
+
+	for i := range list {
+		if list[i].ID != id {
+			continue
+		}
+
+		p, err := daemon.DefaultPaths()
+		if err != nil {
+			return api.SessionInfo{}, err
+		}
+
+		if err := daemon.NewFileStore(p.Sessions, 0).Remove(id); err != nil {
+			return api.SessionInfo{}, err
+		}
+
+		return list[i], nil
+	}
+
+	return api.SessionInfo{}, notFound
 }
 
 // parseLocation parses FILE:LINE, resolving FILE against the working

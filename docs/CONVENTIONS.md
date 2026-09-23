@@ -77,7 +77,12 @@
 - Golden files live in the package's `testdata/`. Regenerate them with `task test:golden` and
   review the diff.
 - CI runs `-race -shuffle=on`.
-- e2e tests against real adapters arrive with milestone 6.
+- Session-level tests run real DAP round trips against `internal/dap/daptest`, a fake adapter:
+  the test binary re-executes itself as the adapter. A package whose tests start sessions needs a
+  `TestMain` that calls `daptest.MaybeRun()` first and returns when it returns true, plus a small
+  fake `session.Driver` launching `daptest.Command()` with `daptest.Arguments(...)`.
+- e2e tests against real adapters (`drivers/dotnet`, `EYEDBG_E2E=1`) need the .NET SDK and
+  netcoredbg.
 
 ## Dependencies
 
