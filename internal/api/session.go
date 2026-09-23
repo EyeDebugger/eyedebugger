@@ -3,7 +3,10 @@
 
 package api
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // Session methods (docs/DESIGN.md §4). Every method that acts on a session
 // takes a SessionID; empty means "the only session".
@@ -21,6 +24,7 @@ const (
 	MethodVars          = "vars"
 	MethodEval          = "eval"
 	MethodOutput        = "output"
+	MethodRunUntil      = "runUntil"
 )
 
 // SessionState is where a session is in its life.
@@ -50,6 +54,8 @@ type LaunchSpec struct {
 // StartParams are the params of [MethodSessionStart].
 type StartParams struct {
 	LaunchSpec
+
+	DumpSpec
 
 	Lang        string           `json:"lang"`
 	Breakpoints []BreakpointSpec `json:"breakpoints,omitempty"`
@@ -87,7 +93,32 @@ type SessionInfo struct {
 	EndReason string       `json:"endReason,omitempty"`
 }
 
-// Snapshot is a session's state plus, when stopped, where.
+// What a snapshot can include beyond the stop location ([DumpSpec]).
+const (
+	DumpLocals  = "locals"  // every local of frame 0
+	DumpChanged = "changed" // locals of frame 0 that changed since the previous stop
+	DumpStack   = "stack"   // the stopped thread's top frames
+	DumpNone    = "none"
+)
+
+// DumpSpec asks for more in a snapshot. Budget caps the variables in it, in
+// tokens (about 4 characters each); 0 means no cap.
+type DumpSpec struct {
+	Dump   []string `json:"dump,omitempty"`
+	Budget int      `json:"budget,omitempty"`
+}
+
+// Wants reports whether d asks for what.
+func (d DumpSpec) Wants(what string) bool { return slices.Contains(d.Dump, what) }
+
+// StatusParams are the params of [MethodSessionStatus].
+type StatusParams struct {
+	SessionRef
+	DumpSpec
+}
+
+// Snapshot is a session's state plus, when stopped, where; and what a
+// [DumpSpec] asked for.
 type Snapshot struct {
 	Session SessionInfo  `json:"session"`
 	Frame   *Frame       `json:"frame,omitempty"`
@@ -95,6 +126,29 @@ type Snapshot struct {
 	// TimedOut means the wait ended before the program stopped or exited;
 	// it is still running.
 	TimedOut bool `json:"timedOut,omitempty"`
+	// Output is what the program printed since it last resumed (the last
+	// few chunks; OutputOmitted counts the older ones left out).
+	Output        []OutputLine `json:"output,omitempty"`
+	OutputOmitted int          `json:"outputOmitted,omitempty"`
+	Stack         []Frame      `json:"stack,omitempty"`
+	// Reached is set by run-until: whether the program stopped at the
+	// target (false: it stopped elsewhere first, or exited).
+	Reached *bool `json:"reached,omitempty"`
+	// Target is run-until's location, as the adapter placed it.
+	Target  *BreakpointSpec `json:"target,omitempty"`
+	Locals  *Scope          `json:"locals,omitempty"`
+	Changes *Changes        `json:"changes,omitempty"`
+}
+
+// Changes are the locals of frame 0 that differ from the previous stop.
+type Changes struct {
+	// NewFrame means the previous stop was in another function (or there
+	// was none): every local is new and listed.
+	NewFrame bool  `json:"newFrame,omitempty"`
+	Vars     []Var `json:"vars"`
+	// More and Truncated are as in [Scope].
+	More      int  `json:"more,omitempty"`
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // SourceLine is one line of source text.
@@ -118,7 +172,20 @@ type ExecParams struct {
 	SessionRef
 
 	// Kind is continue, next, stepIn, stepOut or pause.
+	DumpSpec
+
 	Kind     string   `json:"kind"`
+	ThreadID int      `json:"threadId,omitempty"`
+	Wait     Duration `json:"wait,omitempty"`
+}
+
+// RunUntilParams are the params of [MethodRunUntil]: continue to a location
+// (a temporary breakpoint, removed afterwards).
+type RunUntilParams struct {
+	SessionRef
+	BreakpointSpec
+	DumpSpec
+
 	ThreadID int      `json:"threadId,omitempty"`
 	Wait     Duration `json:"wait,omitempty"`
 }
@@ -126,6 +193,7 @@ type ExecParams struct {
 // WaitParams are the params of [MethodWait].
 type WaitParams struct {
 	SessionRef
+	DumpSpec
 
 	// AfterStops waits for a stop beyond this count; -1 means "the next one
 	// from now", and a stopped program returns at once for any value lower
@@ -134,10 +202,12 @@ type WaitParams struct {
 	Wait       Duration `json:"wait,omitempty"`
 }
 
-// BreakpointSpec asks for a breakpoint at File:Line.
+// BreakpointSpec asks for a breakpoint at File:Line, optionally only when
+// Condition (an expression in the program's language) is true.
 type BreakpointSpec struct {
-	File string `json:"file"`
-	Line int    `json:"line"`
+	File      string `json:"file"`
+	Line      int    `json:"line"`
+	Condition string `json:"condition,omitempty"`
 }
 
 // Breakpoint is a breakpoint as the adapter resolved it.
@@ -146,9 +216,13 @@ type Breakpoint struct {
 	File          string `json:"file"`
 	RequestedLine int    `json:"requestedLine"`
 	// Line is where the adapter placed it (may differ from RequestedLine).
-	Line     int    `json:"line"`
-	Verified bool   `json:"verified"`
-	Message  string `json:"message,omitempty"`
+	Line      int    `json:"line"`
+	Verified  bool   `json:"verified"`
+	Message   string `json:"message,omitempty"`
+	Condition string `json:"condition,omitempty"`
+	// Temporary marks run-until's breakpoint, removed once the program
+	// stops or exits.
+	Temporary bool `json:"temporary,omitempty"`
 }
 
 // BreakpointAddParams are the params of [MethodBreakpointAdd].
@@ -184,6 +258,13 @@ type VarsParams struct {
 
 	Frame int `json:"frame"`
 	Depth int `json:"depth,omitempty"`
+	// Expand shows only the variable at this path (e.g. order.Items[0]).
+	Expand string `json:"expand,omitempty"`
+	// Changed shows only the locals of frame 0 that changed since the
+	// previous stop.
+	Changed bool `json:"changed,omitempty"`
+	// Budget is as in [DumpSpec].
+	Budget int `json:"budget,omitempty"`
 }
 
 // Scope is a group of variables (e.g. Locals).
@@ -193,6 +274,9 @@ type Scope struct {
 	// More is how many variables were left out.
 	More      int  `json:"more,omitempty"`
 	Expensive bool `json:"expensive,omitempty"`
+	// Truncated means the token budget cut this scope short: some
+	// variables or members were left out or not expanded.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // Var is a variable; Children are filled only up to the requested depth.
@@ -203,6 +287,10 @@ type Var struct {
 	HasChildren bool   `json:"hasChildren,omitempty"`
 	Children    []Var  `json:"children,omitempty"`
 	More        int    `json:"more,omitempty"`
+	// Change is "new" or "changed" in a [Changes] list; Previous is the
+	// value at the previous stop.
+	Change   string `json:"change,omitempty"`
+	Previous string `json:"previous,omitempty"`
 }
 
 // EvalParams are the params of [MethodEval].

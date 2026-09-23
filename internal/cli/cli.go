@@ -34,7 +34,12 @@ import (
 type globals struct {
 	json    bool
 	session string
+	budget  int
 }
+
+// defaultBudget is the token budget for variables in one output
+// (docs/DESIGN.md §5).
+const defaultBudget = 2000
 
 // envSession names the default session for commands that act on one.
 const envSession = "EYEDBG_SESSION"
@@ -68,12 +73,76 @@ func Run(ctx context.Context, root *cobra.Command, args []string) int {
 
 	if err := root.ExecuteContext(ctx); err != nil {
 		// Nothing useful can be done if writing the error itself fails.
-		_, _ = io.WriteString(root.ErrOrStderr(), formatError(root.Name(), err))
+		if wantsJSON(root, args) {
+			_ = writeJSON(root.OutOrStdout(), errorOutput{Schema: jsonSchemaVersion, Error: toErrorDoc(err)})
+		} else {
+			_, _ = io.WriteString(root.ErrOrStderr(), formatError(root.Name(), err))
+		}
 
-		return 1
+		return exitCode(err)
 	}
 
 	return 0
+}
+
+// wantsJSON reports whether --json was given; errors raised before flags
+// are parsed (e.g. an unknown command) only show it in args.
+func wantsJSON(root *cobra.Command, args []string) bool {
+	if f := root.PersistentFlags().Lookup("json"); f != nil && f.Value.String() == "true" {
+		return true
+	}
+
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+
+		if a == "--json" || a == "--json=true" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Exit codes by error class (docs/DESIGN.md §5), documented in eyedbgLong.
+const (
+	exitError       = 1 // usage errors, invalid requests, internal errors
+	exitState       = 2 // the session is missing or not in the right state
+	exitEnvironment = 3 // setup: adapter, build, daemon
+	exitAdapter     = 4 // the debug adapter refused or failed a request
+)
+
+func exitCode(err error) int {
+	switch api.CodeOf(err) {
+	case api.CodeNoSession, api.CodeNotStopped, api.CodeNotRunning, api.CodeSessionExited, api.CodeSessionsActive:
+		return exitState
+	case api.CodeAdapterMissing, api.CodeBuildFailed, api.CodeDaemonNotRunning, api.CodeDaemonStart,
+		api.CodeVersionMismatch, api.CodeUnauthorized:
+		return exitEnvironment
+	case api.CodeAdapterFailed:
+		return exitAdapter
+	case api.CodeInvalidRequest, api.CodeUnknownMethod, api.CodeInternal:
+		return exitError
+	default:
+		return exitError
+	}
+}
+
+// errorOutput is the --json form of an error.
+type errorOutput struct {
+	Schema int        `json:"schema"`
+	Error  *api.Error `json:"error"`
+}
+
+// toErrorDoc returns err as an *api.Error; errors without a code (bad
+// flags or arguments, local failures) get ERROR.
+func toErrorDoc(err error) *api.Error {
+	if e, ok := errors.AsType[*api.Error](err); ok {
+		return e
+	}
+
+	return api.NewError("ERROR", err.Error(), "")
 }
 
 const eyedbgLong = `eyedbg is the CLI for EyeDebugger, an AI-native, CLI-first debugger built for
@@ -91,7 +160,17 @@ with a "schema" field; errors print a stable [CODE] and a hint.
 
 Run 'eyedbg <command> --help' or 'eyedbg help <command>' for a command's own help: what it does,
 when to use it, whether it blocks (and for how long), its effect on the debuggee, its output shape,
-and its exit codes (docs/DESIGN.md §4).`
+and its exit codes (docs/DESIGN.md §4). 'eyedbg help --all' prints every command's help in one
+read; add --json for the same as structured data.
+
+Output is budgeted: variables are cut to --budget tokens (default 2000) and every cut says so.
+
+Exit codes: 0 success (a wait that times out is a success that says so); 1 usage or internal
+error; 2 no such session, or it is in the wrong state (NO_SESSION, NOT_STOPPED, NOT_RUNNING,
+SESSION_EXITED, SESSIONS_ACTIVE); 3 setup problem (ADAPTER_NOT_INSTALLED, BUILD_FAILED,
+DAEMON_*, VERSION_MISMATCH, UNAUTHORIZED); 4 the debug adapter refused a request (ADAPTER_ERROR,
+e.g. an expression that doesn't evaluate). Errors print "eyedbg: message [CODE]" and a hint on
+stderr; with --json, {"schema": 1, "error": {"code", "message", "hint"}} on stdout.`
 
 const eyedbgExample = `  eyedbg adapters install netcoredbg            # once per machine
   eyedbg start dotnet --bp Program.cs:12         # build, run, stop at line 12
@@ -106,6 +185,8 @@ func NewEyedbgCommand(info version.Info) *cobra.Command {
 	root, g := newRoot("eyedbg", "AI-native, CLI-first debugger", eyedbgLong, eyedbgExample, info)
 	root.PersistentFlags().StringVarP(&g.session, "session", "s", "",
 		"session id to act on (default: $"+envSession+", else the only session)")
+	root.PersistentFlags().IntVar(&g.budget, "budget", defaultBudget,
+		"most tokens (about 4 characters each) of variables to print; 0 for no limit")
 
 	root.AddCommand(
 		newStartCommand(info, g),
@@ -117,6 +198,7 @@ func NewEyedbgCommand(info version.Info) *cobra.Command {
 		newEvalCommand(info, g),
 		newOutputCommand(info, g),
 		newBreakpointCommand(info, g),
+		newRunUntilCommand(info, g),
 		newStopCommand(info, g),
 		newAdaptersCommand(g),
 		newDaemonCommand(info, g),
@@ -136,7 +218,7 @@ once it has had no sessions for --idle-timeout. Run it directly to debug the dae
 stays in the foreground and logs to stderr until interrupted (Ctrl-C), stopped with
 'eyedbg daemon stop', or idle.
 
-Only one daemon runs per user (per EYEDBG_RUNTIME_DIR): a second one exits 1 at once. On start it
+Only one daemon runs per user (per EYEDBG_RUNTIME_DIR): a second one exits 3 at once. On start it
 writes a fresh token and listens on a Unix socket, both in a directory only you can access.
 Exits 0 when it stops normally, 1 on a start-up error.`
 
@@ -207,15 +289,14 @@ func finalizeCommandTree(root *cobra.Command) {
 	root.InitDefaultCompletionCmd()
 
 	for _, sub := range root.Commands() {
-		switch sub.Name() {
-		case "help":
-			sub.Example = fmt.Sprintf("  %[1]s help version   # same as: %[1]s version --help\n  %[1]s help           # same as: %[1]s --help", root.Name())
-		case "completion":
-			sub.Example = fmt.Sprintf("  %[1]s completion bash   # print the bash completion script (see the shell sub-commands' own help to install it)", root.Name())
+		if sub.Name() != "completion" {
+			continue
+		}
 
-			for _, shell := range sub.Commands() {
-				shell.Example = completionExample(root.Name(), shell.Name())
-			}
+		sub.Example = fmt.Sprintf("  %[1]s completion bash   # print the bash completion script (see the shell sub-commands' own help to install it)", root.Name())
+
+		for _, shell := range sub.Commands() {
+			shell.Example = completionExample(root.Name(), shell.Name())
 		}
 	}
 }
@@ -250,7 +331,8 @@ func newRoot(name, short, long, example string, info version.Info) (*cobra.Comma
 		SilenceErrors: true,
 	}
 	root.SetVersionTemplate("{{.Name}} {{.Version}}\n")
-	root.PersistentFlags().BoolVar(&g.json, "json", false, "print machine-readable JSON output")
+	root.PersistentFlags().BoolVar(&g.json, "json", false, "print machine-readable JSON output (errors too, on stdout)")
+	installHelp(root, g)
 
 	return root, g
 }

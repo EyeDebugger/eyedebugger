@@ -1,0 +1,6 @@
+session s-k3f9 (dotnet) stopped: breakpoint, thread 4242
+  at Program.<Main>$() Program.cs:4
+    3 | {
+  > 4 |     total += i;
+    5 |     Console.WriteLine(total);
+  run-until: did not reach Program.cs:9 (the program stopped or exited first)

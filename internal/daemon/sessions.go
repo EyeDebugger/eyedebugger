@@ -37,11 +37,14 @@ func sessionHandlers(m *session.Manager) map[string]handler {
 		api.MethodSessionStop: withParams(func(ctx context.Context, p api.SessionRef) (any, error) {
 			return m.Stop(ctx, p.SessionID)
 		}),
-		api.MethodSessionStatus: onSession(m, func(ctx context.Context, sess *session.Session, _ api.SessionRef) (any, error) {
-			return sess.Snapshot(ctx), nil
+		api.MethodSessionStatus: onSession(m, func(ctx context.Context, sess *session.Session, p api.StatusParams) (any, error) {
+			return sess.Snapshot(ctx, p.DumpSpec), nil
 		}),
 		api.MethodExec: onSession(m, func(ctx context.Context, sess *session.Session, p api.ExecParams) (any, error) {
-			return sess.Resume(ctx, p.Kind, p.ThreadID, clampWait(p.Wait))
+			return sess.Resume(ctx, p.Kind, p.ThreadID, clampWait(p.Wait), p.DumpSpec)
+		}),
+		api.MethodRunUntil: onSession(m, func(ctx context.Context, sess *session.Session, p api.RunUntilParams) (any, error) {
+			return sess.RunUntil(ctx, p.BreakpointSpec, p.ThreadID, clampWait(p.Wait), p.DumpSpec)
 		}),
 		api.MethodWait: onSession(m, func(ctx context.Context, sess *session.Session, p api.WaitParams) (any, error) {
 			after := p.AfterStops
@@ -49,7 +52,7 @@ func sessionHandlers(m *session.Manager) map[string]handler {
 				after = sess.Stops()
 			}
 
-			return sess.Wait(ctx, after, clampWait(p.Wait)), nil
+			return sess.Wait(ctx, after, clampWait(p.Wait), p.DumpSpec), nil
 		}),
 		api.MethodBreakpointAdd: onSession(m, func(ctx context.Context, sess *session.Session, p api.BreakpointAddParams) (any, error) {
 			return sess.AddBreakpoint(ctx, p.BreakpointSpec)
@@ -66,7 +69,16 @@ func sessionHandlers(m *session.Manager) map[string]handler {
 			return sess.Stack(ctx, p.ThreadID, p.Levels)
 		}),
 		api.MethodVars: onSession(m, func(ctx context.Context, sess *session.Session, p api.VarsParams) (any, error) {
-			return sess.Vars(ctx, p.Frame, max(p.Depth, 1))
+			switch {
+			case p.Changed && p.Frame != 0:
+				return nil, api.NewError(api.CodeInvalidRequest, "--changed works on frame 0 only", "drop --frame")
+			case p.Changed:
+				return sess.Changes(ctx, p.Budget)
+			case p.Expand != "":
+				return sess.Expand(ctx, p.Frame, p.Expand, max(p.Depth, 1), p.Budget)
+			default:
+				return sess.Vars(ctx, p.Frame, max(p.Depth, 1), p.Budget)
+			}
 		}),
 		api.MethodEval: onSession(m, func(ctx context.Context, sess *session.Session, p api.EvalParams) (any, error) {
 			return sess.Eval(ctx, p.Expression, p.Frame)
@@ -86,10 +98,10 @@ func startSession(ctx context.Context, m *session.Manager, p api.StartParams) (a
 	}
 
 	if p.Wait > 0 && (p.StopOnEntry || len(p.Breakpoints) > 0) {
-		return sess.Wait(ctx, 0, clampWait(p.Wait)), nil
+		return sess.Wait(ctx, 0, clampWait(p.Wait), p.DumpSpec), nil
 	}
 
-	return sess.Snapshot(ctx), nil
+	return sess.Snapshot(ctx, p.DumpSpec), nil
 }
 
 // withParams decodes params of type P before calling fn.

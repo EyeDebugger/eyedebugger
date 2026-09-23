@@ -110,7 +110,7 @@ will exit if idle, and where its files are.
 
 Never starts the daemon and has no effect on debug sessions; returns within 10s. "Not running" is
 a normal answer, not an error: it prints "eyedbgd is not running" ("running": false in --json)
-and exits 0. Exits 1 only if the daemon is running but can't be queried (e.g. UNAUTHORIZED).`,
+and exits 0. Exits 3 only if the daemon is running but can't be queried (e.g. UNAUTHORIZED).`,
 		Example: `  eyedbg daemon status
   eyedbg daemon status --json`,
 		Args: cobra.NoArgs,
@@ -366,7 +366,10 @@ func writeLogs(w io.Writer, path string, lines []string, asJSON bool) error {
 }
 
 func writeJSON(w io.Writer, v any) error {
-	if err := json.NewEncoder(w).Encode(v); err != nil {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false) // output is read, not embedded in HTML
+
+	if err := enc.Encode(v); err != nil {
 		return fmt.Errorf("write output: %w", err)
 	}
 

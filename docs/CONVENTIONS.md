@@ -63,8 +63,9 @@
   command missing `Short`, `Long` or `Example`; another executes both help forms for every command
   and asserts they print that command's own `Long` and `Example`. A new command without help fails
   CI, not review.
-- `eyedbg help --all` (prints the full tree's help in one read) and a `--json` help variant are
-  planned (DESIGN §13); until then, `--help` per command is the source of truth.
+- `eyedbg help --all` prints the full tree's help in one read, and `--json` turns any help into
+  structured data (`internal/cli/help.go`); both are built from the same `Short`/`Long`/`Example`
+  and flags, so there is nothing extra to maintain.
 - Help text is a tested, reviewed artifact: change it deliberately, the same as `--json` output.
 
 ## Testing

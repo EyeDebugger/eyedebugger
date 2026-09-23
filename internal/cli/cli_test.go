@@ -5,6 +5,9 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -13,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/version"
 )
 
@@ -375,5 +379,124 @@ func assertGolden(t *testing.T, path string, got []byte) {
 
 	if !bytes.Equal(got, want) {
 		t.Errorf("output mismatch for %s\n--- got ---\n%s\n--- want ---\n%s", path, got, want)
+	}
+}
+
+func TestExitCodeClasses(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		err  error
+		want int
+	}{
+		{errors.New("bad flag"), exitError},
+		{api.NewError(api.CodeInvalidRequest, "", ""), exitError},
+		{api.NewError(api.CodeNotStopped, "", ""), exitState},
+		{fmt.Errorf("wrapped: %w", api.NewError(api.CodeNoSession, "", "")), exitState},
+		{api.NewError(api.CodeBuildFailed, "", ""), exitEnvironment},
+		{api.NewError(api.CodeAdapterFailed, "", ""), exitAdapter},
+	}
+
+	for _, tt := range tests {
+		if got := exitCode(tt.err); got != tt.want {
+			t.Errorf("exitCode(%v) = %d, want %d", tt.err, got, tt.want)
+		}
+	}
+}
+
+func TestJSONErrors(t *testing.T) {
+	t.Parallel()
+
+	// An unknown command fails before flags are parsed; --json still applies.
+	stdout, stderr, code := execute(t, NewEyedbgCommand(testInfo), []string{"no-such-command", "--json"})
+	if code != exitError || len(stderr) != 0 {
+		t.Fatalf("exit code = %d, stderr = %q; want %d and nothing on stderr", code, stderr, exitError)
+	}
+
+	var out struct {
+		Schema int       `json:"schema"`
+		Error  api.Error `json:"error"`
+	}
+
+	if err := json.Unmarshal(stdout, &out); err != nil || out.Schema != jsonSchemaVersion || out.Error.Code != "ERROR" || out.Error.Message == "" {
+		t.Errorf("stdout = %s (%v), want a JSON error", stdout, err)
+	}
+}
+
+func TestHelpAll(t *testing.T) {
+	t.Parallel()
+
+	for name, newRoot := range productionFactories() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			stdout, stderr, code := execute(t, newRoot(), []string{"help", "--all"})
+			if code != 0 {
+				t.Fatalf("exit code = %d, stderr = %q", code, stderr)
+			}
+
+			tree := newRoot()
+			finalizeCommandTree(tree)
+
+			for _, path := range commandPaths(tree) {
+				header := "\n" + strings.Join(append([]string{name}, path...), " ") + "\n"
+				if !bytes.Contains(stdout, []byte(header)) {
+					t.Errorf("help --all has no section for %q", strings.TrimSpace(header))
+				}
+			}
+
+			stdout, stderr, code = execute(t, newRoot(), []string{"help", "--all", "--json"})
+			if code != 0 {
+				t.Fatalf("--json: exit code = %d, stderr = %q", code, stderr)
+			}
+
+			var out helpOutput
+			if err := json.Unmarshal(stdout, &out); err != nil {
+				t.Fatalf("--json: %v", err)
+			}
+
+			if got, want := countHelpDocs(t, out.Command), len(commandPaths(tree)); got != want {
+				t.Errorf("help --all --json has %d commands, want %d", got, want)
+			}
+		})
+	}
+}
+
+// countHelpDocs counts d and its subcommands, checking each is complete.
+func countHelpDocs(t *testing.T, d helpDoc) int {
+	t.Helper()
+
+	if d.Long == "" || d.Example == "" {
+		t.Errorf("%s: JSON help lacks long or example", d.Path)
+	}
+
+	n := 1
+	for i := range d.Commands {
+		n += countHelpDocs(t, d.Commands[i])
+	}
+
+	return n
+}
+
+func TestHelpJSONForOneCommand(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, code := execute(t, NewEyedbgCommand(testInfo), []string{"bp", "add", "--help", "--json"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr)
+	}
+
+	var out helpOutput
+	if err := json.Unmarshal(stdout, &out); err != nil {
+		t.Fatal(err)
+	}
+
+	names := map[string]bool{}
+	for _, f := range append(out.Command.Flags, out.Command.InheritedFlags...) {
+		names[f.Name] = true
+	}
+
+	if out.Command.Path != "eyedbg bp add" || !names["if"] || !names["session"] || !names["budget"] {
+		t.Errorf("help = %+v, want bp add with --if and the inherited --session and --budget", out.Command)
 	}
 }
