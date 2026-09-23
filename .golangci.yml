@@ -1,0 +1,180 @@
+# golangci-lint v2 configuration. Docs: https://golangci-lint.run/docs/configuration/file/
+# CI pins the golangci-lint version in .github/workflows/ci.yml; keep Taskfile.yml in sync.
+version: "2"
+
+run:
+  modules-download-mode: readonly
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - canonicalheader
+    - containedctx
+    - contextcheck
+    - copyloopvar
+    - cyclop
+    - depguard
+    - dupl
+    - dupword
+    - durationcheck
+    - embeddedstructfieldcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - exptostd
+    - fatcontext
+    - forbidigo
+    - forcetypeassert
+    - funlen
+    - gocheckcompilerdirectives
+    - gochecknoglobals
+    - gochecknoinits
+    - gochecksumtype
+    - gocognit
+    - goconst
+    - gocritic
+    - godot
+    - goheader
+    - gomoddirectives
+    - goprintffuncname
+    - gosec
+    - iface
+    - inamedparam
+    - intrange
+    - makezero
+    - mirror
+    - misspell
+    - modernize
+    - musttag
+    - nakedret
+    - nestif
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - noctx
+    - nolintlint
+    - nosprintfhostport
+    - perfsprint
+    - predeclared
+    - reassign
+    - recvcheck
+    - revive
+    - sloglint
+    - tagliatelle
+    - testableexamples
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - usetesting
+    - wastedassign
+    - whitespace
+
+  settings:
+    cyclop:
+      max-complexity: 15
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: "log$"
+              desc: use log/slog (docs/CONVENTIONS.md#logging)
+            - pkg: golang.org/x/exp/slog
+              desc: use log/slog
+            - pkg: github.com/sirupsen/logrus
+              desc: use log/slog
+            - pkg: go.uber.org/zap
+              desc: use log/slog
+            - pkg: github.com/pkg/errors
+              desc: use errors and fmt.Errorf with %w (docs/CONVENTIONS.md#errors)
+            - pkg: io/ioutil
+              desc: deprecated; use io and os
+            - pkg: github.com/stretchr/testify
+              desc: use the standard testing package (docs/CONVENTIONS.md#testing)
+            - pkg: github.com/spf13/viper
+              desc: configuration is explicit; see docs/CONVENTIONS.md
+        cli-framework:
+          files:
+            - "$all"
+            - "!**/internal/cli/**"
+            - "!**/cmd/**"
+          deny:
+            - pkg: github.com/spf13/cobra
+              desc: only internal/cli and cmd/ may import the CLI framework
+            - pkg: github.com/spf13/pflag
+              desc: only internal/cli and cmd/ may import the CLI framework
+    errcheck:
+      check-type-assertions: true
+    exhaustive:
+      default-signifies-exhaustive: false
+    forbidigo:
+      forbid:
+        - pattern: ^(fmt\.Print(f|ln)?|print|println)$
+          msg: write to an injected io.Writer (docs/CONVENTIONS.md#output)
+    gocognit:
+      min-complexity: 20
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - hugeParam # value semantics for small immutable structs beat pointer-passing noise
+    goheader:
+      template: |-
+        Copyright The EyeDebugger Authors
+        SPDX-License-Identifier: Apache-2.0
+    misspell:
+      locale: US
+    nakedret:
+      max-func-lines: 0
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    sloglint:
+      no-mixed-args: true
+      no-global: all
+      context: scope
+      static-msg: true
+      key-naming-case: snake
+      forbidden-keys:
+        - time
+        - level
+        - msg
+        - source
+    tagliatelle:
+      case:
+        rules:
+          json: camel
+
+  exclusions:
+    generated: strict
+    presets:
+      - common-false-positives
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - dupl
+          - funlen
+          - gochecknoglobals
+          - goconst
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/eyedebugger/eyedebugger
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
