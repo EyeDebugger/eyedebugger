@@ -97,6 +97,7 @@ func Serve(ctx context.Context, cfg Config) error {
 	var wg sync.WaitGroup
 
 	wg.Go(func() { s.watchIdle(ctx) })
+	wg.Go(func() { s.watchSocket(ctx) })
 	wg.Go(func() {
 		<-ctx.Done()
 		_ = ln.Close()
@@ -331,6 +332,34 @@ func (s *server) watchIdle(ctx context.Context) {
 		}
 
 		timer.Reset(wait)
+	}
+}
+
+// socketCheckInterval is how often the daemon checks that its socket still
+// exists.
+const socketCheckInterval = 5 * time.Second
+
+// watchSocket stops the daemon once its socket file is gone. On Linux,
+// systemd removes $XDG_RUNTIME_DIR when the user's last login session ends;
+// a daemon left behind would be unreachable, and the next client would start
+// a second one.
+func (s *server) watchSocket(ctx context.Context) {
+	ticker := time.NewTicker(socketCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		if _, err := os.Stat(s.cfg.Paths.Socket); errors.Is(err, os.ErrNotExist) {
+			s.cfg.Logger.WarnContext(ctx, "socket removed, shutting down", slog.String("socket", s.cfg.Paths.Socket))
+			s.shutdown()
+
+			return
+		}
 	}
 }
 
