@@ -1,0 +1,7 @@
+Locals:
+  total: int = 0
+  order: Order = {Order} {…}
+  items: List<int> = Count = 2
+    [0]: int = 7
+    [1]: int = 9
+  … 3 more

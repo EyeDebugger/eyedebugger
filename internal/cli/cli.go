@@ -19,17 +19,34 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 
 	"github.com/spf13/cobra"
 
+	"github.com/eyedebugger/eyedebugger/drivers/dotnet"
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/daemon"
+	"github.com/eyedebugger/eyedebugger/internal/session"
 	"github.com/eyedebugger/eyedebugger/internal/version"
 )
 
 // globals holds flags shared by every command of a binary (docs/DESIGN.md §4).
 type globals struct {
-	json bool
+	json    bool
+	session string
+}
+
+// envSession names the default session for commands that act on one.
+const envSession = "EYEDBG_SESSION"
+
+// ref returns the session chosen by -s, else $EYEDBG_SESSION ("" lets the
+// daemon pick the only session).
+func (g *globals) ref() api.SessionRef {
+	if g.session != "" {
+		return api.SessionRef{SessionID: g.session}
+	}
+
+	return api.SessionRef{SessionID: os.Getenv(envSession)}
 }
 
 // Run executes root with args (without the program name) and returns the
@@ -66,21 +83,46 @@ The CLI is stateless: every invocation talks to a per-user daemon (eyedbgd) over
 auto-starts on first use and exits by itself when idle (see 'eyedbg daemon --help'). There is no MCP server by default — this CLI, with its complete built-in
 help, is the agent interface (docs/DESIGN.md §10).
 
+A typical loop: start a program with breakpoints, inspect (status, stack, vars, eval, output),
+move (next, step-in, step-out, continue, pause, wait), and stop the session when done. Every
+execution command prints where the program ended up, so no extra call is needed to see it.
+Breakpoints are managed with 'eyedbg bp'. Add --json to any command for machine-readable output
+with a "schema" field; errors print a stable [CODE] and a hint.
+
 Run 'eyedbg <command> --help' or 'eyedbg help <command>' for a command's own help: what it does,
 when to use it, whether it blocks (and for how long), its effect on the debuggee, its output shape,
 and its exit codes (docs/DESIGN.md §4).`
 
-const eyedbgExample = `  eyedbg daemon status     # is the per-user daemon running?
-  eyedbg version           # build info for this binary
-  eyedbg version --json    # machine-readable build info ("schema": 1)`
+const eyedbgExample = `  eyedbg adapters install netcoredbg            # once per machine
+  eyedbg start dotnet --bp Program.cs:12         # build, run, stop at line 12
+  eyedbg vars                                    # locals of the current frame
+  eyedbg next                                    # step over, show where it stopped
+  eyedbg eval 'total * 2'
+  eyedbg continue                                # to the next breakpoint or exit
+  eyedbg stop                                    # end the session`
 
 // NewEyedbgCommand returns the root command of the eyedbg CLI.
 func NewEyedbgCommand(info version.Info) *cobra.Command {
 	root, g := newRoot("eyedbg", "AI-native, CLI-first debugger", eyedbgLong, eyedbgExample, info)
+	root.PersistentFlags().StringVarP(&g.session, "session", "s", "",
+		"session id to act on (default: $"+envSession+", else the only session)")
+
 	root.AddCommand(
+		newStartCommand(info, g),
+		newSessionsCommand(info, g),
+		newStatusCommand(info, g),
+		newWaitCommand(info, g),
+		newStackCommand(info, g),
+		newVarsCommand(info, g),
+		newEvalCommand(info, g),
+		newOutputCommand(info, g),
+		newBreakpointCommand(info, g),
+		newStopCommand(info, g),
+		newAdaptersCommand(g),
 		newDaemonCommand(info, g),
 		newVersionCommand("eyedbg", info, g),
 	)
+	root.AddCommand(newExecCommands(info, g)...)
 
 	return root
 }
@@ -118,7 +160,10 @@ func NewDaemonCommand(info version.Info) *cobra.Command {
 
 		logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
 
-		err = daemon.Serve(cmd.Context(), daemon.Config{Paths: p, IdleTimeout: idle, Info: info, Logger: logger})
+		err = daemon.Serve(cmd.Context(), daemon.Config{
+			Paths: p, IdleTimeout: idle, Info: info, Logger: logger,
+			Drivers: []session.Driver{dotnet.New()},
+		})
 		if errors.Is(err, daemon.ErrAlreadyRunning) {
 			return api.NewError(api.CodeDaemonStart, err.Error()+" ("+p.Dir+")",
 				"use 'eyedbg daemon status' to inspect it or 'eyedbg daemon stop' to stop it")
