@@ -115,9 +115,9 @@ Design rules:
 
 ## 6. Daemon
 
-- **Discovery/IPC:** per-user dir (`$XDG_RUNTIME_DIR/eyedbg`, `~/Library/Caches/eyedbg` — TBD, `%LOCALAPPDATA%\eyedbg`), mode 0700. Unix domain socket everywhere (AF_UNIX works on Windows 10 1803+ and Go supports it); fallback named pipe via `go-winio` with owner-only DACL. Plus a 0600 random token file checked on connect.
+- **Discovery/IPC:** per-user runtime dir: `$EYEDBG_RUNTIME_DIR` if set, else `$XDG_RUNTIME_DIR/eyedbg` on Unix when set, else the user cache dir (`~/Library/Caches/eyedbg`, `~/.cache/eyedbg`, `%LocalAppData%\eyedbg`). Mode 0700 and owned by the user (checked on Unix; on Windows the `%LocalAppData%` ACL applies). Unix domain socket everywhere (AF_UNIX works on Windows 10 1803+ and Go supports it); a named-pipe fallback is not needed so far. A fresh random token (0600) is written at each daemon start and checked (constant-time) on every connection's first request.
 - **Lifecycle:** One daemon per user serves all sessions; each session's adapter is its own child process, so an adapter crash only ends that session. Nobody starts or stops the daemon by hand, and it is never installed as a system service:
-  - *Start:* CLI connects → on failure takes a lock file (so concurrent agents don't spawn two), spawns detached `eyedbgd` (`setsid` on Unix, detached process on Windows), polls ready. `EYEDBG_NO_AUTOSTART=1` makes the CLI fail instead of spawning (CI, or users who manage the daemon themselves).
+  - *Start:* CLI connects → on failure spawns detached `eyedbgd` (`setsid` on Unix, detached process on Windows; stdout/stderr appended to `eyedbgd.log`, rotated at 5 MiB), polls ready (5 s). The daemon holds an exclusive OS lock (`flock` / no-share open) on `eyedbgd.lock` for its whole life, so when concurrent agents spawn several, exactly one wins and the rest exit at once; the winner may delete any leftover socket or token, since they can only be stale. `EYEDBG_NO_AUTOSTART=1` makes the CLI fail instead of spawning (CI, or users who manage the daemon themselves).
   - *Handshake:* protocol version + token on every connection; version mismatch → CLI asks the old daemon to drain & exit if it has no sessions, else errors with a hint (never kills live sessions).
   - *Idle exit:* the idle timer starts when the last session ends (no immediate exit, so the next command starts fast); exit after N minutes with zero sessions (default 30, configurable).
   - *Manual:* `eyedbg daemon status` (pid, uptime, version, sessions); `eyedbg daemon stop` refuses while sessions exist unless `--force`, which ends them (killing their debuggees); `eyedbgd` run directly stays in the foreground with logs on stderr, for debugging the daemon itself.
@@ -201,7 +201,7 @@ testdata/apps/       sample debuggees per language
 
 ## 13. MVP milestones
 
-1. **Skeleton:** daemon auto-start, IPC + token, version handshake, `daemon status/stop`.
+1. **Skeleton** (done): daemon auto-start, IPC + token, version handshake, `daemon start/status/stop/logs`.
 2. **DAP core:** go-dap client, netcoredbg install/doctor, `start` a console app, `bp add` (line), `continue`, `status`, `stack`, `vars`, `stop`.
 3. **Agent ergonomics:** stop snapshot, `--dump`, `run-until`, `wait`, `--changed`, budgets, JSON
    schema, errors, `eyedbg help --all` (the full command tree's help in one read) and a `--json`

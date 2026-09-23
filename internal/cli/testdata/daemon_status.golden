@@ -1,0 +1,7 @@
+eyedbgd is running
+pid:      4242
+version:  v0.1.0 (abc1234)
+uptime:   3m2s
+sessions: 0
+idle:     exits in 26m58s unless a session starts (idle timeout 30m0s)
+dir:      /run/user/1000/eyedbg

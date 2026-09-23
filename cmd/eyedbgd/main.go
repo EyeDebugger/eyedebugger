@@ -8,13 +8,14 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"syscall"
 
 	"github.com/eyedebugger/eyedebugger/internal/cli"
 	"github.com/eyedebugger/eyedebugger/internal/version"
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	code := cli.Run(ctx, cli.NewDaemonCommand(version.Get()), os.Args[1:])
 
 	stop()
