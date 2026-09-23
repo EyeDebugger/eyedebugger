@@ -157,7 +157,7 @@ func start(ctx context.Context, p Paths, info version.Info, opts StartOptions) (
 		return nil, err
 	}
 
-	exited, err := spawn(ctx, p, exe)
+	pid, exited, err := spawn(ctx, p, exe)
 	if err != nil {
 		return nil, api.NewError(api.CodeDaemonStart, "start "+exe+": "+err.Error(), "")
 	}
@@ -178,6 +178,10 @@ func start(ctx context.Context, p Paths, info version.Info, opts StartOptions) (
 	for {
 		cl, err := Dial(ctx, p, info)
 		if err == nil {
+			if cl.Hello.PID != pid {
+				awaitLoser(ctx, exited)
+			}
+
 			return cl, nil
 		}
 
@@ -202,15 +206,31 @@ func start(ctx context.Context, p Paths, info version.Info, opts StartOptions) (
 	}
 }
 
+// awaitLoser waits for a spawned daemon that lost the start race to exit
+// (nil exited: it already has). It exits as soon as it finds the lock taken;
+// without waiting, a slow start could take the lock after the winner is gone
+// and linger.
+func awaitLoser(ctx context.Context, exited <-chan error) {
+	if exited == nil {
+		return
+	}
+
+	select {
+	case <-exited:
+	case <-ctx.Done():
+	}
+}
+
 // spawn starts exe detached, with stdout and stderr appended to the daemon
-// log. The returned channel receives the process's exit error (nil on a
-// clean exit) if it exits while this process is still running.
-func spawn(ctx context.Context, p Paths, exe string) (<-chan error, error) {
+// log. It returns the process id and a channel that receives the process's
+// exit error (nil on a clean exit) if it exits while this process is still
+// running.
+func spawn(ctx context.Context, p Paths, exe string) (pid int, exited <-chan error, err error) {
 	rotateLog(p.Log)
 
 	logf, err := os.OpenFile(p.Log, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return nil, fmt.Errorf("open daemon log: %w", err)
+		return 0, nil, fmt.Errorf("open daemon log: %w", err)
 	}
 	defer logf.Close()
 
@@ -224,14 +244,14 @@ func spawn(ctx context.Context, p Paths, exe string) (<-chan error, error) {
 	detach(cmd)
 
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 
-	exited := make(chan error, 1)
+	done := make(chan error, 1)
 
-	go func() { exited <- cmd.Wait() }()
+	go func() { done <- cmd.Wait() }()
 
-	return exited, nil
+	return cmd.Process.Pid, done, nil
 }
 
 // daemonExecutable finds eyedbgd: explicit, else next to the running
