@@ -118,34 +118,37 @@ func TestCompletionUsesConfiguredWriter(t *testing.T) {
 	}
 }
 
+// productionFactories returns a fresh, unfinalized command tree per binary,
+// built exactly as cmd/* builds it: Run finalizes it, so help output rendered
+// from these trees proves the production path adds cobra's generated commands
+// and their Examples.
+func productionFactories() map[string]func() *cobra.Command {
+	return map[string]func() *cobra.Command{
+		"eyedbg":  func() *cobra.Command { return NewEyedbgCommand(testInfo) },
+		"eyedbgd": func() *cobra.Command { return NewDaemonCommand(testInfo) },
+	}
+}
+
 // rootFactories returns a fresh, already-finalized command tree per binary,
 // so every test below covers every binary in the scaffold (docs/DESIGN.md
 // §4). A factory (not a shared instance) matters: cobra command state must
 // not be reused across multiple Execute calls.
 //
-// Finalizing here, ahead of any SetOut, is safe only because none of the
-// trees this factory produces are ever used to actually run "completion
-// <shell>" (as opposed to "completion <shell> --help", which cobra answers
-// without invoking the sub-command's RunE): see TestCompletionUsesConfiguredWriter,
-// which deliberately builds its own unfinalized tree instead.
+// These trees are only walked and searched (Commands, Find). Anything that
+// renders output uses productionFactories instead, so a missing finalize in
+// Run can't hide behind the finalize done here.
 func rootFactories() map[string]func() *cobra.Command {
-	newEyedbg := func() *cobra.Command {
-		root := NewEyedbgCommand(testInfo)
-		finalizeCommandTree(root)
+	factories := productionFactories()
+	for name, build := range factories {
+		factories[name] = func() *cobra.Command {
+			root := build()
+			finalizeCommandTree(root)
 
-		return root
-	}
-	newDaemon := func() *cobra.Command {
-		root := NewDaemonCommand(testInfo)
-		finalizeCommandTree(root)
-
-		return root
+			return root
+		}
 	}
 
-	return map[string]func() *cobra.Command{
-		"eyedbg":  newEyedbg,
-		"eyedbgd": newDaemon,
-	}
+	return factories
 }
 
 // TestAllCommandsHaveHelp walks every command and subcommand of every binary
@@ -195,6 +198,8 @@ func assertHasHelp(t *testing.T, cmd *cobra.Command) {
 func TestHelpReachableForEveryCommand(t *testing.T) {
 	t.Parallel()
 
+	production := productionFactories()
+
 	for name, newRoot := range rootFactories() {
 		for _, path := range commandPaths(newRoot()) {
 			t.Run(name+"/"+strings.Join(append([]string{"root"}, path...), " "), func(t *testing.T) {
@@ -205,8 +210,8 @@ func TestHelpReachableForEveryCommand(t *testing.T) {
 					t.Fatalf("Find(%v): %v", path, err)
 				}
 
-				assertHelpOutput(t, newRoot(), append(append([]string{}, path...), "--help"), target.Long, target.Example)
-				assertHelpOutput(t, newRoot(), append([]string{"help"}, path...), target.Long, target.Example)
+				assertHelpOutput(t, production[name](), append(append([]string{}, path...), "--help"), target.Long, target.Example)
+				assertHelpOutput(t, production[name](), append([]string{"help"}, path...), target.Long, target.Example)
 			})
 		}
 	}
@@ -223,12 +228,14 @@ func TestHelpReachableForEveryCommand(t *testing.T) {
 func TestCommandTreeMatchesHelpOutput(t *testing.T) {
 	t.Parallel()
 
+	production := productionFactories()
+
 	for name, newRoot := range rootFactories() {
 		for _, path := range commandPaths(newRoot()) {
 			t.Run(name+"/"+strings.Join(append([]string{"root"}, path...), " "), func(t *testing.T) {
 				t.Parallel()
 
-				assertCommandSetMatchesHelp(t, newRoot, path)
+				assertCommandSetMatchesHelp(t, newRoot, production[name], path)
 			})
 		}
 	}
@@ -236,8 +243,9 @@ func TestCommandTreeMatchesHelpOutput(t *testing.T) {
 
 // assertCommandSetMatchesHelp compares the non-hidden sub-commands of the
 // command at path (found via cobra's own tree-walk) against the ones listed
-// in that same command's real '--help' output.
-func assertCommandSetMatchesHelp(t *testing.T, newRoot func() *cobra.Command, path []string) {
+// in that same command's real '--help' output, rendered from an unfinalized
+// production tree.
+func assertCommandSetMatchesHelp(t *testing.T, newRoot, newProduction func() *cobra.Command, path []string) {
 	t.Helper()
 
 	target, _, err := newRoot().Find(path)
@@ -252,7 +260,7 @@ func assertCommandSetMatchesHelp(t *testing.T, newRoot func() *cobra.Command, pa
 		}
 	}
 
-	stdout, stderr, code := execute(t, newRoot(), append(append([]string{}, path...), "--help"))
+	stdout, stderr, code := execute(t, newProduction(), append(append([]string{}, path...), "--help"))
 	if code != 0 {
 		t.Fatalf("--help exit code = %d, stderr = %q", code, stderr)
 	}
