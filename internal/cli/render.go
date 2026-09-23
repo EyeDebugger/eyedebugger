@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
 )
@@ -27,6 +28,7 @@ func writeSnapshot(w io.Writer, snap api.Snapshot, asJSON bool, base string) err
 	var b strings.Builder
 
 	b.WriteString(snapshotHeader(snap) + "\n")
+	writeSharing(&b, snap.Session)
 
 	if f := snap.Frame; f != nil {
 		fmt.Fprintf(&b, "  at %s %s\n", f.Name, location(f.File, f.Line, base))
@@ -126,6 +128,26 @@ func writeBudgetHint(b *strings.Builder, truncated bool, indent int) {
 	}
 }
 
+// writeSharing writes who holds the lease and who uses the session, when
+// that matters: several clients, or a policy other than free.
+func writeSharing(b *strings.Builder, s api.SessionInfo) {
+	if s.Lease == nil || (len(s.Clients) <= 1 && s.Lease.Policy == api.LeaseFree) {
+		return
+	}
+
+	holder := s.Lease.Holder
+	if holder == "" {
+		holder = "nobody"
+	}
+
+	ids := make([]string, len(s.Clients))
+	for i := range s.Clients {
+		ids[i] = s.Clients[i].ID
+	}
+
+	fmt.Fprintf(b, "  lease: %s (%s); clients: %s\n", holder, s.Lease.Policy, strings.Join(ids, ", "))
+}
+
 // snapshotHeader is the first line: session, state and why.
 func snapshotHeader(snap api.Snapshot) string {
 	s := snap.Session
@@ -157,11 +179,16 @@ func snapshotHeader(snap api.Snapshot) string {
 		if snap.TimedOut {
 			b.WriteString(" (still running when the wait ended; 'eyedbg wait' or 'eyedbg pause')")
 		}
+	case api.StateLost:
+		b.WriteString(" (eyedbgd exited while it was live)")
 	case api.StateStarting:
 	}
 
 	return b.String()
 }
+
+// lostNote explains lost sessions under the sessions table.
+const lostNote = "(lost: eyedbgd exited while it was live; 'eyedbg sessions --json' has its recording; 'eyedbg stop -s ID' forgets it)\n"
 
 func writeSessions(w io.Writer, list []api.SessionInfo, asJSON bool) error {
 	if asJSON {
@@ -175,10 +202,22 @@ func writeSessions(w io.Writer, list []api.SessionInfo, asJSON bool) error {
 		}{jsonSchemaVersion, list})
 	}
 
-	var b strings.Builder
+	if len(list) == 0 {
+		return nil
+	}
+
+	var (
+		table strings.Builder
+		lost  bool
+	)
+
+	tw := tabwriter.NewWriter(&table, 0, 0, 2, ' ', 0)
+	_, _ = io.WriteString(tw, "ID\tLANG\tSTATE\tLEASE\tPROGRAM\n")
 
 	for i := range list {
 		s := &list[i]
+		lost = lost || s.State == api.StateLost
+
 		state := string(s.State)
 		if s.State == api.StateStopped && s.Stop != nil {
 			state += " (" + s.Stop.Reason + ")"
@@ -188,7 +227,23 @@ func writeSessions(w io.Writer, list []api.SessionInfo, asJSON bool) error {
 			state += fmt.Sprintf(" (code %d)", *s.ExitCode)
 		}
 
-		b.WriteString(strings.TrimRight(fmt.Sprintf("%s  %s  %s  %s", s.ID, s.Lang, state, s.Program), " ") + "\n")
+		holder := "-"
+		if s.Lease != nil && s.Lease.Holder != "" {
+			holder = s.Lease.Holder
+		}
+
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.ID, s.Lang, state, holder, s.Program)
+	}
+
+	_ = tw.Flush() // writes to a strings.Builder cannot fail
+
+	var b strings.Builder
+	for line := range strings.Lines(table.String()) {
+		b.WriteString(strings.TrimRight(line, " \n") + "\n")
+	}
+
+	if lost {
+		b.WriteString(lostNote)
 	}
 
 	return writeText(w, b.String())
@@ -306,20 +361,23 @@ func writeEval(w io.Writer, res api.EvalResult, asJSON bool) error {
 	return writeText(w, s+"\n")
 }
 
-func writeOutput(w io.Writer, lines []api.OutputLine, asJSON bool) error {
+// writeOutput writes output chunks; a hint about chunks left out goes to
+// stderr, so the text on stdout stays exactly what the program printed.
+func writeOutput(w, stderr io.Writer, res api.OutputResult, tail, asJSON bool) error {
 	if asJSON {
-		if lines == nil {
-			lines = []api.OutputLine{}
+		if res.Lines == nil {
+			res.Lines = []api.OutputLine{}
 		}
 
 		return writeJSON(w, struct {
 			Schema int              `json:"schema"`
 			Output []api.OutputLine `json:"output"`
-		}{jsonSchemaVersion, lines})
+			More   int              `json:"more,omitempty"`
+		}{jsonSchemaVersion, res.Lines, res.More})
 	}
 
 	var b strings.Builder
-	for _, l := range lines {
+	for _, l := range res.Lines {
 		b.WriteString(l.Text)
 	}
 
@@ -328,7 +386,23 @@ func writeOutput(w io.Writer, lines []api.OutputLine, asJSON bool) error {
 		out += "\n"
 	}
 
-	return writeText(w, out)
+	if err := writeText(w, out); err != nil {
+		return err
+	}
+
+	switch {
+	case res.More == 0:
+		return nil
+	case tail:
+		return writeText(stderr, fmt.Sprintf("(%d earlier chunks left out to keep the output under 512 KiB)\n", res.More))
+	default:
+		last := 0
+		if n := len(res.Lines); n > 0 {
+			last = res.Lines[n-1].Seq
+		}
+
+		return writeText(stderr, fmt.Sprintf("(%d more chunks: eyedbg output --since %d)\n", res.More, last))
+	}
 }
 
 func writeBreakpoints(w io.Writer, bps []api.Breakpoint, asJSON bool, base string) error {
@@ -345,8 +419,9 @@ func writeBreakpoints(w io.Writer, bps []api.Breakpoint, asJSON bool, base strin
 
 	var b strings.Builder
 
-	for _, bp := range bps {
-		fmt.Fprintf(&b, "%d  %s", bp.ID, location(bp.File, bp.Line, base))
+	for i := range bps {
+		bp := &bps[i]
+		fmt.Fprintf(&b, "%d  %s  %s", bp.ID, bp.Owner, location(bp.File, bp.Line, base))
 
 		if bp.Line != bp.RequestedLine {
 			fmt.Fprintf(&b, " (requested line %d)", bp.RequestedLine)
@@ -370,10 +445,32 @@ func writeBreakpoints(w io.Writer, bps []api.Breakpoint, asJSON bool, base strin
 			}
 		}
 
+		if bp.Note != "" {
+			b.WriteString("  note: " + bp.Note)
+		}
+
 		b.WriteString("\n")
 	}
 
 	return writeText(w, b.String())
+}
+
+// writeRemoved reports what 'bp rm' removed and kept.
+func writeRemoved(w io.Writer, res api.BreakpointRemoveResult, asJSON bool) error {
+	if asJSON {
+		return writeJSON(w, struct {
+			Schema  int `json:"schema"`
+			Removed int `json:"removed"`
+			Kept    int `json:"kept"`
+		}{jsonSchemaVersion, res.Removed, res.Kept})
+	}
+
+	msg := fmt.Sprintf("removed %d breakpoint(s)", res.Removed)
+	if res.Kept > 0 {
+		msg += fmt.Sprintf("; %d of other clients kept (--force removes them)", res.Kept)
+	}
+
+	return writeText(w, msg+"\n")
 }
 
 // location renders file:line, relative to base when file is under it.

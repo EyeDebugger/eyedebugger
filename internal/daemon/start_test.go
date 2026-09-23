@@ -5,9 +5,11 @@ package daemon
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -128,6 +130,12 @@ func TestConcurrentConnectsShareOneDaemon(t *testing.T) {
 
 	if len(pids) != 1 {
 		t.Errorf("%d concurrent Connects reached daemons %v, want exactly one", n, pids)
+	}
+
+	// The daemons that lost the race exited quietly (every Connect waited
+	// for its own spawn to exit).
+	if log, err := os.ReadFile(p.Log); err != nil || strings.Contains(string(log), "already running") {
+		t.Errorf("daemon log (%v):\n%s\nwant no start-race errors", err, log)
 	}
 }
 

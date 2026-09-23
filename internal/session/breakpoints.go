@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"time"
 
 	godap "github.com/google/go-dap"
@@ -15,10 +16,12 @@ import (
 	"github.com/eyedebugger/eyedebugger/internal/dap"
 )
 
-// AddBreakpoint adds a line breakpoint and, once the session is configured,
-// sends it to the adapter. The result says whether the adapter verified it
-// and on which line it actually landed.
-func (s *Session) AddBreakpoint(ctx context.Context, spec api.BreakpointSpec) (api.Breakpoint, error) {
+// AddBreakpoint adds client c's line breakpoint and, once the session is
+// configured, sends it to the adapter. The result says whether the adapter
+// verified it and on which line it actually landed. Adding one where c
+// already has one replaces its condition; other clients' breakpoints at the
+// same line are separate and share the line (see slotsFor).
+func (s *Session) AddBreakpoint(ctx context.Context, c api.Client, spec api.BreakpointSpec) (api.Breakpoint, error) {
 	if !filepath.IsAbs(spec.File) || spec.Line < 1 {
 		return api.Breakpoint{}, api.NewError(api.CodeInvalidRequest,
 			fmt.Sprintf("invalid breakpoint %s:%d", spec.File, spec.Line), "use FILE:LINE with a line number from 1")
@@ -31,7 +34,7 @@ func (s *Session) AddBreakpoint(ctx context.Context, spec api.BreakpointSpec) (a
 		return api.Breakpoint{}, stateError(s.ID, s.state, "adding a breakpoint needs a live session")
 	}
 
-	b := s.addBreakpointLocked(spec)
+	b, isNew, changed := s.addBreakpointLocked(c.ID, spec)
 	s.mu.Unlock()
 
 	if err := s.syncBreakpoints(ctx, spec.File); err != nil {
@@ -41,23 +44,73 @@ func (s *Session) AddBreakpoint(ctx context.Context, spec api.BreakpointSpec) (a
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	switch {
+	case isNew:
+		s.logBreakpointLocked("added", c.ID, b)
+	case changed:
+		s.logBreakpointLocked("changed", c.ID, b)
+	}
+
 	return b.Breakpoint, nil
 }
 
-// RemoveBreakpoint removes the breakpoint with id, or every breakpoint if id
-// is 0. It returns how many were removed.
-func (s *Session) RemoveBreakpoint(ctx context.Context, id int) (int, error) {
+// RemoveBreakpoint removes breakpoint id for client c. Another client's
+// breakpoint needs force (NOT_OWNER otherwise). id 0 removes all of c's
+// breakpoints, or everyone's with force, and never fails for finding none.
+// It returns how many were removed and, for id 0, how many other clients'
+// breakpoints were kept.
+func (s *Session) RemoveBreakpoint(ctx context.Context, c api.Client, id int, force bool) (removed, kept int, err error) {
+	if id == 0 {
+		return s.removeBreakpoints(ctx, c.ID, func(b *breakpoint) bool { return force || b.Owner == c.ID })
+	}
+
+	s.mu.Lock()
+	target := s.findBreakpointLocked(id)
+	s.mu.Unlock()
+
+	if target == nil {
+		return 0, 0, api.NewError(api.CodeInvalidRequest, fmt.Sprintf("no breakpoint %d", id), "see 'eyedbg bp ls'")
+	}
+
+	if target.Owner != c.ID && !force {
+		return 0, 0, api.NewError(api.CodeNotOwner, fmt.Sprintf("breakpoint %d belongs to %s", id, target.Owner),
+			"'eyedbg bp ls --mine' lists yours; add --force to remove it anyway")
+	}
+
+	removed, _, err = s.removeBreakpoints(ctx, c.ID, func(b *breakpoint) bool { return b == target })
+
+	return removed, 0, err
+}
+
+func (s *Session) findBreakpointLocked(id int) *breakpoint {
+	for _, list := range s.bps {
+		for _, b := range list {
+			if b.ID == id {
+				return b
+			}
+		}
+	}
+
+	return nil
+}
+
+// removeBreakpoints removes the breakpoints match selects, sends the files
+// they were in to the adapter (unless the session has exited) and logs a
+// removed event per breakpoint, by actor. It returns how many it removed
+// and how many breakpoints are left.
+func (s *Session) removeBreakpoints(ctx context.Context, actor string, match func(*breakpoint) bool) (removed, left int, err error) {
 	s.mu.Lock()
 
-	removed := 0
+	var gone []*breakpoint
+
 	touched := map[string]bool{}
 
 	for file, list := range s.bps {
-		kept := list[:0]
+		kept := make([]*breakpoint, 0, len(list))
 
 		for _, b := range list {
-			if id == 0 || b.ID == id {
-				removed++
+			if match(b) {
+				gone = append(gone, b)
 				touched[file] = true
 
 				continue
@@ -66,52 +119,70 @@ func (s *Session) RemoveBreakpoint(ctx context.Context, id int) (int, error) {
 			kept = append(kept, b)
 		}
 
-		s.bps[file] = kept
+		left += len(kept)
+
+		if len(kept) == 0 {
+			delete(s.bps, file)
+		} else {
+			s.bps[file] = kept
+		}
 	}
 
+	exited := s.state == api.StateExited
 	s.mu.Unlock()
 
-	if removed == 0 {
-		return 0, api.NewError(api.CodeInvalidRequest, fmt.Sprintf("no breakpoint %d", id), "see 'eyedbg bp ls'")
+	if !exited {
+		for file := range touched {
+			if err = s.syncBreakpoints(ctx, file); err != nil {
+				break
+			}
+		}
 	}
 
-	for file := range touched {
-		if err := s.syncBreakpoints(ctx, file); err != nil {
-			return removed, err
-		}
+	sort.Slice(gone, func(i, j int) bool { return gone[i].ID < gone[j].ID })
 
-		s.mu.Lock()
-		if len(s.bps[file]) == 0 {
-			delete(s.bps, file)
-		}
-		s.mu.Unlock()
+	s.mu.Lock()
+	for _, b := range gone {
+		s.logBreakpointLocked("removed", actor, b)
 	}
+	s.mu.Unlock()
 
-	return removed, nil
+	return len(gone), left, err
 }
 
-// addBreakpointLocked adds a breakpoint, or updates the condition of the
-// one already requested at that line.
-func (s *Session) addBreakpointLocked(spec api.BreakpointSpec) *breakpoint {
+// addBreakpointLocked adds owner's breakpoint, or updates the condition of
+// the one owner already has at that line (making it permanent). changed
+// reports whether an existing one changed.
+func (s *Session) addBreakpointLocked(owner string, spec api.BreakpointSpec) (b *breakpoint, isNew, changed bool) {
 	for _, b := range s.bps[spec.File] {
-		if b.RequestedLine == spec.Line {
+		if b.Owner == owner && b.RequestedLine == spec.Line {
+			changed = b.Condition != spec.Condition || b.Temporary
 			b.Condition, b.Temporary = spec.Condition, false
 
-			return b
+			return b, false, changed
 		}
 	}
 
 	s.nextBP++
-	b := &breakpoint{Breakpoint: api.Breakpoint{
+	b = &breakpoint{Breakpoint: api.Breakpoint{
 		ID: s.nextBP, File: spec.File, RequestedLine: spec.Line, Line: spec.Line, Condition: spec.Condition,
+		Owner: owner, CreatedAt: time.Now(),
 	}}
 	s.bps[spec.File] = append(s.bps[spec.File], b)
 
-	return b
+	return b, true, false
 }
 
-// syncBreakpoints sends file's full breakpoint list to the adapter (DAP
-// replaces per file) and records what the adapter answered. Before the
+// logBreakpointLocked logs a breakpoint event with a copy of b as it is now.
+func (s *Session) logBreakpointLocked(action, actor string, b *breakpoint) {
+	cp := b.Breakpoint
+	s.log.append(api.Event{Kind: api.EventBreakpoint, Action: action, Client: actor, Breakpoint: &cp})
+}
+
+// syncBreakpoints sends file's breakpoints to the adapter (DAP replaces per
+// file), one source breakpoint per line, and records what the adapter
+// answered on every breakpoint of that line. Round trips are serialized by
+// syncMu, so the list the adapter keeps is always the newest one. Before the
 // adapter is initialized there is nothing to do: configure sends them.
 func (s *Session) syncBreakpoints(ctx context.Context, file string) error {
 	select {
@@ -120,13 +191,16 @@ func (s *Session) syncBreakpoints(ctx context.Context, file string) error {
 		return nil
 	}
 
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+
 	s.mu.Lock()
-	list := append([]*breakpoint(nil), s.bps[file]...)
+	slots := slotsFor(s.bps[file])
 	s.mu.Unlock()
 
-	sbps := make([]godap.SourceBreakpoint, len(list))
-	for i, b := range list {
-		sbps[i] = godap.SourceBreakpoint{Line: b.RequestedLine, Condition: b.Condition}
+	sbps := make([]godap.SourceBreakpoint, len(slots))
+	for i, sl := range slots {
+		sbps[i] = godap.SourceBreakpoint{Line: sl.line, Condition: sl.condition}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
@@ -144,17 +218,24 @@ func (s *Session) syncBreakpoints(ctx context.Context, file string) error {
 	defer s.mu.Unlock()
 
 	for i, got := range resp.Body.Breakpoints {
-		if i >= len(list) {
+		if i >= len(slots) {
 			break
 		}
 
-		b := list[i]
-		b.adapterID = got.Id
-		b.Verified = got.Verified
-		b.Message = got.Message
+		note := ""
+		if slots[i].note {
+			note = sharedLineNote
+		}
 
-		if got.Line > 0 {
-			b.Line = got.Line
+		for _, b := range slots[i].bps {
+			b.adapterID = got.Id
+			b.Verified = got.Verified
+			b.Message = got.Message
+			b.Note = note
+
+			if got.Line > 0 {
+				b.Line = got.Line
+			}
 		}
 	}
 
@@ -162,11 +243,18 @@ func (s *Session) syncBreakpoints(ctx context.Context, file string) error {
 }
 
 // updateBreakpointLocked applies an adapter's breakpoint event (e.g. a
-// pending breakpoint that resolved once the module loaded).
+// pending breakpoint that resolved once the module loaded) to every
+// breakpoint of that adapter id, and logs a changed event for each.
 func (s *Session) updateBreakpointLocked(got godap.Breakpoint) {
+	if got.Id == 0 {
+		return
+	}
+
+	var hit []*breakpoint
+
 	for _, list := range s.bps {
 		for _, b := range list {
-			if b.adapterID != got.Id || got.Id == 0 {
+			if b.adapterID != got.Id {
 				continue
 			}
 
@@ -176,7 +264,15 @@ func (s *Session) updateBreakpointLocked(got godap.Breakpoint) {
 			if got.Line > 0 {
 				b.Line = got.Line
 			}
+
+			hit = append(hit, b)
 		}
+	}
+
+	sort.Slice(hit, func(i, j int) bool { return hit[i].ID < hit[j].ID })
+
+	for _, b := range hit {
+		s.logBreakpointLocked("changed", "", b)
 	}
 }
 
@@ -194,36 +290,37 @@ type setBreakpointsArguments struct {
 	Breakpoints []godap.SourceBreakpoint `json:"breakpoints"`
 }
 
-// RunUntil continues to spec's location, via a temporary breakpoint unless a
-// breakpoint is already requested there. The program may stop elsewhere
-// first (another breakpoint, an exception) or exit. The temporary breakpoint
-// is removed when the program stops or exits; after a timeout it stays until
-// the next execution command.
-func (s *Session) RunUntil(ctx context.Context, spec api.BreakpointSpec, threadID int, wait time.Duration, dump api.DumpSpec) (api.Snapshot, error) {
+// RunUntil continues to spec's location for client c, via a temporary
+// breakpoint of c's unless c already has one there. The program may stop
+// elsewhere first (another breakpoint, an exception) or exit. The temporary
+// breakpoint is removed when the program stops or exits; after a timeout it
+// stays until the next execution command.
+func (s *Session) RunUntil(ctx context.Context, c api.Client, spec api.BreakpointSpec, threadID int, wait time.Duration, dump api.DumpSpec) (api.Snapshot, error) {
 	if !filepath.IsAbs(spec.File) || spec.Line < 1 {
 		return api.Snapshot{}, api.NewError(api.CodeInvalidRequest,
 			fmt.Sprintf("invalid location %s:%d", spec.File, spec.Line), "use FILE:LINE with a line number from 1")
 	}
 
-	at, err := s.placeTarget(ctx, spec)
+	x, err := s.execute(ctx, execRequest{client: c, kind: execRunUntil, thread: threadID, target: &spec})
 	if err != nil {
 		return api.Snapshot{}, err
 	}
 
-	snap, err := s.resume(ctx, ExecContinue, threadID, wait, dump)
-	if err != nil {
-		_ = s.removeTemporary(ctx)
+	snap := s.Wait(ctx, x.before, wait, dump)
+	snap.Target = &x.target
 
-		return snap, err
+	if snap.TimedOut {
+		return snap, nil
 	}
 
-	snap.Target = &at
+	reached := snap.Frame != nil && snap.Frame.File == x.target.File && snap.Frame.Line == x.target.Line
+	snap.Reached = &reached
 
-	if !snap.TimedOut {
-		reached := snap.Frame != nil && snap.Frame.File == at.File && snap.Frame.Line == at.Line
-		snap.Reached = &reached
-
-		if err := s.removeTemporary(ctx); err != nil && snap.Session.State != api.StateExited {
+	// Only this request's own breakpoint: another client may have started
+	// a run-until of its own meanwhile.
+	if x.temp != nil {
+		if _, _, err := s.removeBreakpoints(ctx, c.ID, stillTemporary(x.temp)); err != nil &&
+			snap.Session.State != api.StateExited {
 			return snap, err
 		}
 	}
@@ -231,89 +328,56 @@ func (s *Session) RunUntil(ctx context.Context, spec api.BreakpointSpec, threadI
 	return snap, nil
 }
 
-// placeTarget sets run-until's temporary breakpoint at spec, unless one is
-// already there, and returns where the adapter placed it.
-func (s *Session) placeTarget(ctx context.Context, spec api.BreakpointSpec) (api.BreakpointSpec, error) {
-	if err := s.removeTemporary(ctx); err != nil {
-		return api.BreakpointSpec{}, err
-	}
-
+// placeTarget places run-until's breakpoint at spec: c's own breakpoint at
+// that line if it has one, else a new temporary one of c's (returned as
+// temp). It returns where the adapter placed it.
+func (s *Session) placeTarget(ctx context.Context, c api.Client, spec api.BreakpointSpec) (at api.BreakpointSpec, temp *breakpoint, err error) {
 	s.mu.Lock()
-	if s.state != api.StateStopped {
-		defer s.mu.Unlock()
-
-		return api.BreakpointSpec{}, stateError(s.ID, s.state, "run-until needs a stopped program")
-	}
 
 	var target *breakpoint
 
 	for _, b := range s.bps[spec.File] {
-		if b.RequestedLine == spec.Line {
+		if b.Owner == c.ID && b.RequestedLine == spec.Line {
 			target = b
 		}
 	}
 
-	temp := target == nil
-	if temp {
-		target = s.addBreakpointLocked(spec)
+	if target == nil {
+		target, _, _ = s.addBreakpointLocked(c.ID, spec)
 		target.Temporary = true
+		temp = target
 	}
 	s.mu.Unlock()
 
-	if temp {
+	if temp != nil {
 		if err := s.syncBreakpoints(ctx, spec.File); err != nil {
-			_ = s.removeTemporary(ctx)
+			_, _, _ = s.removeBreakpoints(ctx, c.ID, stillTemporary(temp))
 
-			return api.BreakpointSpec{}, err
+			return api.BreakpointSpec{}, nil, err
 		}
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return api.BreakpointSpec{File: target.File, Line: target.Line, Condition: target.Condition}, nil
+	if temp != nil {
+		s.logBreakpointLocked("added", c.ID, temp)
+	}
+
+	return api.BreakpointSpec{File: target.File, Line: target.Line, Condition: target.Condition}, temp, nil
 }
 
-// removeTemporary removes run-until's temporary breakpoints.
-func (s *Session) removeTemporary(ctx context.Context) error {
-	s.mu.Lock()
+// stillTemporary matches temp while it is still temporary: a bp add by its
+// owner at that line meanwhile makes it permanent, and then it stays.
+// removeBreakpoints calls the matcher under mu, which guards Temporary.
+func stillTemporary(temp *breakpoint) func(*breakpoint) bool {
+	return func(b *breakpoint) bool { return b == temp && b.Temporary }
+}
 
-	var touched []string
+// removeTemporary removes every client's run-until breakpoints: they belong
+// to the execution that placed them, which a new one supersedes.
+func (s *Session) removeTemporary(ctx context.Context, actor string) error {
+	_, _, err := s.removeBreakpoints(ctx, actor, func(b *breakpoint) bool { return b.Temporary })
 
-	for file, list := range s.bps {
-		kept := list[:0]
-
-		for _, b := range list {
-			if !b.Temporary {
-				kept = append(kept, b)
-			}
-		}
-
-		if len(kept) != len(list) {
-			touched = append(touched, file)
-		}
-
-		s.bps[file] = kept
-	}
-
-	exited := s.state == api.StateExited
-	s.mu.Unlock()
-
-	if exited {
-		return nil
-	}
-
-	for _, file := range touched {
-		if err := s.syncBreakpoints(ctx, file); err != nil {
-			return err
-		}
-
-		s.mu.Lock()
-		if len(s.bps[file]) == 0 {
-			delete(s.bps, file)
-		}
-		s.mu.Unlock()
-	}
-
-	return nil
+	return err
 }

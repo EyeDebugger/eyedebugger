@@ -1,0 +1,16 @@
+(11 older events were dropped: the log keeps only recent events)
+12  started by agent: bin/Debug/net10.0/app.dll (lease policy handoff)
+13  bp 1 added by agent: Program.cs:5
+14  thread 4242 started
+15  stopped: breakpoint, thread 4242
+16  client human:ijat joined
+17  bp 2 added by human:ijat: Program.cs:9 if i == 3
+18  lease: agent gave it to human:ijat
+19  human:ijat: continue
+20  output (stdout): i=1 total=1 (+1 line)
+21  bp 1 removed by agent
+22  lease: agent took it from human:ijat (auto)
+23  agent: continue
+24  exited with code 0
+25  ended: the program terminated
+next: eyedbg events --since 25

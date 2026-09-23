@@ -18,6 +18,7 @@ security model, major dependencies, licensing and the contribution process.
 | [0006](0006-use-cobra-for-the-cli.md) | Use cobra for the CLI | accepted |
 | [0007](0007-use-task-as-the-task-runner.md) | Use Task as the task runner | accepted |
 | [0008](0008-apache-2-license-and-dco.md) | Apache-2.0 license and DCO | accepted |
+| [0009](0009-client-identity-breakpoint-ownership-lease-and-event-log.md) | Client identity, breakpoint ownership, the control lease and the event log | proposed |
 
 ## Process
 

@@ -35,23 +35,40 @@ type globals struct {
 	json    bool
 	session string
 	budget  int
+	as      string
 }
 
 // defaultBudget is the token budget for variables in one output
 // (docs/DESIGN.md §5).
 const defaultBudget = 2000
 
-// envSession names the default session for commands that act on one.
-const envSession = "EYEDBG_SESSION"
+// Environment variables for commands that act on a session.
+const (
+	// envSession names the default session.
+	envSession = "EYEDBG_SESSION"
+	// envClient is who the caller is when --as is not given.
+	envClient = "EYEDBG_CLIENT"
+)
 
 // ref returns the session chosen by -s, else $EYEDBG_SESSION ("" lets the
-// daemon pick the only session).
+// daemon pick the only session), and the client acting on it.
 func (g *globals) ref() api.SessionRef {
-	if g.session != "" {
-		return api.SessionRef{SessionID: g.session}
+	id := g.session
+	if id == "" {
+		id = os.Getenv(envSession)
 	}
 
-	return api.SessionRef{SessionID: os.Getenv(envSession)}
+	return api.SessionRef{SessionID: id, Client: g.clientID()}
+}
+
+// clientID is --as, else $EYEDBG_CLIENT; "" is the default client (agent).
+// The daemon validates it.
+func (g *globals) clientID() string {
+	if g.as != "" {
+		return g.as
+	}
+
+	return os.Getenv(envClient)
 }
 
 // Run executes root with args (without the program name) and returns the
@@ -115,7 +132,8 @@ const (
 
 func exitCode(err error) int {
 	switch api.CodeOf(err) {
-	case api.CodeNoSession, api.CodeNotStopped, api.CodeNotRunning, api.CodeSessionExited, api.CodeSessionsActive:
+	case api.CodeNoSession, api.CodeNotStopped, api.CodeNotRunning, api.CodeSessionExited, api.CodeSessionsActive,
+		api.CodeLeaseHeld, api.CodeNotOwner:
 		return exitState
 	case api.CodeAdapterMissing, api.CodeBuildFailed, api.CodeDaemonNotRunning, api.CodeDaemonStart,
 		api.CodeVersionMismatch, api.CodeUnauthorized:
@@ -165,9 +183,14 @@ read; add --json for the same as structured data.
 
 Output is budgeted: variables are cut to --budget tokens (default 2000) and every cut says so.
 
+Several clients can share a session (docs/DESIGN.md §3): each request says who sends it (--as
+agent[:NAME] or human[:NAME], else $EYEDBG_CLIENT, else agent). Breakpoints belong to the client
+that added them; the control lease decides who may run, step or pause the program ('eyedbg lease
+--help'); 'eyedbg events' shows what every client did.
+
 Exit codes: 0 success (a wait that times out is a success that says so); 1 usage or internal
-error; 2 no such session, or it is in the wrong state (NO_SESSION, NOT_STOPPED, NOT_RUNNING,
-SESSION_EXITED, SESSIONS_ACTIVE); 3 setup problem (ADAPTER_NOT_INSTALLED, BUILD_FAILED,
+error; 2 no such session, it is in the wrong state, or another client holds it (NO_SESSION,
+NOT_STOPPED, NOT_RUNNING, SESSION_EXITED, SESSIONS_ACTIVE, LEASE_HELD, NOT_OWNER); 3 setup problem (ADAPTER_NOT_INSTALLED, BUILD_FAILED,
 DAEMON_*, VERSION_MISMATCH, UNAUTHORIZED); 4 the debug adapter refused a request (ADAPTER_ERROR,
 e.g. an expression that doesn't evaluate). Errors print "eyedbg: message [CODE]" and a hint on
 stderr; with --json, {"schema": 1, "error": {"code", "message", "hint"}} on stdout.`
@@ -187,6 +210,8 @@ func NewEyedbgCommand(info version.Info) *cobra.Command {
 		"session id to act on (default: $"+envSession+", else the only session)")
 	root.PersistentFlags().IntVar(&g.budget, "budget", defaultBudget,
 		"most tokens (about 4 characters each) of variables to print; 0 for no limit")
+	root.PersistentFlags().StringVar(&g.as, "as", "",
+		"who you are: agent[:NAME] or human[:NAME] (default: $"+envClient+", else agent)")
 
 	root.AddCommand(
 		newStartCommand(info, g),
@@ -199,6 +224,8 @@ func NewEyedbgCommand(info version.Info) *cobra.Command {
 		newOutputCommand(info, g),
 		newBreakpointCommand(info, g),
 		newRunUntilCommand(info, g),
+		newLeaseCommand(info, g),
+		newEventsCommand(info, g),
 		newStopCommand(info, g),
 		newAdaptersCommand(g),
 		newDaemonCommand(info, g),
@@ -218,9 +245,12 @@ once it has had no sessions for --idle-timeout. Run it directly to debug the dae
 stays in the foreground and logs to stderr until interrupted (Ctrl-C), stopped with
 'eyedbg daemon stop', or idle.
 
-Only one daemon runs per user (per EYEDBG_RUNTIME_DIR): a second one exits 3 at once. On start it
-writes a fresh token and listens on a Unix socket, both in a directory only you can access.
-Exits 0 when it stops normally, 1 on a start-up error.`
+Only one daemon runs per user (per EYEDBG_RUNTIME_DIR): a second one exits 3 at once, or 0 without
+a word when eyedbg started it (it lost a start race; eyedbg uses the winner). On start it writes a
+fresh token and listens on a Unix socket, both in a directory only you can access. Its sessions/
+subdirectory keeps each live session's metadata, so a daemon that crashed leaves its sessions listed
+as lost, and each session's recording (control events only, no program output; pruned 7 days after
+the session ended). Exits 0 when it stops normally, 1 on a start-up error.`
 
 const eyedbgdExample = `  eyedbgd                       # run in the foreground, logging to stderr
   eyedbgd --idle-timeout 0      # never exit when idle
@@ -247,6 +277,12 @@ func NewDaemonCommand(info version.Info) *cobra.Command {
 			Drivers: []session.Driver{dotnet.New()},
 		})
 		if errors.Is(err, daemon.ErrAlreadyRunning) {
+			// An auto-started daemon that lost the start race: the client
+			// uses the winner, and the shared log stays clean.
+			if os.Getenv(daemon.EnvAutostarted) == "1" {
+				return nil
+			}
+
 			return api.NewError(api.CodeDaemonStart, err.Error()+" ("+p.Dir+")",
 				"use 'eyedbg daemon status' to inspect it or 'eyedbg daemon stop' to stop it")
 		}

@@ -9,7 +9,8 @@ import (
 )
 
 // Session methods (docs/DESIGN.md §4). Every method that acts on a session
-// takes a SessionID; empty means "the only session".
+// takes a SessionID; empty means "the only session". Every request names its
+// client (see [ParseClient]); empty means the default client, agent.
 const (
 	MethodSessionStart  = "session.start"
 	MethodSessionList   = "session.list"
@@ -36,6 +37,9 @@ const (
 	StateRunning  SessionState = "running"
 	StateStopped  SessionState = "stopped"
 	StateExited   SessionState = "exited"
+	// StateLost is a session of an earlier daemon that exited while the
+	// session was live; only its metadata and recording are left.
+	StateLost SessionState = "lost"
 )
 
 // LaunchSpec is what to debug. Paths are absolute (the CLI resolves them).
@@ -62,11 +66,18 @@ type StartParams struct {
 	// Wait is how long to wait for a first stop when one is expected
 	// (stop-on-entry or breakpoints); 0 returns as soon as it runs.
 	Wait Duration `json:"wait,omitempty"`
+	// Client starts the session and holds its lease first.
+	Client string `json:"client,omitempty"`
+	// LeasePolicy is the session's lease policy; empty means free.
+	LeasePolicy LeasePolicy `json:"leasePolicy,omitempty"`
+	// NoRecord turns off the session's recording.
+	NoRecord bool `json:"noRecord,omitempty"`
 }
 
-// SessionRef names a session.
+// SessionRef names a session, and the client acting on it.
 type SessionRef struct {
 	SessionID string `json:"sessionId,omitempty"`
+	Client    string `json:"client,omitempty"`
 }
 
 // Ref returns r; params that embed a SessionRef inherit it.
@@ -91,6 +102,12 @@ type SessionInfo struct {
 	Stop      *StopInfo    `json:"stop,omitempty"`
 	ExitCode  *int         `json:"exitCode,omitempty"`
 	EndReason string       `json:"endReason,omitempty"`
+	Lease     *LeaseInfo   `json:"lease,omitempty"`
+	// Clients are the clients that have used the session, in the order
+	// they were first seen.
+	Clients []ClientInfo `json:"clients,omitempty"`
+	// Recording is the file the session's control events are recorded to.
+	Recording string `json:"recording,omitempty"`
 }
 
 // What a snapshot can include beyond the stop location ([DumpSpec]).
@@ -223,6 +240,12 @@ type Breakpoint struct {
 	// Temporary marks run-until's breakpoint, removed once the program
 	// stops or exits.
 	Temporary bool `json:"temporary,omitempty"`
+	// Owner is the client id that added it.
+	Owner     string    `json:"owner"`
+	CreatedAt time.Time `json:"createdAt"`
+	// Note explains how sharing its line with other clients' breakpoints
+	// changes it.
+	Note string `json:"note,omitempty"`
 }
 
 // BreakpointAddParams are the params of [MethodBreakpointAdd].
@@ -231,17 +254,29 @@ type BreakpointAddParams struct {
 	BreakpointSpec
 }
 
+// BreakpointListParams are the params of [MethodBreakpointLs].
+type BreakpointListParams struct {
+	SessionRef
+
+	// Mine lists only the caller's breakpoints.
+	Mine bool `json:"mine,omitempty"`
+}
+
 // BreakpointRemoveParams are the params of [MethodBreakpointRm]; ID 0
-// removes all.
+// removes all of the caller's (with Force: everyone's). Force also removes
+// another client's breakpoint by ID.
 type BreakpointRemoveParams struct {
 	SessionRef
 
-	ID int `json:"id"`
+	ID    int  `json:"id"`
+	Force bool `json:"force,omitempty"`
 }
 
 // BreakpointRemoveResult is the result of [MethodBreakpointRm].
 type BreakpointRemoveResult struct {
 	Removed int `json:"removed"`
+	// Kept counts other clients' breakpoints that removing all left alone.
+	Kept int `json:"kept,omitempty"`
 }
 
 // StackParams are the params of [MethodStack].
@@ -317,9 +352,18 @@ type OutputParams struct {
 	Tail  int `json:"tail,omitempty"`
 }
 
-// OutputLine is a chunk of program output.
+// OutputLine is a chunk of program output. Seq is its event's seq in the
+// session's event log.
 type OutputLine struct {
 	Seq      int    `json:"seq"`
 	Category string `json:"category"`
 	Text     string `json:"text"`
+}
+
+// OutputResult is the result of [MethodOutput].
+type OutputResult struct {
+	Lines []OutputLine `json:"lines"`
+	// More counts chunks left out to keep the result small: newer ones, or
+	// older ones when a tail was asked for.
+	More int `json:"more,omitempty"`
 }

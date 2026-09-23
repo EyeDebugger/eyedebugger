@@ -31,6 +31,8 @@ type Paths struct {
 	Lock string
 	// Log receives the daemon's stderr when it is auto-started.
 	Log string
+	// Sessions holds session metadata and recordings (see [FileStore]).
+	Sessions string
 }
 
 // PathsIn returns the paths inside dir.
@@ -41,6 +43,9 @@ func PathsIn(dir string) Paths {
 		Token:  filepath.Join(dir, "token"),
 		Lock:   filepath.Join(dir, "eyedbgd.lock"),
 		Log:    filepath.Join(dir, "eyedbgd.log"),
+		// Sessions lives in the private runtime directory: recordings are
+		// about the user's programs.
+		Sessions: filepath.Join(dir, "sessions"),
 	}
 }
 

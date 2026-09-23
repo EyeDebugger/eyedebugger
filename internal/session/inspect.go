@@ -8,7 +8,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
+	"time"
 
 	godap "github.com/google/go-dap"
 
@@ -372,25 +374,52 @@ func (s *Session) Eval(ctx context.Context, expr string, frameIndex int) (api.Ev
 	}, nil
 }
 
-// Output returns program output lines with Seq > since, at most tail of
-// them (0: all).
-func (s *Session) Output(since, tail int) []api.OutputLine {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// Output returns the program's output chunks with Seq > since, at most tail
+// of them (0: all), within present.MaxResultBytes: the oldest ones, or the
+// newest with a tail. More counts the chunks the size cap left out.
+func (s *Session) Output(since, tail int) api.OutputResult {
+	lines := s.log.outputSince(since)
 
-	var out []api.OutputLine
+	if tail > 0 && len(lines) > tail {
+		lines = lines[len(lines)-tail:]
+	}
 
-	for _, l := range s.output {
-		if l.Seq > since {
-			out = append(out, l)
+	kept, more := present.CapOutput(lines, present.MaxResultBytes, tail > 0)
+	if kept == nil {
+		kept = []api.OutputLine{}
+	}
+
+	return api.OutputResult{Lines: kept, More: more}
+}
+
+// Events returns the session's events that q asks for, waiting up to wait
+// (0: not at all) for one to exist. Output text is cut and the result fits
+// q.Budget tokens and present.MaxResultBytes.
+func (s *Session) Events(ctx context.Context, q api.EventsParams, wait time.Duration) (api.EventsResult, error) {
+	for _, k := range q.Kinds {
+		if !slices.Contains(api.EventKinds(), k) {
+			return api.EventsResult{}, api.NewError(api.CodeInvalidRequest, fmt.Sprintf("unknown event kind %q", k),
+				"kinds: "+api.EventKindNames())
 		}
 	}
 
-	if tail > 0 && len(out) > tail {
-		out = out[len(out)-tail:]
+	var res api.EventsResult
+
+	if wait > 0 {
+		ctx, cancel := context.WithTimeout(ctx, wait)
+		defer cancel()
+
+		res = s.log.wait(ctx, q)
+	} else {
+		res = s.log.query(q)
 	}
 
-	return out
+	var omitted int
+
+	res.Events, omitted = present.ShapeEvents(res.Events, q.Budget, q.Newest)
+	res.More += omitted
+
+	return res, nil
 }
 
 func truncate(v string) string {

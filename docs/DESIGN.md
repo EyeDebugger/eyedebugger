@@ -47,10 +47,10 @@ VS Code extension (P2) ──┘     + per-session DAP facade (P2)       │
 | Concept | Definition |
 |---|---|
 | **Session** | One debuggee + one adapter connection. ID: short, human-typable (`s-7f3k`). May have child sessions (js-debug `startDebugging`). |
-| **Client** | A connected controller: `{id, kind: agent\|human, name}`. CLI calls identify via `--as` / `EYEDBG_CLIENT` (default `agent:<ppid-derived>`); persistent across calls, not per connection. |
-| **Control lease** | Exactly one client holds *execution control* (continue/step/pause/restart/terminate, setVariable). Others can read, set their own breakpoints, and request the lease. Policies: `free` (anyone takes it, MVP default), `handoff` (holder must release/grant), `human-priority` (human request preempts agent). Lease changes are events. |
-| **Breakpoint ownership** | Every breakpoint records `owner` and `createdAt`. The daemon merges all owners' breakpoints per file into the single `setBreakpoints` DAP call and maps adapter ids back. Clients can filter by owner; removing only touches your own unless `--force`. |
-| **Event log** | Per-session append-only log with monotonic `seq`: DAP events (stopped, output, breakpoint, thread…) plus daemon events (lease, client joined, bp added by X). `eyedbg events --since N` / `--wait` makes stateless CLIs and late joiners consistent. Also written to disk as the session recording (§11). |
+| **Client** | A controller: `{id, kind: agent\|human, name}`, id `KIND[:NAME]` (`agent`, `human:ijat`). Every request names it: CLI calls via `--as` / `EYEDBG_CLIENT`, default `agent` (never a human; not derived from the parent pid, since agent harnesses run each command in a fresh shell). Two agents sharing a session set distinct names. Persistent across calls, not per connection; the session lists each client with when it was first and last seen (ADR 0009). |
+| **Control lease** | Exactly one client holds *execution control* (continue/step/pause/run-until, and terminate while the program is live; setVariable and side-effecting eval when they exist). Others can read, set their own breakpoints, and take or be granted the lease. The starter holds it first. Policies (set at start or by the holder): `free` (anyone takes it, executing takes it automatically; the default), `handoff` (only the holder releases or grants it), `human-priority` (handoff, except that a human may take it from an agent; agents never take it from one another). `--force` overrides the policy; a refusal is `LEASE_HELD`. Lease changes are events. |
+| **Breakpoint ownership** | Every breakpoint records `owner` and `createdAt`. The daemon merges all owners' breakpoints per file into the single `setBreakpoints` DAP call — one source breakpoint per line (adapters keep one per line): any unconditional breakpoint makes the line unconditional, equal conditions are kept, different ones make it unconditional with a note — and maps the adapter's answer back to every breakpoint of the line. Clients can filter by owner (`bp ls --mine`); removing only touches your own unless `--force` (`NOT_OWNER` otherwise). |
+| **Event log** | Per-session in-memory log with a monotonic `seq` from 1, bounded (10000 events, 8 MiB; the oldest are dropped and readers are told): DAP events (stopped, continued, output, breakpoint, thread, exited) plus daemon events (started, client joined, lease, exec by X, bp added/removed by X, ended). `output` and a snapshot's output are views of it (their `seq` is the event's). `eyedbg events --since N` / `--wait` (long-poll) makes stateless CLIs and late joiners consistent. Its control events are also written to disk as the session recording (§11). |
 | **Stop snapshot** | On every `stopped`, the daemon eagerly fetches threads, top K frames of the stopped thread, and scopes/vars of frame 0 to depth D. Cached until the next resume. Most agent reads hit this cache — one call, no round-trips. Invalidated on resume; variable references are never exposed across resumes. |
 
 ### Concurrency rules
@@ -64,13 +64,14 @@ Global flags: `--session/-s <id>` (or `EYEDBG_SESSION`), `--json`, `--as <client
 
 ```
 eyedbg start  <lang> [--program P | --project P.csproj] [--args ...] [--cwd] [--env K=V] [--stop-on-entry] [--no-build]
+              [--lease-policy free|handoff|human-priority] [--no-record]
 eyedbg attach <lang> --pid N
 eyedbg test   <lang> <filter>            # run tests under debugger (dotnet test + VSTEST_HOST_DEBUG attach)
 eyedbg sessions | eyedbg status            # status = state + stop snapshot summary
 eyedbg stop | eyedbg detach
 
 eyedbg bp add <file:line | func:Name | anchor>  [--if EXPR] [--hit N] [--log "msg {expr}"]
-eyedbg bp ls [--mine] | eyedbg bp rm <id|all>
+eyedbg bp ls [--mine] | eyedbg bp rm <id|all> [--force]
 eyedbg bp exceptions [all|uncaught|none]
 
 eyedbg run-until <location|--if EXPR> [--dump locals,stack,args] [--timeout 30s]
@@ -84,9 +85,9 @@ eyedbg eval <expr> [--frame F] [--allow-side-effects]
 eyedbg set <var> <value>
 eyedbg source [--frame F] [--context 5]
 eyedbg output [--since N] [--tail 50]
-eyedbg events [--since N] [--wait]
+eyedbg events [--since N] [--limit N] [--kind k,...] [--wait] [--timeout 30s]
 
-eyedbg lease [take|release|grant <client>]          # prepared for P2, works in MVP
+eyedbg lease [status|take [--force]|release|grant <client> [--force]|policy <p> [--force]]
 eyedbg daemon [status|stop|logs]
 eyedbg adapters [ls|install <name>|doctor]
 ```
@@ -121,7 +122,8 @@ Design rules:
   - *Handshake:* protocol version + token on every connection; version mismatch → CLI asks the old daemon to drain & exit if it has no sessions, else errors with a hint (never kills live sessions).
   - *Idle exit:* the idle timer starts when the last session ends (no immediate exit, so the next command starts fast); exit after N minutes with zero sessions (default 30, configurable).
   - *Manual:* `eyedbg daemon status` (pid, uptime, version, sessions); `eyedbg daemon stop` refuses while sessions exist unless `--force`, which ends them (killing their debuggees); `eyedbgd` run directly stays in the foreground with logs on stderr, for debugging the daemon itself.
-- **Crash resilience:** debuggee processes are children of adapters, adapters children of the daemon; if the daemon dies, sessions die (MVP). Session metadata persisted so `eyedbg sessions` can report "lost" instead of silently vanishing.
+- **Crash resilience:** debuggee processes are children of adapters, adapters children of the daemon; if the daemon dies, sessions die (MVP). Session metadata is persisted in the runtime dir as `sessions/<id>.json` (0600; written at start and when the session ends, removed when it is stopped or the daemon exits cleanly), so a daemon reads what is left at its start as the sessions an earlier one lost: `eyedbg sessions` lists them as `lost` (read from the files directly when no daemon runs) and `eyedbg stop -s ID` forgets one (ADR 0009).
+- **Auto-start races:** a daemon started by a client (`EYEDBG_AUTOSTARTED=1`) that finds the lock taken exits 0 silently, so the shared log stays clean.
 - **Logs:** `eyedbg daemon logs`; optional raw DAP trace per session.
 
 ## 7. Plugin model (languages)
@@ -175,7 +177,7 @@ Known netcoredbg gaps to surface honestly: no lambda/LINQ-lambda evaluation, no 
 
 - `eval` may run code (method calls, property getters). Default: read-only intent (DAP `context: "watch"`); `--allow-side-effects` for calls. How strictly each adapter enforces this is unverified → document per adapter.
 - Socket access restricted to the user; token file; no TCP listener by default.
-- Redaction (§5). Session recordings (DAP transcript + daemon events, JSONL) stored locally, opt-out, with redaction applied.
+- Redaction (§5), not implemented yet. Session recordings (`sessions/<id>.jsonl` in the private runtime dir, 0600, never overwritten, capped at 4 MiB, pruned 7 days after the session ended) hold control events only: started, client, lease, exec, continued, stopped (reason and thread only), breakpoints (conditions included), threads, exited, ended — no program output, stop text, launch arguments, environment or variable values, until redaction exists. On by default; `start --no-record` or `EYEDBG_NO_RECORD=1` turns it off.
 - `attach` only to processes owned by the same user; explain macOS `task_for_pid`/Linux ptrace-scope errors with actionable hints.
 
 ## 12. Repo layout (Go)
@@ -206,7 +208,8 @@ testdata/apps/       sample debuggees per language
 3. **Agent ergonomics** (done): stop snapshot, `--dump`, `run-until`, `wait`, `--changed`, budgets, JSON
    schema, errors, `eyedbg help --all` (the full command tree's help in one read) and a `--json`
    help variant.
-4. **Model for P2:** client identity, bp ownership merge, lease, event log + `events --since`.
+4. **Model for P2** (done): client identity, bp ownership merge, lease, event log + `events --since`,
+   lost sessions and recordings (ADR 0009).
 5. **Breadth:** conditional/log/function/exception bps, eval, set, attach, `test`, anchors.
 6. **Ship:** SKILL.md, CI matrix (6 os/arch), e2e tests driving sample apps.
 7. **Second language** via manifest only (debugpy) to prove the plugin boundary.

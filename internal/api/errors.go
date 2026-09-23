@@ -26,6 +26,10 @@ const (
 	CodeAdapterFailed    Code = "ADAPTER_ERROR"
 	CodeBuildFailed      Code = "BUILD_FAILED"
 	CodeInternal         Code = "INTERNAL"
+	// CodeLeaseHeld: another client holds the session's control lease.
+	CodeLeaseHeld Code = "LEASE_HELD"
+	// CodeNotOwner: the breakpoint belongs to another client.
+	CodeNotOwner Code = "NOT_OWNER"
 )
 
 // Error is a user-facing error: a stable code, a message and an optional hint
