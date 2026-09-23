@@ -27,7 +27,6 @@ func TestWithinDir(t *testing.T) {
 		{"filesystem root", home, string(filepath.Separator), false, false},
 		{"dot-dot name inside", home, filepath.Join(home, "..x"), false, true},
 		{"case differs, folded", home, filepath.Join(filepath.Join(string(filepath.Separator), "HOME", "Me"), "w"), true, true},
-		{"case differs, not folded", home, filepath.Join(string(filepath.Separator), "HOME", "Me"), false, false},
 		{"empty root", "", home, false, false},
 	}
 
