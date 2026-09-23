@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
+	"github.com/eyedebugger/eyedebugger/internal/session"
 	"github.com/eyedebugger/eyedebugger/internal/version"
 )
 
@@ -36,6 +37,8 @@ type Config struct {
 	IdleTimeout time.Duration
 	Info        version.Info
 	Logger      *slog.Logger
+	// Drivers are the languages the daemon can debug.
+	Drivers []session.Driver
 }
 
 type server struct {
@@ -43,9 +46,10 @@ type server struct {
 	token     string
 	startedAt time.Time
 	shutdown  context.CancelFunc
+	sessions  *session.Manager
 
 	mu        sync.Mutex
-	sessions  int
+	live      int // sessions that have not exited
 	idleSince time.Time
 	conns     map[net.Conn]struct{}
 }
@@ -79,6 +83,12 @@ func Serve(ctx context.Context, cfg Config) error {
 		conns:     make(map[net.Conn]struct{}),
 	}
 	s.idleSince = s.startedAt
+	// Adapters get their own context, canceled only after every session was
+	// ended cleanly: killing an adapter outright would orphan its debuggee.
+	adapterCtx, stopAdapters := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopAdapters()
+
+	s.sessions = session.NewManager(adapterCtx, cfg.Drivers, cfg.Logger, os.Stderr, s.setLive)
 
 	ln, err := s.listen(ctx)
 	if err != nil {
@@ -106,6 +116,7 @@ func Serve(ctx context.Context, cfg Config) error {
 
 	s.acceptLoop(ctx, ln, &wg)
 	cancel()
+	s.sessions.StopAll(adapterCtx)
 	wg.Wait()
 
 	cfg.Logger.InfoContext(ctx, "daemon stopped")
@@ -230,13 +241,22 @@ func (s *server) dispatch(ctx context.Context, req api.Request, authed *bool) (r
 			return api.NewErrorResponse(req.ID, err), false
 		}
 
-		result, apiErr := s.stop(params)
+		result, apiErr := s.stop(ctx, params)
 		if apiErr != nil {
 			return api.NewErrorResponse(req.ID, apiErr), false
 		}
 
 		return s.result(req.ID, result), true
 	default:
+		if h, ok := s.sessionHandler(req.Method); ok {
+			result, err := h(ctx, req.Params)
+			if err != nil {
+				return api.NewErrorResponse(req.ID, toAPIError(err)), false
+			}
+
+			return s.result(req.ID, result), false
+		}
+
 		return api.NewErrorResponse(req.ID, api.NewError(api.CodeUnknownMethod,
 			"unknown method "+req.Method, "the daemon may be older than this client; see 'eyedbg daemon status'")), false
 	}
@@ -260,7 +280,7 @@ func (s *server) hello(raw json.RawMessage) (api.HelloResult, *api.Error) {
 		Version:         s.cfg.Info.Version,
 		Commit:          s.cfg.Info.Commit,
 		PID:             os.Getpid(),
-		Sessions:        s.sessions,
+		Sessions:        s.live,
 	}, nil
 }
 
@@ -273,13 +293,13 @@ func (s *server) status() api.StatusResult {
 		Version:     s.cfg.Info.Version,
 		Commit:      s.cfg.Info.Commit,
 		StartedAt:   s.startedAt,
-		Sessions:    s.sessions,
+		Sessions:    s.live,
 		Dir:         s.cfg.Paths.Dir,
 		Socket:      s.cfg.Paths.Socket,
 		IdleTimeout: api.Duration(s.cfg.IdleTimeout),
 	}
 
-	if s.sessions == 0 && s.cfg.IdleTimeout > 0 {
+	if s.live == 0 && s.cfg.IdleTimeout > 0 {
 		at := s.idleSince.Add(s.cfg.IdleTimeout)
 		res.IdleExitAt = &at
 	}
@@ -287,17 +307,31 @@ func (s *server) status() api.StatusResult {
 	return res
 }
 
-func (s *server) stop(params api.StopParams) (api.StopResult, *api.Error) {
+func (s *server) stop(ctx context.Context, params api.StopParams) (api.StopResult, *api.Error) {
+	s.mu.Lock()
+	live := s.live
+	s.mu.Unlock()
+
+	if live > 0 && !params.Force {
+		return api.StopResult{}, api.NewError(api.CodeSessionsActive,
+			fmt.Sprintf("%d debug session(s) are active", live),
+			"end them first with 'eyedbg stop', or run 'eyedbg daemon stop --force' to end them (their debuggees are killed)")
+	}
+
+	return api.StopResult{EndedSessions: s.sessions.StopAll(ctx)}, nil
+}
+
+// setLive records the live session count and restarts the idle clock when
+// it drops to zero.
+func (s *server) setLive(n int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.sessions > 0 && !params.Force {
-		return api.StopResult{}, api.NewError(api.CodeSessionsActive,
-			fmt.Sprintf("%d debug session(s) are active", s.sessions),
-			"end them first, or run 'eyedbg daemon stop --force' to end them (their debuggees are killed)")
+	if n == 0 && s.live > 0 {
+		s.idleSince = time.Now()
 	}
 
-	return api.StopResult{EndedSessions: s.sessions}, nil
+	s.live = n
 }
 
 // watchIdle stops the daemon once it has had no sessions for IdleTimeout.
@@ -319,7 +353,7 @@ func (s *server) watchIdle(ctx context.Context) {
 
 		s.mu.Lock()
 		wait := timeout
-		if s.sessions == 0 {
+		if s.live == 0 {
 			wait = time.Until(s.idleSince.Add(timeout))
 		}
 		s.mu.Unlock()

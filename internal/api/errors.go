@@ -18,6 +18,13 @@ const (
 	CodeDaemonStart      Code = "DAEMON_START_FAILED"
 	CodeVersionMismatch  Code = "VERSION_MISMATCH"
 	CodeSessionsActive   Code = "SESSIONS_ACTIVE"
+	CodeNoSession        Code = "NO_SESSION"
+	CodeNotStopped       Code = "NOT_STOPPED"
+	CodeNotRunning       Code = "NOT_RUNNING"
+	CodeSessionExited    Code = "SESSION_EXITED"
+	CodeAdapterMissing   Code = "ADAPTER_NOT_INSTALLED"
+	CodeAdapterFailed    Code = "ADAPTER_ERROR"
+	CodeBuildFailed      Code = "BUILD_FAILED"
 	CodeInternal         Code = "INTERNAL"
 )
 

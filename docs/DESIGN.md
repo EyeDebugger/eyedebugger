@@ -202,7 +202,7 @@ testdata/apps/       sample debuggees per language
 ## 13. MVP milestones
 
 1. **Skeleton** (done): daemon auto-start, IPC + token, version handshake, `daemon start/status/stop/logs`.
-2. **DAP core:** go-dap client, netcoredbg install/doctor, `start` a console app, `bp add` (line), `continue`, `status`, `stack`, `vars`, `stop`.
+2. **DAP core** (done): go-dap client, netcoredbg install/doctor, `start` a console app, `bp add` (line), `continue`, `status`, `stack`, `vars`, `stop`.
 3. **Agent ergonomics:** stop snapshot, `--dump`, `run-until`, `wait`, `--changed`, budgets, JSON
    schema, errors, `eyedbg help --all` (the full command tree's help in one read) and a `--json`
    help variant.
