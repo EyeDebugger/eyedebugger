@@ -116,7 +116,11 @@ Design rules:
 ## 6. Daemon
 
 - **Discovery/IPC:** per-user dir (`$XDG_RUNTIME_DIR/eyedbg`, `~/Library/Caches/eyedbg` — TBD, `%LOCALAPPDATA%\eyedbg`), mode 0700. Unix domain socket everywhere (AF_UNIX works on Windows 10 1803+ and Go supports it); fallback named pipe via `go-winio` with owner-only DACL. Plus a 0600 random token file checked on connect.
-- **Lifecycle:** CLI connects → on failure takes a lock file, spawns detached `eyedbgd`, polls ready. Handshake includes protocol version; mismatch → CLI asks the old daemon to drain & exit if it has no sessions, else errors with a hint. Idle exit after N minutes with zero sessions (default 30).
+- **Lifecycle:** One daemon per user serves all sessions; each session's adapter is its own child process, so an adapter crash only ends that session. Nobody starts or stops the daemon by hand, and it is never installed as a system service:
+  - *Start:* CLI connects → on failure takes a lock file (so concurrent agents don't spawn two), spawns detached `eyedbgd` (`setsid` on Unix, detached process on Windows), polls ready. `EYEDBG_NO_AUTOSTART=1` makes the CLI fail instead of spawning (CI, or users who manage the daemon themselves).
+  - *Handshake:* protocol version + token on every connection; version mismatch → CLI asks the old daemon to drain & exit if it has no sessions, else errors with a hint (never kills live sessions).
+  - *Idle exit:* the idle timer starts when the last session ends (no immediate exit, so the next command starts fast); exit after N minutes with zero sessions (default 30, configurable).
+  - *Manual:* `eyedbg daemon status` (pid, uptime, version, sessions); `eyedbg daemon stop` refuses while sessions exist unless `--force`, which ends them (killing their debuggees); `eyedbgd` run directly stays in the foreground with logs on stderr, for debugging the daemon itself.
 - **Crash resilience:** debuggee processes are children of adapters, adapters children of the daemon; if the daemon dies, sessions die (MVP). Session metadata persisted so `eyedbg sessions` can report "lost" instead of silently vanishing.
 - **Logs:** `eyedbg daemon logs`; optional raw DAP trace per session.
 
