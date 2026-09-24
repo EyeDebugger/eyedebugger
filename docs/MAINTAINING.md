@@ -22,7 +22,8 @@ Dependabot handles only action SHAs and `go.mod`; everything else is a manual bu
   comment alongside. `DOTNET_VERSION` and `PYTHON_VERSION`: `ci.yml` `env`.
 - `actionlint`: `ci.yml` `env` (`ACTIONLINT_VERSION`) **and** `Taskfile.yml` `vars` (its own copy,
   used by `task lint:workflows`) — bump both.
-- `zizmor`: `ci.yml` `env` (`ZIZMOR_VERSION`) only; it isn't wired into any task, run it by hand
+- `zizmor`: `ci.yml` `env` (`ZIZMOR_VERSION`) and the `zizmorcore/zizmor-action` SHA/version comment
+  in the `workflows` job — bump both; not wired into any task, run it by hand for local iteration
   (see Workflow security rules below).
 - Runner labels (the `test` job matrix's `os:` values, and the `full`/`reduced` `os:` values in the
   `e2e-matrix` job's script): bump when GitHub renames or retires one (e.g. `-latest` moving to a
@@ -45,9 +46,11 @@ public repos).
 - Never `pull_request_target` with checkout of PR code.
 - Untrusted values go in via `env`, never `${{ }}` inside `run:`.
 - No caches in release jobs.
-- Run `actionlint` and `zizmor --offline .` on every workflow change. `task lint:workflows` runs
-  actionlint only; run zizmor by hand: `go run github.com/rhysd/actionlint/cmd/actionlint@$ACTIONLINT_VERSION`
-  and, separately, `pipx run --spec zizmor==$ZIZMOR_VERSION zizmor --offline .`.
+- Run `actionlint` and zizmor on every workflow change. `task lint:workflows` runs actionlint only;
+  CI's `workflows` job runs zizmor via the SHA-pinned `zizmorcore/zizmor-action` (offline audits,
+  no Advanced Security upload). Run both locally by hand:
+  `go run github.com/rhysd/actionlint/cmd/actionlint@$ACTIONLINT_VERSION` and, separately,
+  `pipx run --spec zizmor==$ZIZMOR_VERSION zizmor --offline .`.
 
 ## One-time setup after publishing
 
