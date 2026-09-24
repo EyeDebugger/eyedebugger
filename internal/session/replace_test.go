@@ -32,7 +32,7 @@ func lines(specs ...string) []api.BreakpointSpec {
 func replaceLines(t *testing.T, s *Session, c api.Client, file string, specs []api.BreakpointSpec) []api.Breakpoint {
 	t.Helper()
 
-	got, err := s.ReplaceBreakpoints(t.Context(), c, file, specs)
+	got, err := s.ReplaceBreakpoints(t.Context(), c, file, specs, nil)
 	if err != nil {
 		t.Fatalf("%s: replace %v: %v", c.ID, specs, err)
 	}
@@ -114,7 +114,7 @@ func TestReplaceBreakpoints(t *testing.T) {
 }
 
 // TestReplaceKeepsOthers: other owners' breakpoints stay and share their
-// line; temporaries stay; RemoveOwnBreakpoints removes only the caller's.
+// line; temporaries stay.
 func TestReplaceKeepsOthers(t *testing.T) {
 	t.Parallel()
 
@@ -142,12 +142,7 @@ func TestReplaceKeepsOthers(t *testing.T) {
 		t.Errorf("after clearing = %+v, want the agent's and the temporary", left)
 	}
 
-	mine = replaceLines(t, s, humanC, file, lines("5", "6"))
-
-	removed, err := s.RemoveOwnBreakpoints(t.Context(), humanC, []int{agents.ID, temp.ID, mine[0].ID, 999})
-	if err != nil || removed != 1 {
-		t.Errorf("RemoveOwnBreakpoints = %d, %v; want only the human's own", removed, err)
-	}
+	replaceLines(t, s, humanC, file, lines("6"))
 
 	if got := adapterBPs(t, s); got != "3,6,9" {
 		t.Errorf("adapter holds %q", got)
@@ -274,12 +269,245 @@ func TestReplaceOnExitedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := s.ReplaceBreakpoints(t.Context(), humanC, file, lines("3"))
+	_, err := s.ReplaceBreakpoints(t.Context(), humanC, file, lines("3"), nil)
 	expectCode(t, err, api.CodeSessionExited)
 
 	_, err = s.ReplaceFunctionBreakpoints(t.Context(), humanC, nil)
 	expectCode(t, err, api.CodeSessionExited)
 
-	_, err = s.ReplaceBreakpoints(t.Context(), humanC, "", lines("3"))
+	_, err = s.ReplaceBreakpoints(t.Context(), humanC, "", lines("3"), nil)
 	expectCode(t, err, api.CodeSessionExited)
+}
+
+// TestReplaceKeepsCLIBreakpoints: an editor's replace removes only its
+// client's editor breakpoints; a CLI breakpoint of the same client it
+// doesn't list survives, and one it lists keeps its id and becomes an
+// editor breakpoint (docs/adr/0014).
+func TestReplaceKeepsCLIBreakpoints(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// specs is the editor's list; the human has CLI breakpoints at 3
+		// and 5, the agent one at 4.
+		specs      []api.BreakpointSpec
+		wantLeft   string // the human's breakpoints after: "line:editor" by line
+		wantEvents []string
+	}{
+		{
+			name: "not listed", specs: lines("7"),
+			wantLeft: "3:false,5:false,7:true", wantEvents: []string{"added:human:t:7"},
+		},
+		{
+			name: "listed by line", specs: lines("3", "7"),
+			wantLeft: "3:true,5:false,7:true", wantEvents: []string{"changed:human:t:3", "added:human:t:7"},
+		},
+		{
+			name: "listed with a new condition", specs: lines("5 if false"),
+			wantLeft: "3:false,5:true", wantEvents: []string{"changed:human:t:5"},
+		},
+		{name: "empty list", specs: nil, wantLeft: "3:false,5:false"},
+		{
+			name: "on another owner's line", specs: lines("4"),
+			wantLeft: "3:false,4:true,5:false", wantEvents: []string{"added:human:t:4"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			s, file := startReplaceSession(t, fakeDriver{})
+			cli3 := addBP(t, s, humanC, file, 3, "")
+			addBP(t, s, humanC, file, 5, "")
+			agents := addBP(t, s, agentC, file, 4, "true")
+			since := s.log.latest()
+
+			got := replaceLines(t, s, humanC, file, tt.specs)
+			if slices.Contains(ids(got), 0) {
+				t.Fatalf("replace = %+v, want every spec placed", got)
+			}
+
+			if len(tt.specs) > 0 && tt.specs[0].Line == 3 && got[0].ID != cli3.ID {
+				t.Errorf("listed CLI breakpoint got id %d, want %d", got[0].ID, cli3.ID)
+			}
+
+			if left := editorLines(s, humanC.ID); left != tt.wantLeft {
+				t.Errorf("human's breakpoints = %v, want %s", left, tt.wantLeft)
+			}
+
+			if ev := bpEvents(s, since); !slices.Equal(ev, tt.wantEvents) {
+				t.Errorf("events = %v, want %v", ev, tt.wantEvents)
+			}
+
+			if a := s.Breakpoints(agentC.ID); len(a) != 1 || a[0].ID != agents.ID || a[0].Condition != "true" || a[0].Editor {
+				t.Errorf("agent's breakpoints = %+v, want %d untouched", a, agents.ID)
+			}
+		})
+	}
+}
+
+// TestReplaceKeep: an editor breakpoint in keep (listed under another path
+// of the file) stays when this list doesn't have it, and is matched and
+// updated like any other when it does; keep never touches another owner's
+// breakpoint or an id elsewhere.
+func TestReplaceKeep(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// The human has editor breakpoints at 3 and 5, the agent one at 4;
+		// specs is the list, keep names breakpoints by line ("a4" is the
+		// agent's, 9 no breakpoint).
+		specs      []api.BreakpointSpec
+		keep       []string
+		wantLeft   string // the human's breakpoints after, by line
+		wantEvents []string
+	}{
+		{name: "kept, not listed", specs: lines("7"), keep: []string{"3"}, wantLeft: "3,7", wantEvents: []string{"removed:human:t:5", "added:human:t:7"}},
+		{name: "kept and listed", specs: lines("3 if false"), keep: []string{"3"}, wantLeft: "3", wantEvents: []string{"removed:human:t:5", "changed:human:t:3"}},
+		{name: "another owner's or none", specs: nil, keep: []string{"a4", "9"}, wantLeft: "", wantEvents: []string{"removed:human:t:3", "removed:human:t:5"}},
+		{name: "none kept", specs: nil, wantLeft: "", wantEvents: []string{"removed:human:t:3", "removed:human:t:5"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			s, file := startReplaceSession(t, fakeDriver{})
+			mine := replaceLines(t, s, humanC, file, lines("3", "5"))
+			agents := addBP(t, s, agentC, file, 4, "true")
+			byName := map[string]int{"3": mine[0].ID, "5": mine[1].ID, "a4": agents.ID, "9": 999}
+			since := s.log.latest()
+
+			keep := make([]int, 0, len(tt.keep))
+			for _, k := range tt.keep {
+				keep = append(keep, byName[k])
+			}
+
+			if _, err := s.ReplaceBreakpoints(t.Context(), humanC, file, tt.specs, keep); err != nil {
+				t.Fatal(err)
+			}
+
+			var left []string
+			for _, b := range s.Breakpoints(humanC.ID) {
+				left = append(left, strconv.Itoa(b.Line))
+			}
+
+			if got := strings.Join(left, ","); got != tt.wantLeft {
+				t.Errorf("human's breakpoints = %q, want %q", got, tt.wantLeft)
+			}
+
+			if ev := bpEvents(s, since); !slices.Equal(ev, tt.wantEvents) {
+				t.Errorf("events = %v, want %v", ev, tt.wantEvents)
+			}
+
+			if a := s.Breakpoints(agentC.ID); len(a) != 1 || a[0].ID != agents.ID {
+				t.Errorf("agent's breakpoints = %+v, want %d untouched", a, agents.ID)
+			}
+		})
+	}
+}
+
+// editorLines renders owner's breakpoints as "line:editor", sorted,
+// comma-separated.
+func editorLines(s *Session, owner string) string {
+	bps := s.Breakpoints(owner)
+	out := make([]string, 0, len(bps))
+
+	for i := range bps {
+		out = append(out, strconv.Itoa(bps[i].Line)+":"+strconv.FormatBool(bps[i].Editor))
+	}
+
+	slices.Sort(out)
+
+	return strings.Join(out, ",")
+}
+
+// TestEditorBreakpointsStayEditor: a CLI 'bp add' on an editor
+// breakpoint's line updates it in place; it stays an editor breakpoint, so
+// the editor's next list may remove it.
+func TestEditorBreakpointsStayEditor(t *testing.T) {
+	t.Parallel()
+
+	s, file := startReplaceSession(t, fakeDriver{})
+	mine := replaceLines(t, s, humanC, file, lines("3"))
+
+	if b := addBP(t, s, humanC, file, 3, "false"); b.ID != mine[0].ID || !b.Editor || b.Condition != "false" {
+		t.Errorf("bp add on an editor breakpoint's line = %+v, want id %d still an editor one", b, mine[0].ID)
+	}
+
+	replaceLines(t, s, humanC, file, nil)
+
+	if left := s.Breakpoints(humanC.ID); len(left) != 0 {
+		t.Errorf("after an empty list: %+v", left)
+	}
+}
+
+func TestReplaceFunctionBreakpointsKeepCLIOnes(t *testing.T) {
+	t.Parallel()
+
+	s, _ := startReplaceSession(t, fakeDriver{})
+	cli := addFunc(t, s, humanC, "f3")
+	addFunc(t, s, humanC, "f5")
+
+	got, err := s.ReplaceFunctionBreakpoints(t.Context(), humanC, []api.BreakpointSpec{{Function: "f5"}, {Function: "f7"}})
+	if err != nil || got[0].ID == 0 || !got[0].Editor || !got[1].Editor {
+		t.Fatalf("replace = %+v, %v; want both placed as editor breakpoints", got, err)
+	}
+
+	if _, err := s.ReplaceFunctionBreakpoints(t.Context(), humanC, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if left := s.Breakpoints(humanC.ID); len(left) != 1 || left[0].ID != cli.ID || left[0].Editor {
+		t.Errorf("after an empty list: %+v, want the CLI one (%d)", left, cli.ID)
+	}
+}
+
+func TestFileKey(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "prog.txt")
+
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	spec, err := resolveSpec(api.BreakpointSpec{File: file, Line: 1}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gone := filepath.Join(dir, "gone.txt")
+
+	tests := []struct {
+		name    string
+		file    string
+		want    string
+		wantErr bool
+	}{
+		{name: "existing file: resolveSpec's path", file: file, want: spec.File},
+		{name: "deleted file: the directory resolved", file: gone, want: filepath.Join(filepath.Dir(spec.File), "gone.txt")},
+		{name: "relative", file: "prog.txt", wantErr: true},
+		{name: "empty", file: "", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := FileKey(tt.file)
+			if tt.wantErr {
+				expectCode(t, err, api.CodeInvalidRequest)
+
+				return
+			}
+
+			if err != nil || got != tt.want {
+				t.Errorf("FileKey(%q) = %q, %v; want %q", tt.file, got, err, tt.want)
+			}
+		})
+	}
 }

@@ -33,8 +33,9 @@ func newEventsCommand(info version.Info, g *globals) *cobra.Command {
 		Use:   "events",
 		Short: "Show what happened in a session, or wait for it",
 		Long: `Show a session's event log: what every client and the program did, one line per event, oldest
-first, each with its sequence number: started, client joined, lease changes, execution commands
-(who ran what), stops, program output, breakpoints added/removed/changed, threads, exit and end.
+first, each with its sequence number: started, client joined (and editors connected/disconnected),
+lease changes and requests, execution commands (who ran what), stops, program output, breakpoints
+added/removed/changed, threads, exit and end.
 Use it to see what another client (a human in an IDE, another agent) did, or to follow the session.
 
 Without --since, shows the newest --limit events (default 100). --since N shows the events after N,
@@ -183,7 +184,7 @@ func describeEvent(e *api.Event, base string) string {
 
 		return s
 	case api.EventClient:
-		return "client " + e.Client + " joined"
+		return describeClient(e)
 	case api.EventLease:
 		return describeLease(e)
 	case api.EventExec:
@@ -202,6 +203,19 @@ func describeEvent(e *api.Event, base string) string {
 		return describeEnd(e)
 	default:
 		return string(e.Kind)
+	}
+}
+
+// describeClient renders a client joining, or its editor connecting or
+// disconnecting.
+func describeClient(e *api.Event) string {
+	switch e.Action {
+	case "connected":
+		return "client " + e.Client + " connected (editor)"
+	case "disconnected":
+		return "client " + e.Client + " disconnected (editor)"
+	default:
+		return "client " + e.Client + " joined"
 	}
 }
 
@@ -268,7 +282,18 @@ func describeLease(e *api.Event) string {
 	case "grant":
 		return "lease: " + e.Client + " gave it to " + holder
 	case "release":
+		if e.Reason != "" {
+			return "lease: " + e.Client + " released it (" + e.Reason + ")"
+		}
+
 		return "lease: " + e.Client + " released it"
+	case "request":
+		s := "lease: " + e.Client + " asks " + holder + " for it"
+		if e.Text != "" {
+			s += ": " + quoteLine(e.Text)
+		}
+
+		return s
 	case "policy":
 		policy := ""
 		if e.Lease != nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -168,9 +169,15 @@ func writeBudgetHint(b *strings.Builder, truncated bool, indent int) {
 }
 
 // writeSharing writes who holds the lease and who uses the session, when
-// that matters: several clients, or a policy other than free.
+// that matters: several clients, a policy other than free, a connected
+// editor or a pending lease request.
 func writeSharing(b *strings.Builder, s api.SessionInfo) {
-	if s.Lease == nil || (len(s.Clients) <= 1 && s.Lease.Policy == api.LeaseFree) {
+	if s.Lease == nil {
+		return
+	}
+
+	anyConnected := slices.ContainsFunc(s.Clients, func(c api.ClientInfo) bool { return c.Connected > 0 })
+	if len(s.Clients) <= 1 && s.Lease.Policy == api.LeaseFree && !anyConnected && len(s.Lease.Requests) == 0 {
 		return
 	}
 
@@ -179,12 +186,26 @@ func writeSharing(b *strings.Builder, s api.SessionInfo) {
 		holder = "nobody"
 	}
 
+	fmt.Fprintf(b, "  lease: %s (%s)", holder, s.Lease.Policy)
+
+	if len(s.Lease.Requests) > 0 {
+		requests := make([]string, len(s.Lease.Requests))
+		for i, r := range s.Lease.Requests {
+			requests[i] = leaseRequestText(r)
+		}
+
+		b.WriteString("; requested by " + strings.Join(requests, ", "))
+	}
+
 	ids := make([]string, len(s.Clients))
 	for i := range s.Clients {
 		ids[i] = s.Clients[i].ID
+		if s.Clients[i].Connected > 0 {
+			ids[i] += " (connected)"
+		}
 	}
 
-	fmt.Fprintf(b, "  lease: %s (%s); clients: %s\n", holder, s.Lease.Policy, strings.Join(ids, ", "))
+	fmt.Fprintf(b, "; clients: %s\n", strings.Join(ids, ", "))
 }
 
 // snapshotHeader is the first line: session, state and why.
@@ -251,7 +272,7 @@ func writeSessions(w io.Writer, list []api.SessionInfo, asJSON bool) error {
 	)
 
 	tw := tabwriter.NewWriter(&table, 0, 0, 2, ' ', 0)
-	_, _ = io.WriteString(tw, "ID\tLANG\tSTATE\tLEASE\tPROGRAM\n")
+	_, _ = io.WriteString(tw, "ID\tLANG\tSTATE\tLEASE\tCONNECTED\tPROGRAM\n")
 
 	for i := range list {
 		s := &list[i]
@@ -271,7 +292,7 @@ func writeSessions(w io.Writer, list []api.SessionInfo, asJSON bool) error {
 			holder = s.Lease.Holder
 		}
 
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.ID, s.Lang, state, holder, s.Program)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", s.ID, s.Lang, state, holder, connectedClients(s.Clients), s.Program)
 	}
 
 	_ = tw.Flush() // writes to a strings.Builder cannot fail
@@ -286,6 +307,24 @@ func writeSessions(w io.Writer, list []api.SessionInfo, asJSON bool) error {
 	}
 
 	return writeText(w, b.String())
+}
+
+// connectedClients lists the clients with an editor connection open,
+// comma-separated, or "-".
+func connectedClients(clients []api.ClientInfo) string {
+	var ids []string
+
+	for i := range clients {
+		if clients[i].Connected > 0 {
+			ids = append(ids, clients[i].ID)
+		}
+	}
+
+	if len(ids) == 0 {
+		return "-"
+	}
+
+	return strings.Join(ids, ",")
 }
 
 func writeStack(w io.Writer, frames []api.Frame, asJSON bool, base string) error {
@@ -475,6 +514,10 @@ func writeBreakpoints(w io.Writer, bps []api.Breakpoint, asJSON bool, base strin
 
 		if bp.Temporary {
 			b.WriteString(" (run-until, temporary)")
+		}
+
+		if bp.Editor {
+			b.WriteString(" (editor)")
 		}
 
 		if bp.Verified {

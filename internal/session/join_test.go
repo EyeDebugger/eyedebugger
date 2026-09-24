@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -233,5 +234,91 @@ func TestExecUnderHandoff(t *testing.T) {
 	caps.ExceptionBreakpointFilters[0] = godap.ExceptionBreakpointsFilter{Filter: "changed"}
 	if again, _ := s.Capabilities(); again.ExceptionBreakpointFilters[0].Filter == "changed" {
 		t.Error("Capabilities shares its filter list with the caller")
+	}
+}
+
+func TestOutputBefore(t *testing.T) {
+	t.Parallel()
+
+	// chunks appends n output events of text size bytes and returns the
+	// seq of the last one.
+	chunks := func(l *eventLog, n, size int) int {
+		for range n {
+			l.append(api.Event{Kind: api.EventOutput, Category: "stdout", Text: strings.Repeat("x", size)})
+		}
+
+		return l.latest()
+	}
+
+	tests := []struct {
+		name string
+		// fill fills the log and returns the seq to ask for.
+		fill         func(l *eventLog) int
+		maxChunks    int
+		maxBytes     int
+		wantSeqs     []int
+		wantOmitted  int
+		wantCutFirst bool
+	}{
+		{
+			name: "none", fill: func(l *eventLog) int { l.append(api.Event{Kind: api.EventLease}); return 1 },
+			maxChunks: 10, maxBytes: 1 << 16,
+		},
+		{
+			name: "fewer than max", fill: func(l *eventLog) int { return chunks(l, 3, 1) },
+			maxChunks: 10, maxBytes: 1 << 16, wantSeqs: []int{1, 2, 3},
+		},
+		{
+			name: "more than max", fill: func(l *eventLog) int { return chunks(l, 5, 1) },
+			maxChunks: 2, maxBytes: 1 << 16, wantSeqs: []int{4, 5}, wantOmitted: 3,
+		},
+		{
+			name: "bytes cap cuts the oldest", fill: func(l *eventLog) int { return chunks(l, 4, 100) },
+			maxChunks: 10, maxBytes: 300, wantSeqs: []int{3, 4}, wantOmitted: 2,
+		},
+		{
+			name: "one too big is cut", fill: func(l *eventLog) int { return chunks(l, 1, 1000) },
+			maxChunks: 10, maxBytes: 100, wantSeqs: []int{1}, wantCutFirst: true,
+		},
+		{name: "after seq excluded", fill: func(l *eventLog) int {
+			seq := chunks(l, 2, 1)
+			l.append(api.Event{Kind: api.EventStopped})
+			chunks(l, 2, 1)
+
+			return seq
+		}, maxChunks: 10, maxBytes: 1 << 16, wantSeqs: []int{1, 2}},
+		{
+			name: "only held ones counted", fill: func(l *eventLog) int { return chunks(l, 6, 1) },
+			maxChunks: 2, maxBytes: 1 << 16, wantSeqs: []int{5, 6}, wantOmitted: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := bareSession(t)
+			if tt.name == "only held ones counted" {
+				// The ring holds 4 events: seqs 1 and 2 are dropped.
+				s.log = newEventLog(4, maxEventBytes, fixedNow)
+			}
+
+			seq := tt.fill(s.log)
+
+			got, omitted := s.OutputBefore(seq, tt.maxChunks, tt.maxBytes)
+
+			var gotSeqs []int
+			for _, l := range got {
+				gotSeqs = append(gotSeqs, l.Seq)
+			}
+
+			if !slices.Equal(gotSeqs, tt.wantSeqs) || omitted != tt.wantOmitted {
+				t.Errorf("OutputBefore = seqs %v, omitted %d; want %v, %d", gotSeqs, omitted, tt.wantSeqs, tt.wantOmitted)
+			}
+
+			if tt.wantCutFirst && len(got[0].Text) >= 1000 {
+				t.Errorf("a chunk too big alone was not cut: %d bytes", len(got[0].Text))
+			}
+		})
 	}
 }

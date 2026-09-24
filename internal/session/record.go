@@ -111,6 +111,14 @@ func recordable(e api.Event) (api.Event, bool) {
 		return api.Event{}, false
 	}
 
+	if e.Lease != nil && e.Lease.Requests != nil {
+		// Requests carry the requesters' messages, which are text like
+		// Text.
+		lease := *e.Lease
+		lease.Requests = nil
+		e.Lease = &lease
+	}
+
 	e.Text, e.Truncated = "", false
 
 	return e, true

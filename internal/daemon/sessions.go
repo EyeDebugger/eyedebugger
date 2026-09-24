@@ -154,7 +154,15 @@ func leaseHandlers(m *session.Manager) map[string]handler {
 			return nil, err
 		}
 
-		return api.LeaseResult{SessionID: sess.ID, Lease: info}, nil
+		res := api.LeaseResult{SessionID: sess.ID, Lease: info}
+
+		for _, c := range sess.Info().Clients {
+			if c.ID == info.Holder && c.Connected > 0 {
+				res.HolderConnected = true
+			}
+		}
+
+		return res, nil
 	}
 
 	return map[string]handler{
@@ -176,6 +184,11 @@ func leaseHandlers(m *session.Manager) map[string]handler {
 		}),
 		api.MethodLeasePolicy: onSession(m, func(_ context.Context, sess *session.Session, c api.Client, p api.LeasePolicyParams) (any, error) {
 			info, err := sess.SetLeasePolicy(c, p.Policy, p.Force)
+
+			return result(sess, info, err)
+		}),
+		api.MethodLeaseRequest: onSession(m, func(_ context.Context, sess *session.Session, c api.Client, p api.LeaseRequestParams) (any, error) {
+			info, err := sess.RequestLease(c, p.Message)
 
 			return result(sess, info, err)
 		}),

@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net"
 	"os/exec"
-	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -104,6 +103,10 @@ type Session struct {
 	lease     lease
 	clients   []api.ClientInfo // by first seen
 	resumedAt int              // log seq when the program last resumed
+	// presence counts each client's open editor connections (presence.go);
+	// connGen numbers connections, session-wide.
+	presence map[string]*presence
+	connGen  uint64
 	// lastOutput is the seq of the newest output event.
 	lastOutput int
 	// execInFlight is set while an execution request is sent: the
@@ -731,7 +734,7 @@ func (s *Session) infoLocked() api.SessionInfo {
 		CreatedAt: s.CreatedAt,
 		ExitCode:  s.exitCode,
 		Lease:     &leaseInfo,
-		Clients:   slices.Clone(s.clients),
+		Clients:   s.clientsLocked(),
 		Recording: s.recPath,
 		Mode:      s.mode,
 	}

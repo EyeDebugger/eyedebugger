@@ -58,7 +58,9 @@ byte that can't belong to the header closes the connection; a JSON-RPC line afte
 does); content ≤ 1 MiB from editors (4 MiB from adapters, where the same reader now replaces
 go-dap's unbounded one), checked before allocating; any violation closes the connection without a
 reply — except an adapter message over 4 MiB with a valid header, which is skipped (its request
-times out) so one huge value can't end the session. ≤ 32 requests in flight per connection (reading pauses beyond); each write has a 30 s
+times out) so one huge value can't end the session. ≤ 32 requests in flight per connection
+(reading pauses beyond); ≤ 1000 entries per `setBreakpoints` or `setFunctionBreakpoints`
+(`INVALID_REQUEST` beyond, ADR 0014); each write has a 30 s
 deadline (a client that stops reading is dropped). **Re-encode, never relay:** what reaches the
 adapter is encoded from the go-dap value the policy decided on; fields go-dap 0.12 doesn't model
 are dropped.
@@ -229,3 +231,6 @@ follow-ups: presence and releasing the lease on the last disconnect, `lease requ
 custom requests and events, replaying output before the join, and other owners' breakpoints shown
 to editors as DAP `breakpoint` events (decided 2026-09-24), which must keep adopted foreign
 breakpoints from being re-sent as the human's own.
+
+Amended by ADR 0014 (presence, releasing the lease on the last disconnect, shared breakpoints,
+custom messages).

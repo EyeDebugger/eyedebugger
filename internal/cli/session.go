@@ -379,14 +379,16 @@ func newSessionsCommand(info version.Info, g *globals) *cobra.Command {
 		Use:   "sessions",
 		Short: "List debug sessions",
 		Long: `List every debug session of the daemon: id, language, state (starting, running, stopped,
-exited, lost), who holds its control lease, and program, under a header line. Exited sessions stay
+exited, lost), who holds its control lease, which clients have an editor connected ('eyedbg dap';
+CONNECTED, "-" for none), and program, under a header line. Exited sessions stay
 listed, with their exit code, until 'eyedbg stop'. A lost session belonged to a daemon that exited
 while it was live: only its metadata and recording are left, and 'eyedbg stop -s ID' forgets it.
 With no daemon running, the lost sessions are read from the runtime directory.
 
 Never starts the daemon or affects a session. Prints nothing when there are none (an empty
-"sessions" array in --json) and exits 0. --json adds each session's lease, clients (who used it,
-first and last seen) and recording file.`,
+"sessions" array in --json) and exits 0. --json adds each session's lease (with pending
+requests), clients (who used it, first and last seen, "connected": open editor connections) and
+recording file.`,
 		Example: `  eyedbg sessions
   eyedbg sessions --json`,
 		Args: cobra.NoArgs,

@@ -21,7 +21,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resumes and state changes arrive as `continued`/`invalidated`. Frames are bounded (1 MiB, one
   `Content-Length` header) and malformed ones close the connection.
 - `version --json` (both binaries) reports `"protocol"` (the native API version, 2) and
-  `"features": ["dap"]`.
+  `"features": ["dap", "presence", "lease.request", "dap.collab"]`.
+- Editors and agents collaborate (phase 2, ADR 0014): presence — each `eyedbg dap` connection
+  counts as its client's (`connected` in `sessions --json`, a `CONNECTED` column in `eyedbg
+  sessions`, `client connected`/`disconnected` events); when a client's last editor connection
+  closes, its editor breakpoints are removed, the exception mode its editor set is reset and its
+  lease is released (`lease` `release`, reason `disconnected`; a DAP `disconnect {restart: true}`
+  waits 10 s for it to come back). `eyedbg lease request [--message TEXT]` (native
+  `lease.request`) asks the holder for the lease without moving it: a pending request shows in
+  `status`, every stop's sharing line (`requested by C: "msg"`), `lease` and `sessions --json`
+  (`lease.requests`) until the lease changes hands. The DAP facade answers custom `eyedbg/lease`,
+  `eyedbg/clients` and `eyedbg/breakpoints` requests and sends `eyedbg/lease`, `eyedbg/clients`,
+  `eyedbg/breakpoints` and `eyedbg/activity` events for editor extensions; shows other clients'
+  line breakpoints in the editor as DAP `breakpoint` events at column 1, with whose they are and
+  their condition in the message — the editor's re-sent copies stay the owner's (condition kept),
+  stale copies are retracted, removing one only hides it, editing one makes the human's own — and
+  retracts them on leaving; and replays the output from before the join (newest 200 chunks,
+  64 KiB). `facade.open` reports `facadeVersion` 2. `eyedbg bp ls` marks breakpoints set through
+  an editor `(editor)` (`editor` in `--json`).
 - Stops carry `allThreadsStopped` when the adapter says so (`--json` snapshots and events).
 - C, C++ and Rust debugging through LLVM's lldb-dap (`eyedbg start c|cpp|rust --program FILE`),
   manifest only (`lldb-dap-c.json`, `lldb-dap-cpp.json`, `lldb-dap-rust.json`; `EYEDBG_LLDB_DAP` or
@@ -34,6 +51,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lldb-dap 18–20, `set` reports the new value (their `setVariable` answer carries it as
   `"result"`: the session re-reads the variable), and on Linux a pause stops with reason `pause`,
   not `exception` (`signal SIGSTOP`).
+
+### Changed
+
+- An editor's breakpoint list (DAP `setBreakpoints`) no longer removes breakpoints its client set
+  with the CLI; only the ones set through an editor — and not the ones it set under another path
+  of the same file (a symlink). A `setBreakpoints` or `setFunctionBreakpoints` of more than 1000
+  entries is refused (`INVALID_REQUEST`). `eyedbg sessions` has a `CONNECTED` column
+  before `PROGRAM`, and the sharing line of a stop also shows while an editor is connected or a
+  lease request is pending.
 
 ## [0.1.2] - 2026-09-24
 

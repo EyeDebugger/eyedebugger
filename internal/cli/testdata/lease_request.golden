@@ -1,0 +1,5 @@
+session s-k3f9: lease held by human:ijat (connected, policy handoff)
+  requested by agent:b
+  requested by agent: "I need to step into \"Total()\"\nnow"
+session s-k3f9: nobody holds the lease (policy handoff): 'eyedbg lease take' takes it
+session s-k3f9: you hold the lease (policy free)

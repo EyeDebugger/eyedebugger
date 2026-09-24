@@ -39,6 +39,11 @@ type Handlers struct {
 	// Request answers a reverse request (e.g. runInTerminal); nil, or a nil
 	// result, makes the client reply with a "not supported" error.
 	Request func(godap.RequestMessage) godap.ResponseMessage
+	// Codec decodes what the peer sends; nil is go-dap's standard messages
+	// only (an unknown event is dropped, an unknown response reaches its
+	// waiter without its body). A codec with custom messages registered
+	// decodes them too.
+	Codec *godap.Codec
 }
 
 // Client speaks DAP to one adapter over a byte stream (usually its stdio).
@@ -196,7 +201,17 @@ func (c *Client) readLoop(r *bufio.Reader) {
 }
 
 func (c *Client) dispatch(raw []byte) {
-	msg, err := godap.DecodeProtocolMessage(raw)
+	var (
+		msg godap.Message
+		err error
+	)
+
+	if c.handlers.Codec != nil {
+		msg, err = c.handlers.Codec.DecodeMessage(raw)
+	} else {
+		msg, err = godap.DecodeProtocolMessage(raw)
+	}
+
 	if err != nil {
 		// A message go-dap has no type for (an adapter-specific event or
 		// response). Responses must still reach their waiter.

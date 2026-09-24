@@ -151,6 +151,13 @@ type testClient struct {
 func join(t *testing.T, s *session.Session, c api.Client) *testClient {
 	t.Helper()
 
+	return joinWith(t, Config{Session: s, Client: c})
+}
+
+// joinWith opens a facade connection with cfg (its logger is set here).
+func joinWith(t *testing.T, cfg Config) *testClient {
+	t.Helper()
+
 	ours, theirs := net.Pipe()
 	tc := &testClient{
 		t: t, conn: theirs, msgs: make(chan godap.Message, 10000), done: make(chan struct{}),
@@ -160,10 +167,16 @@ func join(t *testing.T, s *session.Session, c api.Client) *testClient {
 	ctx, cancel := context.WithCancel(t.Context())
 
 	go func() {
-		Serve(ctx, Config{Session: s, Client: c, Logger: slog.New(slog.DiscardHandler)}, bufio.NewReader(ours), ours)
+		cfg.Logger = slog.New(slog.DiscardHandler)
+		Serve(ctx, cfg, bufio.NewReader(ours), ours)
 		_ = ours.Close()
 		close(tc.done)
 	}()
+
+	codec := godap.NewCodec()
+	if err := RegisterMessages(codec); err != nil {
+		t.Fatal(err)
+	}
 
 	go func() {
 		defer close(tc.msgs)
@@ -176,7 +189,7 @@ func join(t *testing.T, s *session.Session, c api.Client) *testClient {
 				return
 			}
 
-			msg, err := godap.DecodeProtocolMessage(raw)
+			msg, err := codec.DecodeMessage(raw)
 			if err != nil {
 				t.Errorf("undecodable message from the facade: %s", raw)
 

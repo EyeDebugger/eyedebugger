@@ -15,7 +15,14 @@ const (
 	MethodLeaseRelease = "lease.release"
 	MethodLeaseGrant   = "lease.grant"
 	MethodLeasePolicy  = "lease.policy"
+	// MethodLeaseRequest asks the lease's holder for it: it records a
+	// pending request and changes nothing else (docs/adr/0014).
+	MethodLeaseRequest = "lease.request"
 )
+
+// MaxLeaseRequestMessage is the most characters (runes) a lease request's
+// message may have.
+const MaxLeaseRequestMessage = 200
 
 // LeasePolicy decides whether a client may take the control lease from
 // another.
@@ -62,12 +69,25 @@ type LeaseInfo struct {
 	// Holder is the client id holding the lease; empty: nobody.
 	Holder string     `json:"holder,omitempty"`
 	Since  *time.Time `json:"since,omitempty"`
+	// Requests are the pending lease requests, oldest first; they are
+	// cleared whenever the lease changes hands.
+	Requests []LeaseRequest `json:"requests,omitempty"`
+}
+
+// LeaseRequest is a client's pending request for the lease.
+type LeaseRequest struct {
+	Client  string    `json:"client"`
+	Message string    `json:"message,omitempty"`
+	At      time.Time `json:"at"`
 }
 
 // LeaseResult is the result of every lease method.
 type LeaseResult struct {
 	SessionID string    `json:"sessionId"`
 	Lease     LeaseInfo `json:"lease"`
+	// HolderConnected means the holder has an editor (DAP) connection open:
+	// the lease is released when its last one closes.
+	HolderConnected bool `json:"holderConnected,omitempty"`
 }
 
 // LeaseParams are the params of [MethodLeaseStatus], [MethodLeaseTake] and
@@ -93,4 +113,12 @@ type LeasePolicyParams struct {
 
 	Policy LeasePolicy `json:"policy"`
 	Force  bool        `json:"force,omitempty"`
+}
+
+// LeaseRequestParams are the params of [MethodLeaseRequest]: Message (at
+// most [MaxLeaseRequestMessage] characters) tells the holder why.
+type LeaseRequestParams struct {
+	SessionRef
+
+	Message string `json:"message,omitempty"`
 }

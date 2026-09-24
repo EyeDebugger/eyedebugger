@@ -6,6 +6,7 @@ package dap
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -295,4 +296,112 @@ func TestDoSkipsTooLargeMessages(t *testing.T) {
 		t.Errorf("the connection ended: %v", c.Err())
 	default:
 	}
+}
+
+// customEvent and customResponse are messages go-dap doesn't know.
+type customEvent struct {
+	godap.Event
+
+	Body struct {
+		N int `json:"n"`
+	} `json:"body"`
+}
+
+type customResponse struct {
+	godap.Response
+
+	Body struct {
+		N int `json:"n"`
+	} `json:"body"`
+}
+
+// TestCodec: with a codec, custom events and responses arrive typed, with
+// their bodies; without, an unknown event is dropped and an unknown
+// response arrives bare.
+func TestCodec(t *testing.T) {
+	t.Parallel()
+
+	codec := godap.NewCodec()
+	if err := codec.RegisterEvent("x/event", func() godap.Message { return &customEvent{} }); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := codec.RegisterRequest("x/req", func() godap.Message { return &godap.Request{} },
+		func() godap.Message { return &customResponse{} }); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, withCodec := range []bool{true, false} {
+		t.Run(strconv.FormatBool(withCodec), func(t *testing.T) {
+			t.Parallel()
+
+			events := make(chan godap.EventMessage, 2)
+			h := Handlers{Event: func(e godap.EventMessage) { events <- e }}
+
+			if withCodec {
+				h.Codec = codec
+			}
+
+			resp := customExchange(t, h)
+			first := <-events
+
+			if e, isCustom := first.(*customEvent); withCodec != isCustom || (isCustom && e.Body.N != 7) {
+				t.Errorf("first event = %#v", first)
+			}
+
+			if !withCodec && first.GetEvent().Event != "stopped" {
+				t.Errorf("without a codec the custom event arrived: %#v", first)
+			}
+
+			if r, isCustom := resp.(*customResponse); withCodec != isCustom || (isCustom && r.Body.N != 8) {
+				t.Errorf("response = %#v", resp)
+			}
+		})
+	}
+}
+
+// customExchange sends an x/req request through a client with h; the
+// adapter answers with a custom event, a stopped event and a custom
+// response, which it returns.
+func customExchange(t *testing.T, h Handlers) godap.Message {
+	t.Helper()
+
+	c, fa := pipeClient(t, h)
+
+	type result struct {
+		resp godap.Message
+		err  error
+	}
+
+	done := make(chan result, 1)
+
+	go func() {
+		resp, err := c.Do(t.Context(), &godap.Request{Command: "x/req"})
+		done <- result{resp, err}
+	}()
+
+	rawReq, err := ReadMessage(fa.in, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var req godap.Request
+	if err := json.Unmarshal(rawReq, &req); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, s := range []string{
+		`{"seq":1,"type":"event","event":"x/event","body":{"n":7}}`,
+		`{"seq":2,"type":"event","event":"stopped","body":{"reason":"pause","threadId":1}}`,
+		`{"seq":3,"type":"response","request_seq":` + strconv.Itoa(req.Seq) + `,"command":"x/req","success":true,"body":{"n":8}}`,
+	} {
+		_, _ = io.WriteString(fa.out, "Content-Length: "+strconv.Itoa(len(s))+"\r\n\r\n"+s)
+	}
+
+	got := <-done
+	if got.err != nil {
+		t.Fatalf("Do: %v", got.err)
+	}
+
+	return got.resp
 }

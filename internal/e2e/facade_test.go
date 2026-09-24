@@ -5,11 +5,14 @@ package e2e
 
 import (
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	godap "github.com/google/go-dap"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
+	"github.com/eyedebugger/eyedebugger/internal/facade"
 )
 
 const humanE2E = "human:e2e"
@@ -278,4 +281,265 @@ func TestFacadeErrors(t *testing.T) {
 	if len(r.stdout) != 0 {
 		t.Errorf("stdout = %q, want nothing", r.stdout)
 	}
+}
+
+// TestFacadeCollab: an agent (CLI) and a human (DAP) share a session —
+// the human sees the agent's breakpoints and actions, its copies of them
+// never become the human's, a lease request reaches the agent, and the
+// human's leaving releases the lease (docs/adr/0014).
+func TestFacadeCollab(t *testing.T) {
+	t.Parallel()
+
+	for _, lc := range langCases(t) {
+		t.Run(lc.name, func(t *testing.T) {
+			lc.require(t)
+			t.Parallel()
+
+			h := newHarness(t)
+			if lc.lang == "fakelang" {
+				fakeManifestFiles(t, h.configDir)
+			}
+
+			startAt(t, h, lc, "handoff")
+
+			p := h.dap(humanE2E)
+			thread := joinStopped(t, p, lc, 0)
+			anchor := collabJoin(t, h, p, lc)
+			target := collabAgentBreakpoint(t, h, p, lc)
+			collabEcho(t, h, p, anchor, target)
+			collabAgentSteps(t, h, p)
+			collabLeaseRequest(t, h, p, thread)
+			collabLeave(t, h, p, anchor, target)
+		})
+	}
+}
+
+// agentBreakpoints returns the session's breakpoints as 'bp ls --json'
+// lists them.
+func agentBreakpoints(t *testing.T, h *harness) []api.Breakpoint {
+	t.Helper()
+
+	var bps struct {
+		Breakpoints []api.Breakpoint `json:"breakpoints"`
+	}
+
+	h.run("--json", "bp", "ls").wantCode(exitOK).decode(&bps)
+
+	return bps.Breakpoints
+}
+
+// isBreakpointEvent matches a breakpoint event with reason for id.
+func isBreakpointEvent(reason string, id int) func(godap.EventMessage) bool {
+	return func(ev godap.EventMessage) bool {
+		b, ok := ev.(*godap.BreakpointEvent)
+
+		return ok && b.Body.Reason == reason && b.Body.Breakpoint.Id == id
+	}
+}
+
+// collabJoin: the join announced the agent's anchor breakpoint as a mirror
+// and sent the lease, the clients and the breakpoints; the agent sees the
+// human connected. It returns the mirror.
+func collabJoin(t *testing.T, h *harness, p *dapProc, lc langCase) godap.Breakpoint {
+	t.Helper()
+
+	bps := agentBreakpoints(t, h)
+	i := slices.IndexFunc(bps, func(b api.Breakpoint) bool { return b.Owner == "agent" && b.RequestedLine == lc.anchor })
+
+	if i < 0 {
+		t.Fatalf("bp ls = %+v, want the anchor breakpoint", bps)
+	}
+
+	ev, ok := p.waitEventWhere("breakpoint", isBreakpointEvent("new", bps[i].ID)).(*godap.BreakpointEvent)
+	if !ok || ev.Body.Breakpoint.Column != 1 || ev.Body.Breakpoint.Source == nil || !strings.Contains(ev.Body.Breakpoint.Message, "agent's breakpoint") {
+		t.Fatalf("mirror of the anchor = %+v", ev)
+	}
+
+	lease, ok := p.waitEvent(facade.CommandLease).(*facade.LeaseEvent)
+	if !ok || lease.Body.Lease.Holder != "agent" {
+		t.Errorf("eyedbg/lease at the join = %+v", lease)
+	}
+
+	clients, ok := p.waitEvent(facade.CommandClients).(*facade.ClientsEvent)
+	if !ok || !slices.ContainsFunc(clients.Body.Clients, func(c api.ClientInfo) bool { return c.ID == humanE2E && c.Connected == 1 }) {
+		t.Errorf("eyedbg/clients at the join = %+v", clients)
+	}
+
+	p.waitEvent(facade.CommandBreakpoints)
+
+	var sessions struct {
+		Sessions []api.SessionInfo `json:"sessions"`
+	}
+
+	h.run("--json", "sessions").wantCode(exitOK).decode(&sessions)
+
+	if len(sessions.Sessions) != 1 || !slices.ContainsFunc(sessions.Sessions[0].Clients, func(c api.ClientInfo) bool {
+		return c.ID == humanE2E && c.Connected == 1
+	}) {
+		t.Errorf("sessions = %+v, want %s connected", sessions.Sessions, humanE2E)
+	}
+
+	return ev.Body.Breakpoint
+}
+
+// collabAgentBreakpoint: the agent's new breakpoint (with a hit count,
+// which the editor's copy loses) reaches the human as a mirror, an
+// activity and a breakpoint list. It returns the mirror.
+func collabAgentBreakpoint(t *testing.T, h *harness, p *dapProc, lc langCase) godap.Breakpoint {
+	t.Helper()
+
+	h.run("bp", "add", loc(lc.file, lc.target), "--hit", ">=1").wantCode(exitOK)
+
+	i := slices.IndexFunc(agentBreakpoints(t, h), func(b api.Breakpoint) bool { return b.RequestedLine == lc.target })
+	if i < 0 {
+		t.Fatal("the agent's breakpoint at the target is not listed")
+	}
+
+	id := agentBreakpoints(t, h)[i].ID
+
+	ev, ok := p.waitEventWhere("breakpoint", isBreakpointEvent("new", id)).(*godap.BreakpointEvent)
+	if !ok || ev.Body.Breakpoint.Column != 1 || !strings.Contains(ev.Body.Breakpoint.Message, "hit >=1") {
+		t.Fatalf("mirror of the target = %+v", ev)
+	}
+
+	p.waitEventWhere(facade.EventActivity, func(ev godap.EventMessage) bool {
+		a, ok := ev.(*facade.ActivityEvent)
+
+		return ok && a.Body.Event.Kind == api.EventBreakpoint && a.Body.Event.Action == "added" && a.Body.Event.Client == "agent"
+	})
+	p.waitEventWhere(facade.CommandBreakpoints, func(ev godap.EventMessage) bool {
+		b, ok := ev.(*facade.BreakpointsEvent)
+
+		return ok && slices.ContainsFunc(b.Body.Breakpoints, func(bp api.Breakpoint) bool { return bp.ID == id })
+	})
+
+	return ev.Body.Breakpoint
+}
+
+// collabEcho: the human's editor re-sends its copies, marked at column 1,
+// as VS Code does: they stay the agent's, hit count included.
+func collabEcho(t *testing.T, h *harness, p *dapProc, anchor, target godap.Breakpoint) {
+	t.Helper()
+
+	req := &godap.SetBreakpointsRequest{Request: request("setBreakpoints"), Arguments: godap.SetBreakpointsArguments{
+		Source:      godap.Source{Path: target.Source.Path},
+		Breakpoints: []godap.SourceBreakpoint{{Line: anchor.Line, Column: 1}, {Line: target.Line, Column: 1}},
+	}}
+
+	resp, ok := p.ok(req).(*godap.SetBreakpointsResponse)
+	if !ok || len(resp.Body.Breakpoints) != 2 || resp.Body.Breakpoints[0].Id != anchor.Id || resp.Body.Breakpoints[1].Id != target.Id {
+		t.Fatalf("setBreakpoints with the copies = %+v, want the agent's %d and %d", resp, anchor.Id, target.Id)
+	}
+
+	bps := agentBreakpoints(t, h)
+	for i := range bps {
+		if b := &bps[i]; b.Owner == humanE2E {
+			t.Errorf("the human got a breakpoint from a copy: %+v", b)
+		} else if b.ID == target.Id && (b.Owner != "agent" || b.HitCondition != ">=1") {
+			t.Errorf("the agent's breakpoint after the echo = %+v", b)
+		}
+	}
+}
+
+// collabAgentSteps: the agent's step reaches the human as an activity, a
+// resume and a stop.
+func collabAgentSteps(t *testing.T, h *harness, p *dapProc) {
+	t.Helper()
+
+	h.run("next", "--timeout", startTimeout).wantCode(exitOK)
+
+	// The exec event: continued, then its activity.
+	p.waitEvent("continued")
+	p.waitEventWhere(facade.EventActivity, func(ev godap.EventMessage) bool {
+		a, ok := ev.(*facade.ActivityEvent)
+
+		return ok && a.Body.Event.Kind == api.EventExec && a.Body.Event.Action == "next" && a.Body.Event.Client == "agent"
+	})
+	p.waitEvent("stopped")
+}
+
+// collabLeaseRequest: the human asks for the lease; the agent sees the
+// request in its events and status, and grants it.
+func collabLeaseRequest(t *testing.T, h *harness, p *dapProc, thread int) {
+	t.Helper()
+
+	var latest eventsEnvelope
+
+	h.run("--json", "events", "--limit", "1").wantCode(exitOK).decode(&latest)
+
+	req := &facade.LeaseRequest{Request: request(facade.CommandLease), Arguments: facade.LeaseArguments{Action: facade.LeaseActionRequest, Message: "e2e"}}
+	if resp, ok := p.ok(req).(*facade.LeaseResponse); !ok || len(resp.Body.Lease.Requests) != 1 {
+		t.Fatalf("eyedbg/lease request = %+v", resp)
+	}
+
+	var events eventsEnvelope
+
+	h.run("--json", "events", "--since", strconv.Itoa(latest.Latest), "--kind", "lease", "--wait", "--timeout", "30s").wantCode(exitOK).decode(&events)
+
+	if len(events.Events) == 0 || events.Events[0].Action != "request" || events.Events[0].Client != humanE2E || events.Events[0].Text != "e2e" {
+		t.Errorf("lease events = %+v, want the human's request", events.Events)
+	}
+
+	h.run("status").wantCode(exitOK).wantStdout("requested by " + humanE2E)
+	h.run("lease", "grant", humanE2E).wantCode(exitOK)
+
+	p.waitEventWhere(facade.CommandLease, func(ev godap.EventMessage) bool {
+		l, ok := ev.(*facade.LeaseEvent)
+
+		return ok && l.Body.Lease.Holder == humanE2E && len(l.Body.Lease.Requests) == 0
+	})
+
+	p.ok(threadReq("next", thread))
+	p.waitEvent("stopped")
+}
+
+// collabLeave: the disconnect retracts the copies before its response;
+// the human's lease is released, the agent's breakpoints stay, and the
+// agent drives again without --force.
+func collabLeave(t *testing.T, h *harness, p *dapProc, anchor, target godap.Breakpoint) {
+	t.Helper()
+
+	p.ok(&godap.DisconnectRequest{Request: request("disconnect")})
+
+	// The client hands events to onEvent before the response that follows
+	// them reaches Do.
+	got := p.received()
+	for _, id := range []int{anchor.Id, target.Id} {
+		if !slices.ContainsFunc(got, isBreakpointEvent("removed", id)) {
+			t.Errorf("no removed event for %d before the disconnect response", id)
+		}
+	}
+
+	if code := p.wait(); code != exitOK {
+		t.Fatalf("eyedbg dap exited %d, want 0; stderr: %s", code, p.stderr)
+	}
+
+	var lease struct {
+		Lease api.LeaseInfo `json:"lease"`
+	}
+
+	h.run("--json", "lease", "status").wantCode(exitOK).decode(&lease)
+
+	if lease.Lease.Holder != "" {
+		t.Errorf("lease after the human left = %+v, want nobody", lease.Lease)
+	}
+
+	var events eventsEnvelope
+
+	h.run("--json", "events", "--kind", "client,lease", "--limit", "2").wantCode(exitOK).decode(&events)
+
+	if n := len(events.Events); n != 2 || events.Events[0].Action != "disconnected" || events.Events[1].Action != "release" ||
+		events.Events[1].Reason != "disconnected" {
+		t.Errorf("last client and lease events = %+v, want disconnected then release (disconnected)", events.Events)
+	}
+
+	bps := agentBreakpoints(t, h)
+	for i := range bps {
+		if b := &bps[i]; b.Owner == humanE2E || (b.ID == target.Id && b.HitCondition != ">=1") {
+			t.Errorf("breakpoint after the human left = %+v", b)
+		}
+	}
+
+	h.run("continue", "--timeout", startTimeout).wantCode(exitOK)
+	h.run("stop").wantCode(exitOK)
 }

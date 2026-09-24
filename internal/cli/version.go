@@ -46,7 +46,9 @@ Never blocks and has no effect on any debug session. Exits 0 on success, 1 on a 
 extra arguments) or a write error. Default output is text for LLM/human reading; --json prints the
 machine-readable form with a stable "schema" field (docs/DESIGN.md §5) that only changes on
 purpose, plus the native protocol version it speaks and its optional features ("dap": 'eyedbg
-dap' and the daemon's DAP facade).`, binName),
+dap' and the daemon's DAP facade; "presence": connected editors in sessions; "lease.request":
+'eyedbg lease request'; "dap.collab": the facade's eyedbg/* messages, other clients' breakpoints
+in the editor and output replay).`, binName),
 		Example: fmt.Sprintf("  %[1]s version\n  %[1]s version --json", binName),
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -66,7 +68,7 @@ func writeVersion(w io.Writer, name string, info version.Info, asJSON bool) erro
 			GoVersion: info.GoVersion,
 			Platform:  info.Platform,
 			Protocol:  api.ProtocolVersion,
-			Features:  []string{"dap"},
+			Features:  []string{"dap", "presence", "lease.request", "dap.collab"},
 		}
 		if err := json.NewEncoder(w).Encode(out); err != nil {
 			return fmt.Errorf("write version: %w", err)

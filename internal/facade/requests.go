@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"slices"
 
 	godap "github.com/google/go-dap"
 
@@ -31,8 +30,7 @@ func (c *connection) dispatch(ctx context.Context, req godap.RequestMessage, in 
 	case *godap.ConfigurationDoneRequest:
 		c.configurationDone(ctx, r)
 	case *godap.DisconnectRequest:
-		// Leaving never ends the session, whatever the arguments ask.
-		c.respond(ctx, req, &godap.DisconnectResponse{})
+		c.disconnect(ctx, r)
 
 		return true
 	default:
@@ -63,13 +61,41 @@ func isExecution(req godap.RequestMessage) bool {
 
 // isOrdered reports whether req changes something, so that the
 // connection's requests of its kind must apply in the order they arrived:
-// breakpoints, the exception mode, and execution requests.
+// breakpoints, the exception mode, the lease, and execution requests.
 func isOrdered(req godap.RequestMessage) bool {
-	switch req.(type) {
-	case *godap.SetBreakpointsRequest, *godap.SetFunctionBreakpointsRequest, *godap.SetExceptionBreakpointsRequest:
+	if _, ok := req.(*godap.SetExceptionBreakpointsRequest); ok {
 		return true
+	}
+
+	return isGated(req)
+}
+
+// isGated reports whether req holds the event gate from its session call
+// until its response (and the events it causes) are written: execution
+// requests, breakpoint changes and lease changes.
+func isGated(req godap.RequestMessage) bool {
+	switch r := req.(type) {
+	case *godap.SetBreakpointsRequest, *godap.SetFunctionBreakpointsRequest:
+		return true
+	case *LeaseRequest:
+		return r.Arguments.Action != LeaseActionStatus
+	case *BreakpointsRequest:
+		return changesBreakpoints(req)
 	default:
 		return isExecution(req)
+	}
+}
+
+// changesBreakpoints reports whether req changes breakpoints: the editor's
+// view is reconciled after its response.
+func changesBreakpoints(req godap.RequestMessage) bool {
+	switch r := req.(type) {
+	case *godap.SetBreakpointsRequest, *godap.SetFunctionBreakpointsRequest:
+		return true
+	case *BreakpointsRequest:
+		return r.Arguments.Action == BreakpointsActionRemove
+	default:
+		return false
 	}
 }
 
@@ -155,10 +181,13 @@ func (c *connection) attach(ctx context.Context, r *godap.AttachRequest) {
 	}
 }
 
-// configurationDone joins the session's event log: it answers, sends the
-// program's state as of the join point and what the adapter changed about
-// the connection's breakpoints since their responses, then follows the
-// log from the join point.
+// configurationDone joins the session's event log: it answers, then,
+// holding the event gate (a setBreakpoints sent before it may still be
+// running), replays the output held as of the join point, sends the
+// program's state then, announces the other clients' breakpoints and what
+// changed about the connection's own since their responses, and the lease,
+// clients and breakpoints (eyedbg/*); then it follows the log from the join
+// point. A session that exited gets its output and its end only.
 func (c *connection) configurationDone(ctx context.Context, r *godap.ConfigurationDoneRequest) {
 	if c.phase != phaseAttached {
 		c.fail(ctx, r, api.NewError(api.CodeInvalidRequest, "configurationDone needs attach first, once", ""), false)
@@ -173,7 +202,12 @@ func (c *connection) configurationDone(ctx context.Context, r *godap.Configurati
 		return
 	}
 
-	st := &followState{self: c.client.ID, invalidated: c.invalidated, owns: c.owns}
+	st := &followState{self: c.client.ID, invalidated: c.invalidated}
+
+	c.gate.Lock()
+	defer c.gate.Unlock()
+
+	c.sendAll(ctx, c.replayOutput(seq))
 
 	switch info.State {
 	case api.StateStopped:
@@ -189,60 +223,92 @@ func (c *connection) configurationDone(ctx context.Context, r *godap.Configurati
 	case api.StateStarting, api.StateRunning, api.StateLost:
 	}
 
+	c.view.configured = true
 	c.sendAll(ctx, c.reconcile())
+
+	if info.Lease != nil {
+		c.send(ctx, leaseEvent(*info.Lease))
+	}
+
+	c.send(ctx, clientsEvent(info.Clients))
+	c.send(ctx, c.breakpointsEvent())
 	c.wg.Go(func() { c.protect(ctx, func() { c.follow(ctx, seq, st) }) })
 }
 
-// reconcile returns a breakpoint changed event for each of the
-// connection's breakpoints whose state differs from what its response said.
-func (c *connection) reconcile() []godap.EventMessage {
-	now := c.sess.Breakpoints(c.client.ID)
+// replayOutput returns the output events of the newest output the session
+// holds up to seq, after a console line counting the older chunks left out.
+func (c *connection) replayOutput(seq int) []godap.EventMessage {
+	lines, omitted := c.sess.OutputBefore(seq, replayChunks, replayBytes)
+	out := make([]godap.EventMessage, 0, len(lines)+1)
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	if omitted > 0 {
+		out = append(out, consoleLine(fmt.Sprintf("%d earlier output chunks aren't shown ('eyedbg output' has them)", omitted)))
+	}
 
-	var out []godap.EventMessage
-
-	for i := range now {
-		told, ok := c.reported[now[i].ID]
-		if !ok {
-			continue
-		}
-
-		if b := dapBreakpoint(&now[i]); b != told {
-			c.reported[b.Id] = b
-			out = append(out, &godap.BreakpointEvent{Event: event("breakpoint"), Body: godap.BreakpointEventBody{Reason: actionChanged, Breakpoint: b}})
-		}
+	for _, l := range lines {
+		out = append(out, outputEvent(l.Category, l.Text))
 	}
 
 	return out
 }
 
+// disconnect leaves: holding the event gate, it retracts the mirrors,
+// stops every later event and answers. Leaving never ends the session,
+// whatever the arguments ask; a restart asks the session to wait for the
+// client's next connection.
+func (c *connection) disconnect(ctx context.Context, r *godap.DisconnectRequest) {
+	c.restart = r.Arguments != nil && r.Arguments.Restart
+
+	c.gate.Lock()
+	defer c.gate.Unlock()
+
+	c.sendAll(ctx, retractMirrors(c.view))
+	c.view.leaving = true
+	c.respond(ctx, r, &godap.DisconnectResponse{})
+}
+
 // handle handles a request that isn't a lifecycle one. Execution requests
-// and breakpoint changes hold the event gate until their response is
-// written.
+// and breakpoint and lease changes hold the event gate until their response
+// (and, for breakpoints, the events that bring the editor's view up to
+// date) are written.
 func (c *connection) handle(ctx context.Context, req godap.RequestMessage) {
 	exec := isExecution(req)
 
-	switch req.(type) {
-	case *godap.SetBreakpointsRequest, *godap.SetFunctionBreakpointsRequest:
+	if isGated(req) {
 		c.gate.Lock()
 		defer c.gate.Unlock()
-	default:
-		if exec {
-			c.gate.Lock()
-			defer c.gate.Unlock()
-		}
 	}
 
 	resp, err := c.serve(ctx, req)
+
+	answered := false
 	if err != nil {
 		c.fail(ctx, req, err, exec)
+	} else {
+		answered = c.respond(ctx, req, resp)
+	}
 
+	if changesBreakpoints(req) {
+		c.afterBreakpoints(ctx, answered)
+	}
+}
+
+// afterBreakpoints sends, after a breakpoint change's response (under the
+// event gate), the events that response causes (retracted copies, if it was
+// answered) and brings the editor's view up to date.
+func (c *connection) afterBreakpoints(ctx context.Context, answered bool) {
+	after := c.view.after
+	c.view.after = nil
+
+	if c.view.leaving {
 		return
 	}
 
-	c.respond(ctx, req, resp)
+	if answered {
+		c.sendAll(ctx, after)
+	}
+
+	c.sendAll(ctx, c.reconcile())
 }
 
 // serve runs a request against the session and returns its response.
@@ -267,6 +333,14 @@ func (c *connection) serve(ctx context.Context, req godap.RequestMessage) (godap
 		return c.setFunctionBreakpoints(ctx, r)
 	case *godap.SetExceptionBreakpointsRequest:
 		return c.setExceptionBreakpoints(ctx, r)
+	case *LeaseRequest:
+		return c.lease(r)
+	case *ClientsRequest:
+		info := c.sess.Info()
+
+		return &ClientsResponse{Body: ClientsBody{Clients: clientsEvent(info.Clients).Body.Clients, Lease: info.Lease}}, nil
+	case *BreakpointsRequest:
+		return c.breakpoints(ctx, r)
 	default:
 		return c.sess.Forward(ctx, c.client, req)
 	}
@@ -278,74 +352,126 @@ func (c *connection) exec(ctx context.Context, kind string, thread int) error {
 	return err
 }
 
-// setBreakpoints replaces the connection's client's breakpoints in one
-// file (columns are ignored; lines is used only without breakpoints).
+// setBreakpoints replaces the connection's client's editor breakpoints in
+// one file (lines is used only without breakpoints). Each entry is
+// classified first (docs/adr/0014): the editor's copies of mirrors are
+// answered with the mirror and never become the client's, stale copies are
+// retracted (a negative id, removed after the response), and the rest are
+// the client's own. An editor keys its lists by source path: the client's
+// breakpoints the connection's lists hold under the file's other paths (a
+// symlink) are kept. Under the event gate.
 func (c *connection) setBreakpoints(ctx context.Context, r *godap.SetBreakpointsRequest) (godap.ResponseMessage, error) {
 	a := r.Arguments
 
-	specs := make([]api.BreakpointSpec, 0, len(a.Breakpoints))
-	for _, b := range a.Breakpoints {
-		specs = append(specs, api.BreakpointSpec{Line: b.Line, Condition: b.Condition, HitCondition: b.HitCondition, LogMessage: b.LogMessage})
-	}
-
-	if a.Breakpoints == nil {
+	entries := a.Breakpoints
+	if entries == nil {
 		for _, l := range a.Lines {
-			specs = append(specs, api.BreakpointSpec{Line: l})
+			entries = append(entries, godap.SourceBreakpoint{Line: l})
 		}
 	}
 
-	got, err := c.sess.ReplaceBreakpoints(ctx, c.client, a.Source.Path, specs)
-	out := c.track(bpsKey{path: a.Source.Path}, got)
+	if len(entries) > maxRequestBreakpoints {
+		return nil, tooManyBreakpoints(len(entries))
+	}
+
+	var bps []api.Breakpoint
+
+	path := a.Source.Path
+
+	key, keyErr := session.FileKey(path)
+	if keyErr != nil {
+		key = ""
+	} else {
+		bps = c.sess.Breakpoints("")
+	}
+
+	classes := classify(entries, key, path, c.view, bps, c.client.ID)
+
+	var (
+		specs []api.BreakpointSpec
+		own   []int
+	)
+
+	for i, e := range entries {
+		if classes[i].kind == entryOwn {
+			specs = append(specs, api.BreakpointSpec{Line: e.Line, Condition: e.Condition, HitCondition: e.HitCondition, LogMessage: e.LogMessage})
+			own = append(own, i)
+		}
+	}
+
+	var keep []int
+	if key != "" {
+		keep = c.view.keep(key, path)
+		c.view.sourceSeen(path, key, len(own) > 0)
+	}
+
+	got, err := c.sess.ReplaceBreakpoints(ctx, c.client, path, specs, keep)
+	placed := c.view.track(bpsKey{path: path}, got)
+
+	out := make([]godap.Breakpoint, len(entries))
+	for j, i := range own {
+		if j < len(placed) {
+			out[i] = placed[j]
+		}
+	}
+
+	c.answerCopies(path, entries, classes, out)
+	settle(c.view, key, path, entries, classes)
 
 	return &godap.SetBreakpointsResponse{Body: godap.SetBreakpointsResponseBody{Breakpoints: out}}, err
+}
+
+// tooManyBreakpoints refuses a breakpoint list longer than
+// maxRequestBreakpoints.
+func tooManyBreakpoints(n int) error {
+	return api.NewError(api.CodeInvalidRequest,
+		fmt.Sprintf("%d breakpoints in one request: eyedbg takes at most %d", n, maxRequestBreakpoints), "")
+}
+
+// answerCopies fills out's answers to the entries that aren't the client's
+// own: echoes get their mirror, retracted copies a negative id (and a
+// removed event after the response, with one console line saying why),
+// duplicates the session's refusal.
+func (c *connection) answerCopies(path string, entries []godap.SourceBreakpoint, classes []entryClass, out []godap.Breakpoint) {
+	retracts := 0
+
+	for i, cl := range classes {
+		switch cl.kind {
+		case entryEcho:
+			out[i] = cl.told
+		case entryRetract:
+			id := c.view.nextRetractID()
+			out[i] = retracted(id, entries[i].Line)
+			c.view.after = append(c.view.after, removedEvent(id))
+			retracts++
+		case entryDuplicate:
+			out[i] = godap.Breakpoint{Line: entries[i].Line, Message: duplicateMessage}
+		case entryOwn:
+		}
+	}
+
+	if retracts > 0 {
+		c.view.after = append(c.view.after, consoleLine(fmt.Sprintf(
+			"removed %d leftover copies of other clients' breakpoints from %s (column 1 marks eyedbg's copies)", retracts, path)))
+	}
 }
 
 // setFunctionBreakpoints replaces the connection's client's function
 // breakpoints.
 func (c *connection) setFunctionBreakpoints(ctx context.Context, r *godap.SetFunctionBreakpointsRequest) (godap.ResponseMessage, error) {
+	if len(r.Arguments.Breakpoints) > maxRequestBreakpoints {
+		return nil, tooManyBreakpoints(len(r.Arguments.Breakpoints))
+	}
+
 	specs := make([]api.BreakpointSpec, 0, len(r.Arguments.Breakpoints))
 	for _, b := range r.Arguments.Breakpoints {
 		specs = append(specs, api.BreakpointSpec{Function: b.Name, Condition: b.Condition, HitCondition: b.HitCondition})
 	}
 
 	got, err := c.sess.ReplaceFunctionBreakpoints(ctx, c.client, specs)
-	out := c.track(funcBreakpoints, got)
+	out := c.view.track(funcBreakpoints, got)
 
 	return &godap.SetFunctionBreakpointsResponse{Body: godap.SetFunctionBreakpointsResponseBody{Breakpoints: out}}, err
-}
-
-// track records the breakpoints a request placed under key (got is nil
-// when it placed none: the session had exited), and what its response
-// says of them, and returns them as DAP breakpoints (never nil).
-func (c *connection) track(key bpsKey, got []api.Breakpoint) []godap.Breakpoint {
-	out := make([]godap.Breakpoint, len(got))
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	ids := make([]int, 0, len(got))
-
-	for i := range got {
-		out[i] = dapBreakpoint(&got[i])
-		if got[i].ID != 0 {
-			ids = append(ids, got[i].ID)
-			c.reported[got[i].ID] = out[i]
-		}
-	}
-
-	if got == nil {
-		return out
-	}
-
-	for _, id := range c.bps[key] {
-		if !slices.Contains(ids, id) {
-			delete(c.reported, id)
-		}
-	}
-
-	c.bps[key] = ids
-
-	return out
 }
 
 // setExceptionBreakpoints sets the connection's client's exception mode:
@@ -356,11 +482,75 @@ func (c *connection) setExceptionBreakpoints(ctx context.Context, r *godap.SetEx
 		return nil, err
 	}
 
-	c.mu.Lock()
-	c.excMode = mode
-	c.mu.Unlock()
+	c.presence.ExceptionsSet(mode)
 
 	return &godap.SetExceptionBreakpointsResponse{}, nil
+}
+
+// lease answers eyedbg/lease: the lease commands of the CLI, force
+// included.
+func (c *connection) lease(r *LeaseRequest) (godap.ResponseMessage, error) {
+	a := r.Arguments
+
+	var (
+		info api.LeaseInfo
+		err  error
+	)
+
+	switch a.Action {
+	case LeaseActionStatus:
+		info = c.sess.Lease()
+	case LeaseActionTake:
+		info, err = c.sess.TakeLease(c.client, a.Force)
+	case LeaseActionRelease:
+		info = c.sess.ReleaseLease(c.client)
+	case LeaseActionRequest:
+		info, err = c.sess.RequestLease(c.client, a.Message)
+	case LeaseActionGrant:
+		info, err = c.sess.GrantLease(c.client, a.To, a.Force)
+	case LeaseActionPolicy:
+		if a.Policy == "" {
+			return nil, api.NewError(api.CodeInvalidRequest, CommandLease+" policy needs a policy: free, handoff or human-priority", "")
+		}
+
+		info, err = c.sess.SetLeasePolicy(c.client, a.Policy, a.Force)
+	default:
+		return nil, api.NewError(api.CodeInvalidRequest,
+			CommandLease+" needs an action: status, take, release, request, grant or policy", "")
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &LeaseResponse{Body: LeaseBody{Lease: info}}, nil
+}
+
+// breakpoints answers eyedbg/breakpoints: every client's breakpoints, or
+// removing one as 'eyedbg bp rm ID [--force]' does.
+func (c *connection) breakpoints(ctx context.Context, r *BreakpointsRequest) (godap.ResponseMessage, error) {
+	a := r.Arguments
+
+	switch a.Action {
+	case "", BreakpointsActionList:
+		return &BreakpointsResponse{Body: breakpointsBody(c.sess.Breakpoints(""))}, nil
+	case BreakpointsActionRemove:
+		if a.ID < 1 {
+			return nil, api.NewError(api.CodeInvalidRequest, CommandBreakpoints+" remove needs a breakpoint id from 1", "")
+		}
+
+		removed, _, err := c.sess.RemoveBreakpoint(ctx, c.client, a.ID, a.Force)
+		if err != nil {
+			return nil, err
+		}
+
+		body := breakpointsBody(c.sess.Breakpoints(""))
+		body.Removed = removed
+
+		return &BreakpointsResponse{Body: body}, nil
+	default:
+		return nil, api.NewError(api.CodeInvalidRequest, CommandBreakpoints+" needs an action: list or remove", "")
+	}
 }
 
 // respond writes a successful response; false means the connection broke

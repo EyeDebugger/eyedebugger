@@ -1,5 +1,5 @@
 session s-k3f9 (dotnet) stopped: breakpoint, thread 4242
-  lease: human:ijat (handoff); clients: agent, human:ijat
+  lease: human:ijat (handoff); requested by agent: "I need to step into Total()"; clients: agent, human:ijat (connected)
   at Program.<Main>$() Program.cs:4
     3 | {
   > 4 |     total += i;

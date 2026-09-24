@@ -24,13 +24,19 @@ type replaceItem struct {
 	changed bool
 }
 
-// ReplaceBreakpoints makes client c's breakpoints in file exactly specs
-// (DAP setBreakpoints): c's existing permanent breakpoints there are
+// ReplaceBreakpoints makes client c's editor breakpoints in file exactly
+// specs (DAP setBreakpoints): c's existing permanent breakpoints there are
 // matched to specs by requested line, then by the line the adapter placed
 // them on (an editor re-sends a moved breakpoint there); a match keeps its
-// id (and its hit count unless it changed), the rest of c's are removed and
-// new ones added, in one adapter round trip. Temporary (run-until)
-// breakpoints and other clients' are never touched.
+// id (and its hit count unless it changed) and, like every new one, becomes
+// an editor breakpoint (api.Breakpoint.Editor); c's unmatched editor
+// breakpoints are removed and new ones added, in one adapter round trip.
+// c's other breakpoints (set with the CLI), temporary (run-until) ones and
+// other clients' are never removed (docs/adr/0014), nor are c's editor
+// breakpoints whose ids are in keep: the ones its editor lists under
+// another path of the same file (a symlink), which a list under this path
+// doesn't show. An id in keep that isn't one of c's editor breakpoints in
+// the file has no effect.
 //
 // It returns one breakpoint per spec, in order. A spec that can't be
 // placed — no such file, an invalid hit condition or log message, a
@@ -39,8 +45,8 @@ type replaceItem struct {
 // only for an exited session or an adapter error; after an adapter error
 // the model keeps the change (as [Session.AddBreakpoint] does), and the
 // results are returned with the error.
-func (s *Session) ReplaceBreakpoints(ctx context.Context, c api.Client, file string, specs []api.BreakpointSpec) ([]api.Breakpoint, error) {
-	key, keyErr := breakpointFileKey(file)
+func (s *Session) ReplaceBreakpoints(ctx context.Context, c api.Client, file string, specs []api.BreakpointSpec, keep []int) ([]api.Breakpoint, error) {
+	key, keyErr := FileKey(file)
 	items := make([]replaceItem, len(specs))
 
 	for i, spec := range specs {
@@ -60,7 +66,7 @@ func (s *Session) ReplaceBreakpoints(ctx context.Context, c api.Client, file str
 		return s.replaceResults(items), s.requireLive("setting breakpoints needs a live session")
 	}
 
-	return s.replace(ctx, c, key, items)
+	return s.replace(ctx, c, key, items, keep)
 }
 
 // ReplaceFunctionBreakpoints makes client c's function breakpoints exactly
@@ -84,29 +90,15 @@ func (s *Session) ReplaceFunctionBreakpoints(ctx context.Context, c api.Client, 
 		}
 	}
 
-	return s.replace(ctx, c, funcKey, items)
+	return s.replace(ctx, c, funcKey, items, nil)
 }
 
-// RemoveOwnBreakpoints removes those of ids that are still client c's
-// permanent breakpoints (unknown ids and other clients' are ignored) and
-// returns how many it removed.
-func (s *Session) RemoveOwnBreakpoints(ctx context.Context, c api.Client, ids []int) (int, error) {
-	if len(ids) == 0 {
-		return 0, nil
-	}
-
-	removed, _, err := s.removeBreakpoints(ctx, c.ID, func(b *breakpoint) bool {
-		return b.Owner == c.ID && !b.Temporary && slices.Contains(ids, b.ID)
-	})
-
-	return removed, err
-}
-
-// breakpointFileKey returns the key of file's breakpoints in Session.bps:
-// its path with symlinks resolved, as resolveSpec gives it. For a file
-// that no longer exists, its directory's resolved path plus its name, so
-// the breakpoints of a deleted file can still be cleared.
-func breakpointFileKey(file string) (string, error) {
+// FileKey returns the key of file's breakpoints (api.Breakpoint.File): its
+// path with symlinks resolved, as a breakpoint's file is. For a file that
+// no longer exists, its directory's resolved path plus its name, so the
+// breakpoints of a deleted file can still be cleared. The file must be an
+// absolute path (INVALID_REQUEST otherwise).
+func FileKey(file string) (string, error) {
 	if file == "" {
 		return "", api.NewError(api.CodeInvalidRequest, "breakpoints need a file on disk", "")
 	}
@@ -134,9 +126,9 @@ func (s *Session) requireLive(what string) error {
 	return nil
 }
 
-// replace applies items to c's breakpoints under key, syncs key with the
-// adapter once and logs what changed.
-func (s *Session) replace(ctx context.Context, c api.Client, key string, items []replaceItem) ([]api.Breakpoint, error) {
+// replace applies items to c's breakpoints under key (keeping the ids in
+// keep), syncs key with the adapter once and logs what changed.
+func (s *Session) replace(ctx context.Context, c api.Client, key string, items []replaceItem, keep []int) ([]api.Breakpoint, error) {
 	s.mu.Lock()
 	if s.state == api.StateExited {
 		s.mu.Unlock()
@@ -145,7 +137,7 @@ func (s *Session) replace(ctx context.Context, c api.Client, key string, items [
 	}
 
 	s.refuseLocked(items)
-	gone := s.matchLocked(c.ID, key, items)
+	gone := s.matchLocked(c.ID, key, items, keep)
 	s.mu.Unlock()
 
 	err := s.syncKey(ctx, key)
@@ -199,9 +191,11 @@ func (s *Session) refuseLocked(items []replaceItem) {
 }
 
 // matchLocked matches the accepted items to owner's permanent breakpoints
-// under key, updates the matches, adds the unmatched items and removes
-// owner's unmatched breakpoints, which it returns sorted by id.
-func (s *Session) matchLocked(owner, key string, items []replaceItem) []*breakpoint {
+// under key, updates the matches, adds the unmatched items, marks both as
+// editor breakpoints and removes owner's unmatched editor breakpoints not
+// in keep, which it returns sorted by id. owner's unmatched other
+// breakpoints stay.
+func (s *Session) matchLocked(owner, key string, items []replaceItem, keep []int) []*breakpoint {
 	var old []*breakpoint
 
 	for _, b := range s.bps[key] {
@@ -210,7 +204,12 @@ func (s *Session) matchLocked(owner, key string, items []replaceItem) []*breakpo
 		}
 	}
 
-	gone := matchItems(old, items)
+	kept := make(map[int]bool, len(keep))
+	for _, id := range keep {
+		kept[id] = true
+	}
+
+	gone := slices.DeleteFunc(matchItems(old, items), func(b *breakpoint) bool { return !b.Editor || kept[b.ID] })
 	if len(gone) > 0 {
 		kept := slices.DeleteFunc(slices.Clone(s.bps[key]), func(b *breakpoint) bool { return slices.Contains(gone, b) })
 		if len(kept) == 0 {
@@ -221,9 +220,19 @@ func (s *Session) matchLocked(owner, key string, items []replaceItem) []*breakpo
 	}
 
 	for i := range items {
-		if it := &items[i]; it.refused == nil && it.b == nil {
-			it.b, it.isNew = s.addNewLocked(owner, it.spec), true
+		it := &items[i]
+		if it.refused != nil {
+			continue
 		}
+
+		if it.b == nil {
+			it.b, it.isNew = s.addNewLocked(owner, it.spec), true
+		} else if !it.b.Editor {
+			// A breakpoint c set with the CLI, now in its editor's list.
+			it.changed = true
+		}
+
+		it.b.Editor = true
 	}
 
 	return gone

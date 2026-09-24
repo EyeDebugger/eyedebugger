@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net"
 	"runtime/debug"
-	"slices"
 	"sync"
 	"time"
 
@@ -32,9 +31,16 @@ const (
 	maxRequest = api.MaxMessageSize
 	// readyTimeout bounds initialize's wait for a session still starting.
 	readyTimeout = 30 * time.Second
-	// cleanupTimeout bounds removing what the connection set, once it ends.
-	cleanupTimeout = 10 * time.Second
+	// maxRequestBreakpoints bounds the entries of one setBreakpoints or
+	// setFunctionBreakpoints (INVALID_REQUEST beyond): no editor sends that
+	// many, and each one costs every connection a mirror to reconcile.
+	maxRequestBreakpoints = 1000
 )
+
+// DefaultRestartGrace is how long a client that left with disconnect
+// {restart: true} (an editor's Restart) keeps its lease and editor
+// breakpoints, waiting for it to connect again.
+const DefaultRestartGrace = 10 * time.Second
 
 // Config configures [Serve].
 type Config struct {
@@ -43,6 +49,10 @@ type Config struct {
 	// Client is who every request of the connection acts as.
 	Client api.Client
 	Logger *slog.Logger
+	// RestartGrace is how long the client's leaving waits after a
+	// disconnect asking for a restart (see [DefaultRestartGrace]); 0 leaves
+	// at once.
+	RestartGrace time.Duration
 }
 
 // phase is how far the connection's handshake got.
@@ -57,40 +67,38 @@ const (
 
 // connection is one editor's DAP connection to a session.
 type connection struct {
-	sess   *session.Session
-	client api.Client
-	logger *slog.Logger
-	srv    *dap.Server
-	conn   net.Conn
+	sess     *session.Session
+	client   api.Client
+	presence *session.Presence
+	logger   *slog.Logger
+	srv      *dap.Server
+	conn     net.Conn
 
 	// phase and invalidated are the reader's: set before the follower
-	// starts, never changed after.
+	// starts, never changed after. restart is the reader's too: the
+	// disconnect asked for a restart.
 	phase       phase
 	invalidated bool
+	restart     bool
 
 	// gate orders responses before the events they cause: a request that
 	// changes something holds it from its session call until its response
 	// is written (and its breakpoints are recorded), and the follower holds
-	// it while it translates and writes each event. Lock order: gate, then
-	// mu or the session's locks; neither is held while taking it.
+	// it while it translates and writes each event. It also guards view.
+	// Lock order: gate, then mu or the session's locks; neither is held
+	// while taking it.
 	gate sync.Mutex
+	view *view
 
 	// wg tracks the handlers and the follower.
 	wg sync.WaitGroup
 
-	mu sync.Mutex
-	// bps are the breakpoint ids the connection's setBreakpoints (by
-	// source path) and setFunctionBreakpoints answered last; reported is
-	// what those answers said of each.
-	bps      map[bpsKey][]int
-	reported map[int]godap.Breakpoint
-	// excMode is the exception mode the connection last set.
-	excMode api.ExceptionMode
-	closed  bool
+	mu     sync.Mutex
+	closed bool
 }
 
-// bpsKey keys connection.bps: one source's breakpoints (path, "" for a
-// source without one), or the function breakpoints (function).
+// bpsKey keys view.lists: one source's breakpoints (path, "" for a source
+// without one), or the function breakpoints (function).
 type bpsKey struct {
 	function bool
 	path     string
@@ -101,18 +109,29 @@ var funcBreakpoints = bpsKey{function: true} //nolint:gochecknoglobals // a cons
 
 // Serve speaks DAP on conn (r is conn's buffered reader, holding what was
 // read past the switch) for cfg.Client on cfg.Session until the client
-// disconnects, the connection breaks or ctx ends. Then it waits for every
-// request in flight and, unless ctx ended, removes the breakpoints and the
-// exception mode the connection set. It does not close conn.
+// disconnects, the connection breaks or ctx ends. The connection counts as
+// the client's presence in the session (session.Session.Connect) until
+// Serve waited for every request in flight; when it was the client's last,
+// the session removes its editor breakpoints and releases its lease (after
+// cfg.RestartGrace for a restart). It does not close conn.
 func Serve(ctx context.Context, cfg Config, r *bufio.Reader, conn net.Conn) {
+	logger := cfg.Logger.With(slog.String("session", cfg.Session.ID), slog.String("client", cfg.Client.ID))
+
+	codec := godap.NewCodec()
+	if err := RegisterMessages(codec); err != nil {
+		logger.ErrorContext(ctx, "facade codec", slog.Any("error", err))
+
+		return
+	}
+
 	c := &connection{
 		sess:     cfg.Session,
 		client:   cfg.Client,
-		logger:   cfg.Logger.With(slog.String("session", cfg.Session.ID), slog.String("client", cfg.Client.ID)),
-		srv:      dap.NewServer(r, conn, godap.NewCodec(), maxRequest),
+		presence: cfg.Session.Connect(cfg.Client),
+		logger:   logger,
+		srv:      dap.NewServer(r, conn, codec, maxRequest),
 		conn:     conn,
-		bps:      make(map[bpsKey][]int),
-		reported: make(map[int]godap.Breakpoint),
+		view:     newView(),
 	}
 
 	c.logger.InfoContext(ctx, "facade opened")
@@ -123,10 +142,12 @@ func Serve(ctx context.Context, cfg Config, r *bufio.Reader, conn net.Conn) {
 	cancel()
 	c.wg.Wait()
 
-	if ctx.Err() == nil {
-		c.protect(ctx, func() { c.cleanup(ctx) })
+	grace := time.Duration(0)
+	if c.restart {
+		grace = cfg.RestartGrace
 	}
 
+	c.protect(ctx, func() { c.presence.Leave(ctx, grace) })
 	c.logger.InfoContext(ctx, "facade closed")
 }
 
@@ -245,64 +266,5 @@ func (c *connection) close() {
 	if !c.closed {
 		c.closed = true
 		_ = c.conn.Close()
-	}
-}
-
-// owns reports whether id is one of the connection's breakpoints.
-func (c *connection) owns(id int) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for _, ids := range c.bps {
-		if slices.Contains(ids, id) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// forget drops id from the connection's breakpoints (another client
-// removed it).
-func (c *connection) forget(id int) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for key, ids := range c.bps {
-		c.bps[key] = slices.DeleteFunc(ids, func(i int) bool { return i == id })
-	}
-
-	delete(c.reported, id)
-}
-
-// cleanup removes what the connection set: its breakpoints, and its
-// exception mode, while the session is live.
-func (c *connection) cleanup(ctx context.Context) {
-	if c.sess.Info().State == api.StateExited {
-		return
-	}
-
-	c.mu.Lock()
-	var ids []int
-	for _, list := range c.bps {
-		ids = append(ids, list...)
-	}
-
-	mode := c.excMode
-	c.mu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
-	defer cancel()
-
-	if n, err := c.sess.RemoveOwnBreakpoints(ctx, c.client, ids); err != nil {
-		c.logger.WarnContext(ctx, "remove the facade's breakpoints", slog.String("code", string(api.CodeOf(err))))
-	} else if n > 0 {
-		c.logger.DebugContext(ctx, "removed the facade's breakpoints", slog.Int("count", n))
-	}
-
-	if mode != "" && mode != api.ExceptionsNone {
-		if _, err := c.sess.Exceptions(ctx, c.client, api.ExceptionsParams{Mode: api.ExceptionsNone}); err != nil {
-			c.logger.WarnContext(ctx, "reset the facade's exception mode", slog.String("code", string(api.CodeOf(err))))
-		}
 	}
 }

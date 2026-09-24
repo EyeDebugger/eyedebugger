@@ -23,6 +23,7 @@ security model, major dependencies, licensing and the contribution process.
 | [0011](0011-declarative-adapter-manifests-and-their-trust-model.md) | Declarative adapter manifests and their trust model | accepted |
 | [0012](0012-serve-dap-to-editors-through-eyedbg-dap.md) | Serve DAP to editors through `eyedbg dap` | proposed |
 | [0013](0013-socket-transport-and-native-manifest-languages.md) | A socket transport and three more manifest-only native languages | accepted |
+| [0014](0014-presence-lease-requests-and-shared-breakpoints.md) | Presence, lease requests and sharing breakpoints with editors | proposed |
 
 ## Process
 

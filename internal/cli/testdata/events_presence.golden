@@ -1,0 +1,8 @@
+30  client human:ijat joined
+31  client human:ijat connected (editor)
+32  lease: human:ijat asks agent for it: "let me step through parse()"
+33  lease: agent:b asks agent for it
+34  lease: agent gave it to human:ijat
+35  client human:ijat disconnected (editor)
+36  lease: human:ijat released it (disconnected)
+next: eyedbg events --since 36
