@@ -79,7 +79,7 @@ jobs:
             race: true
           - os: windows-11-arm
             go: "1.27.x"
-            race: false # F16: the race detector doesn't support windows/arm64
+            race: false # the race detector doesn't support windows/arm64
           - os: ubuntu-latest
             go: "1.26.x" # minimum supported, from go.mod
             race: true
@@ -150,11 +150,11 @@ jobs:
             netcoredbg: true
             race: true
           - os: macos-15-intel
-            netcoredbg: false # D7/F16-adjacent: netcoredbg has no osx-x64 release
+            netcoredbg: false # netcoredbg has no osx-x64 release
             race: true
           - os: windows-11-arm
-            netcoredbg: false # D7: netcoredbg has no win-arm64 release
-            race: false # F16: the race detector doesn't support windows/arm64
+            netcoredbg: false # netcoredbg has no win-arm64 release
+            race: false # the race detector doesn't support windows/arm64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     defaults:

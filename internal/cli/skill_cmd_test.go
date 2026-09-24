@@ -159,3 +159,35 @@ func TestSkillInstallRelativeDirResolvedToAbsolute(t *testing.T) {
 		t.Errorf("Path = %q, want %q", got.Path, want)
 	}
 }
+
+// TestExpandHome covers a leading "~" in --dir: bash never expands it after
+// "=", and cmd.exe never expands it, so resolveSkillRoot does it itself.
+func TestExpandHome(t *testing.T) {
+	t.Parallel()
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory: %v", err)
+	}
+
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"~", home},
+		{"~/.codex/skills", filepath.Join(home, ".codex", "skills")},
+		{"relative/dir", "relative/dir"},
+		{"~notauser/skills", "~notauser/skills"},
+	}
+
+	for _, tt := range tests {
+		got, err := expandHome(tt.in)
+		if err != nil {
+			t.Fatalf("expandHome(%q): %v", tt.in, err)
+		}
+
+		if got != tt.want {
+			t.Errorf("expandHome(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}

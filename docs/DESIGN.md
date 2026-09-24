@@ -118,11 +118,13 @@ Design rules:
 - Default: compact text (tuned for LLM reading). `--json`: stable schema, versioned (`"schema": 1`).
 - Budgeting: `--budget` (default ~2k tokens for state dumps) enforced by the daemon via depth, max children per node (default 20), string truncation (default 200 chars), collection summaries (`List<Order> Count=1532 [0..19 shown]`). Truncation is always explicit (`…+1512 more, expand: eyedbg vars --expand orders`).
 - Errors: `{code, message, hint}`; codes are stable (`NO_SESSION`, `NOT_STOPPED`, `LEASE_HELD`, `UNSUPPORTED_BY_ADAPTER`, `SIDE_EFFECTS`, `ATTACH_FAILED`, `NO_TEST_HOST`, `ANCHOR_NOT_FOUND`, `ANCHOR_AMBIGUOUS`, …). Exit codes map to classes: 1 usage (incl. `SIDE_EFFECTS`, `ANCHOR_*`), 2 state, 3 setup (incl. `ATTACH_FAILED`, `NO_TEST_HOST`), 4 adapter (incl. `UNSUPPORTED_BY_ADAPTER`).
-- With no daemon running: a daemon-lifecycle command (`eyedbg daemon status/stop/logs`) reports
-  `DAEMON_NOT_RUNNING` (exit 3). Every session-scoped command (`status`, `bp`, `continue`, …)
-  reports `NO_SESSION` (exit 2) instead — there cannot be a session without a daemon, so
-  `internal/cli/session.go`'s `call()` deliberately folds "no daemon" into "no session"; it never
-  returns `DAEMON_NOT_RUNNING`.
+- With no daemon running and autostart disabled (`EYEDBG_NO_AUTOSTART=1`): a command that needs an
+  *existing* session (`status`, `bp`, `continue`, `stop`, …) reports `NO_SESSION` (exit 2) — there
+  cannot be a session without a daemon, so `internal/cli/session.go`'s `call()` deliberately folds
+  "no daemon" into "no session". A command that *creates* one (`start`, `attach`, `test`) instead
+  reports `DAEMON_NOT_RUNNING` (exit 3), since there it is the daemon itself, not a session, that
+  is missing. `eyedbg daemon status`/`stop` print "eyedbgd is not running" and exit 0 (querying
+  daemon state never fails); `daemon logs` exits 1 (no log file to open).
 - Redaction: values of names matching configurable patterns (`password|secret|token|connectionstring`) masked by default.
 
 ## 6. Daemon
@@ -259,7 +261,7 @@ Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; mor
 
 - netcoredbg eval limits and macOS arm64 stability → SharpDbg as fallback; e2e now runs in CI on all
   6 platforms (milestone 6): .NET on Linux (x64/arm64), macOS (arm64) and Windows (x64) — not on
-  Intel Macs or Windows on Arm, where netcoredbg has no build (D13); Python on all 6.
+  Intel Macs or Windows on Arm, where netcoredbg has no build; Python on all 6.
 - netcoredbg release cadence (~2/yr, single corporate maintainer) → pin versions, keep our own builds.
 - Test debugging flow (`VSTEST_HOST_DEBUG`) and `attach`: validated on Linux, macOS (arm64) and
   Windows (x64) by CI e2e (milestone 6); still unexercised on Intel Macs and Windows on Arm (no

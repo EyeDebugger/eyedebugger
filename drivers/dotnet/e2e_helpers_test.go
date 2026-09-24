@@ -25,8 +25,11 @@ import (
 var appsDir = filepath.Join("..", "..", "testdata", "apps", "dotnet")
 
 // requireE2E skips the test unless the end-to-end tests are enabled, and
-// unless netcoredbg's bundled manifest has a download for this platform
-// (D7): e2e-count=5 in CI only runs where the adapter can actually install.
+// unless netcoredbg's bundled manifest has a download for this platform or
+// netcoredbg can otherwise be found (EYEDBG_NETCOREDBG, already installed,
+// or on PATH): e2e-count=5 in CI only runs where the adapter can actually
+// run, but a self-built netcoredbg on a platform with no official download
+// (osx-x64, win-arm64) can still be validated this way.
 func requireE2E(t *testing.T) {
 	t.Helper()
 
@@ -41,7 +44,9 @@ func requireE2E(t *testing.T) {
 		t.Fatal("no bundled netcoredbg manifest for dotnet (or it has no install section)")
 	}
 
-	_, found := m.Install.Downloads[runtime.GOOS+"/"+runtime.GOARCH]
+	_, hasDownload := m.Install.Downloads[runtime.GOOS+"/"+runtime.GOARCH]
+	_, findErr := adapters.Find(m)
+	found := hasDownload || findErr == nil
 
 	if skip, reason := dotnetE2ESkip(runtime.GOOS, runtime.GOARCH, found); skip {
 		t.Skip(reason)
@@ -49,11 +54,11 @@ func requireE2E(t *testing.T) {
 }
 
 // dotnetE2ESkip decides whether the .NET e2e tests should skip on this
-// platform (D7): found reports whether netcoredbg's bundled manifest has a
-// download for goos/goarch.
+// platform: found reports whether netcoredbg's bundled manifest has a
+// download for goos/goarch, or netcoredbg can otherwise be found.
 func dotnetE2ESkip(goos, goarch string, found bool) (skip bool, reason string) {
 	if !found {
-		return true, fmt.Sprintf("netcoredbg has no download for %s/%s", goos, goarch)
+		return true, fmt.Sprintf("netcoredbg has no download for %s/%s, and none was otherwise found (EYEDBG_NETCOREDBG, installed, or PATH)", goos, goarch)
 	}
 
 	return false, ""
@@ -126,8 +131,8 @@ func buildApp(t *testing.T, dir, name string) string {
 	return dll
 }
 
-// TestDotnetE2ESkip covers dotnetE2ESkip's platform decision (D7): only
-// found decides, goos/goarch merely shape the reason.
+// TestDotnetE2ESkip covers dotnetE2ESkip's platform decision: only found
+// decides, goos/goarch merely shape the reason.
 func TestDotnetE2ESkip(t *testing.T) {
 	t.Parallel()
 
