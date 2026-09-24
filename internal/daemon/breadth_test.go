@@ -17,7 +17,7 @@ import (
 func TestBreadthMethods(t *testing.T) {
 	t.Parallel()
 
-	ts := startServer(t, time.Hour)
+	ts := startServer(t)
 	p := ts.paths
 	snap := startFake(t, p, "", api.LeaseFree, "laps=3")
 	ref := api.SessionRef{SessionID: snap.Session.ID}
@@ -92,7 +92,7 @@ func checkBreadthRun(t *testing.T, p Paths, ref api.SessionRef) {
 func TestAttachAndDetachMethods(t *testing.T) {
 	t.Parallel()
 
-	ts := startServer(t, time.Hour)
+	ts := startServer(t)
 	p := ts.paths
 
 	var snap api.Snapshot
@@ -120,7 +120,7 @@ func TestAttachAndDetachMethods(t *testing.T) {
 func TestBreadthParamsAreChecked(t *testing.T) {
 	t.Parallel()
 
-	ts := startServer(t, time.Hour)
+	ts := startServer(t)
 	p := ts.paths
 	snap := startFake(t, p, humanID, api.LeaseFree)
 
