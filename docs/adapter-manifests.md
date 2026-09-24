@@ -170,6 +170,7 @@ operators and dunder methods still run code.
 | `${args}` | list | the program's arguments (after `--`) |
 | `${cwd}` | string | `--cwd`, else the directory eyedbg was run in, else the program's directory |
 | `${env}` | map | `--env` |
+| `${envList}` | list | `--env` as sorted `"NAME=VALUE"` strings (launch only); for an adapter whose launch `env` argument is an array, not an object |
 | `${stopOnEntry}` | bool | `--stop-on-entry` (always set) |
 | `${runtime}` | string | the interpreter (python runtime only) |
 | `${pid}` | int | the process to attach to (attach only) |

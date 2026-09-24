@@ -6,6 +6,7 @@ package generic
 import (
 	"context"
 	"path/filepath"
+	"slices"
 
 	"github.com/eyedebugger/eyedebugger/internal/adapters"
 	"github.com/eyedebugger/eyedebugger/internal/api"
@@ -43,6 +44,25 @@ func Drivers(reg *adapters.Registry) []session.Driver {
 
 // Name implements session.Driver: the manifest's language.
 func (d *Driver) Name() string { return d.m.LanguageName() }
+
+// envList renders env as "NAME=VALUE" strings sorted by name, for adapters
+// (like lldb-dap <=19) whose launch "env" argument is an array, not an
+// object.
+func envList(env map[string]string) []string {
+	names := make([]string, 0, len(env))
+	for k := range env {
+		names = append(names, k)
+	}
+
+	slices.Sort(names)
+
+	out := make([]string, 0, len(names))
+	for _, k := range names {
+		out = append(out, k+"="+env[k])
+	}
+
+	return out
+}
 
 // Manifest returns the manifest the driver follows.
 func (d *Driver) Manifest() *adapters.Manifest { return d.m }
@@ -86,6 +106,7 @@ func (d *Driver) Prepare(ctx context.Context, spec session.LaunchSpec) (session.
 	vars[adapters.VarArgs] = spec.Args
 	vars[adapters.VarCwd] = cwd
 	vars[adapters.VarEnv] = spec.Env
+	vars[adapters.VarEnvList] = envList(spec.Env)
 	vars[adapters.VarStopOnEntry] = spec.StopOnEntry
 
 	launch.Arguments = adapters.Render(d.m.Launch.Arguments, vars)

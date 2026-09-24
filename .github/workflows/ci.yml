@@ -150,13 +150,16 @@ jobs:
           set -euo pipefail
           # netcoredbg has no osx-x64 release (macos-15-intel) or win-arm64 release
           # (windows-11-arm); the race detector doesn't support windows/arm64 either.
+          # langs is EYEDBG_E2E_LANGS: "" runs every language (Linux and macOS install
+          # lldb-18/xcrun's lldb-dap below); Windows has no lldb-dap story yet, so its
+          # entries exclude c, cpp and rust.
           full='[
-            {"os":"ubuntu-latest","netcoredbg":true,"race":true},
-            {"os":"ubuntu-24.04-arm","netcoredbg":true,"race":true},
-            {"os":"macos-latest","netcoredbg":true,"race":true},
-            {"os":"windows-latest","netcoredbg":true,"race":true},
-            {"os":"macos-15-intel","netcoredbg":false,"race":true},
-            {"os":"windows-11-arm","netcoredbg":false,"race":false}
+            {"os":"ubuntu-latest","netcoredbg":true,"race":true,"langs":""},
+            {"os":"ubuntu-24.04-arm","netcoredbg":true,"race":true,"langs":""},
+            {"os":"macos-latest","netcoredbg":true,"race":true,"langs":""},
+            {"os":"windows-latest","netcoredbg":true,"race":true,"langs":"python,dotnet"},
+            {"os":"macos-15-intel","netcoredbg":false,"race":true,"langs":""},
+            {"os":"windows-11-arm","netcoredbg":false,"race":false,"langs":"python,dotnet"}
           ]'
           reduced=$(jq -c '[.[0]]' <<<"$full")
           if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$EVENT_NAME" = "schedule" ]; then
@@ -180,6 +183,7 @@ jobs:
     env:
       EYEDBG_E2E: "1"
       EYEDBG_E2E_NETWORK: "1"
+      EYEDBG_E2E_LANGS: ${{ matrix.langs }}
       E2E_COUNT: ${{ inputs.e2e-count || '1' }}
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
@@ -199,6 +203,19 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install lldb-dap (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lldb-18
+          echo "EYEDBG_LLDB_DAP=/usr/bin/lldb-dap-18" >> "$GITHUB_ENV"
+          sudo sysctl -w kernel.yama.ptrace_scope=0
+      - name: Find lldb-dap (macOS)
+        if: runner.os == 'macOS'
+        run: echo "EYEDBG_LLDB_DAP=$(xcrun -f lldb-dap)" >> "$GITHUB_ENV"
+      - name: rustc version
+        if: runner.os != 'Windows'
+        run: rustc --version
       - name: Build eyedbg
         run: |
           go build -o "$RUNNER_TEMP/eyedbg-bin/" ./cmd/...
@@ -218,6 +235,9 @@ jobs:
       - name: Doctor (dotnet)
         if: matrix.netcoredbg
         run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters doctor dotnet"
+      - name: Doctor (c)
+        if: runner.os != 'Windows'
+        run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters doctor c"
       - name: e2e
         env:
           RACE: ${{ matrix.race && '-race' || '' }}
