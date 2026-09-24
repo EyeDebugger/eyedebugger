@@ -187,6 +187,8 @@ when to use it, whether it blocks (and for how long), its effect on the debuggee
 and its exit codes (docs/DESIGN.md §4). 'eyedbg help --all' prints every command's help in one
 read; add --json for the same as structured data.
 
+Agents: 'eyedbg skill install' installs a usage guide (SKILL.md) for your agent.
+
 Output is budgeted: variables are cut to --budget tokens (default 2000) and every cut says so.
 
 Several clients can share a session (docs/DESIGN.md §3): each request says who sends it (--as
@@ -243,6 +245,7 @@ func NewEyedbgCommand(info version.Info) *cobra.Command {
 		newStopCommand(info, g),
 		newAdaptersCommand(g),
 		newDaemonCommand(info, g),
+		newSkillCommand(g),
 		newVersionCommand("eyedbg", info, g),
 	)
 	root.AddCommand(newExecCommands(info, g)...)
