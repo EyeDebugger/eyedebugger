@@ -228,7 +228,11 @@ func requireDotnetE2E(t *testing.T) {
 // missing cc or lldb-dap fails the test, it doesn't skip. Like pythonCase,
 // compiling is deferred until EYEDBG_E2E=1 is confirmed. attachSupported is
 // true: a real attach is exercised by drivers/generic's TestCAttach, not
-// here.
+// here. The build directory is resolved with filepath.EvalSymlinks (see
+// drivers/generic/e2e_lldb_test.go's compileApp): on macOS t.TempDir() is
+// under /var/folders, a symlink to /private/var, and lldb-dap's full-path
+// match against the session's resolved breakpoint path would otherwise never
+// bind.
 func cCase(t *testing.T) langCase {
 	t.Helper()
 
@@ -254,7 +258,11 @@ func cCase(t *testing.T) langCase {
 		return lc
 	}
 
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "..", "testdata", "apps", "c", "basic"))); err != nil {
 		t.Fatal(err)
 	}
@@ -279,9 +287,10 @@ func cCase(t *testing.T) langCase {
 // managed install) and connects through schema 1's connect transport
 // (Step 7): its script positions come from testdata/apps/go/basic/main.go's
 // own markers. --program is the package directory (Delve's debug mode
-// builds it), so --cwd is also given: workDir would otherwise take the
-// directory of --program, which is already the package directory here, but
-// naming it explicitly matches how a real invocation would run it. Unlike
+// builds it), so --cwd is also given: workDir would otherwise default to
+// the client's own directory (drivers/generic/launch.go's workDir), not
+// --program's directory, so naming --cwd explicitly pins Delve's build to
+// the package directory, matching how a real invocation would run it. Unlike
 // python and dotnet there is no bundled download to fall back on except
 // Delve's own managed install: a missing go or dlv fails the test, it
 // doesn't skip. attachSupported is true: a real attach is exercised by
