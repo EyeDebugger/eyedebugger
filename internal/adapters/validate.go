@@ -21,7 +21,6 @@ const (
 	sha256Hex      = 64
 	archiveZip     = "zip"
 	archiveTarGz   = "tar.gz"
-	transportStdio = "stdio"
 	// assignOpChars are the characters an evalGuard assignOps entry may use.
 	assignOpChars = "=<>!:+-*/%&|^~@"
 )
@@ -108,11 +107,13 @@ func checkHTTPS(s string) error {
 func (m *Manifest) validateAdapter() error {
 	a := m.Adapter
 
+	if err := validateTransport(a); err != nil {
+		return err
+	}
+
 	switch {
 	case a.ID == "":
 		return fieldError("adapter.id", "is required")
-	case a.Transport != "" && a.Transport != transportStdio:
-		return fieldError("adapter.transport", "%q is not supported yet (only stdio)", a.Transport)
 	case a.Runtime != RuntimeNative && a.Runtime != RuntimePython:
 		return fieldError("adapter.runtime", "%q is not a runtime (\"\" for an executable, or python)", a.Runtime)
 	case a.Entry == "":
@@ -135,6 +136,53 @@ func (m *Manifest) validateAdapter() error {
 
 	if a.Env != "" && !matches(envPattern, a.Env) {
 		return fieldError("adapter.env", "%q must be an upper-case environment variable name", a.Env)
+	}
+
+	return nil
+}
+
+// validateTransport checks adapter.transport and, since transport decides
+// what adapter.args may reference, adapter.args too (checkAdapterArgs).
+func validateTransport(a Adapter) error {
+	switch {
+	case a.Transport != "" && a.Transport != TransportStdio && a.Transport != TransportConnect:
+		return fieldError("adapter.transport", "%q must be stdio or connect (\"\" for stdio)", a.Transport)
+	case a.Transport == TransportConnect && a.Runtime != RuntimeNative:
+		return fieldError("adapter.transport", "connect is only for a native adapter")
+	}
+
+	return checkAdapterArgs(a)
+}
+
+// checkAdapterArgs checks adapter.args' only allowed reference, ${socket}
+// (the connect transport's socket path): required, and the only reference,
+// on connect; refused (it needs transport connect) otherwise.
+func checkAdapterArgs(a Adapter) error {
+	if a.Transport != TransportConnect {
+		for _, arg := range a.Args {
+			if hasVarRef(arg, VarSocket) {
+				return fieldError("adapter.args", "%q needs transport connect", arg)
+			}
+		}
+
+		return nil
+	}
+
+	kinds := map[string]varKind{VarSocket: kindString}
+	hasSocket := false
+
+	for _, arg := range a.Args {
+		if err := checkString(arg, kinds); err != nil {
+			return fieldError("adapter.args", "%v", err)
+		}
+
+		if hasVarRef(arg, VarSocket) {
+			hasSocket = true
+		}
+	}
+
+	if !hasSocket {
+		return fieldError("adapter.args", "connect needs ${socket} in at least one argument")
 	}
 
 	return nil

@@ -330,6 +330,42 @@ func TestPrepareEnvList(t *testing.T) {
 	}
 }
 
+// TestPrepareConnectTransport: a manifest with adapter.transport "connect"
+// gets launch.SocketArgs rendering adapter.args with ${socket}, and no
+// launch.AdapterArgs (session.Launch: "AdapterArgs is then unused").
+func TestPrepareConnectTransport(t *testing.T) {
+	t.Parallel()
+
+	m := &adapters.Manifest{
+		Name: "toydbg", Version: "1", Adapter: adapters.Adapter{
+			ID: "toy", Transport: adapters.TransportConnect, Entry: "toydbg", Env: "TOYDBG", Path: true,
+			Args: []string{"dap", "--client-addr=unix:${socket}"},
+		},
+		Language: &adapters.Language{Name: "toy"},
+		Launch:   &adapters.Template{Require: []string{"program"}, Arguments: map[string]any{"program": "${program}"}},
+	}
+	d := New(m)
+	d.find = func(*adapters.Manifest) (adapters.Location, error) {
+		return adapters.Location{Path: "/usr/bin/toydbg", Source: adapters.FoundPath}, nil
+	}
+
+	launch, err := d.Prepare(t.Context(), session.LaunchSpec{Program: appFile(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if launch.Adapter != "/usr/bin/toydbg" || launch.AdapterArgs != nil || launch.SocketArgs == nil {
+		t.Fatalf("launch = %+v, want a socket adapter with no AdapterArgs", launch)
+	}
+
+	got := launch.SocketArgs("/tmp/eyedbg-dap-x/dap.sock")
+	want := []string{"dap", "--client-addr=unix:/tmp/eyedbg-dap-x/dap.sock"}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("SocketArgs = %v, want %v", got, want)
+	}
+}
+
 func TestDrivers(t *testing.T) {
 	t.Parallel()
 

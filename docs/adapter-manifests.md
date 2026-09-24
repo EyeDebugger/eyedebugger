@@ -79,10 +79,10 @@ being half-read. Top level:
 | field | | |
 |---|---|---|
 | `id` | required | the DAP `adapterID` sent in `initialize` |
-| `transport` | | `stdio` (the default; nothing else yet) |
+| `transport` | | `stdio` (the default) or `connect` (below); native adapters only |
 | `runtime` | | `""` (a native executable) or `python` |
 | `entry` | required | native: an executable name (`.exe` is added on Windows) or an absolute path; python: a slash path relative to the package root, no `..` (debugpy: `debugpy/adapter`) |
-| `args` | | literal arguments |
+| `args` | | literal arguments; on `connect`, `${socket}` (below) |
 | `environment` | | `{NAME: value}` added to the adapter's environment |
 | `env` | native | an environment variable naming the executable, e.g. `EYEDBG_NETCOREDBG` |
 | `path` | native | also look `entry` up on PATH |
@@ -91,6 +91,22 @@ being half-read. Top level:
 
 A native adapter is found by `env`, then an absolute `entry`, then the installed copy, then PATH
 (if `path`).
+
+### Transports
+
+Most adapters speak DAP on their own stdin and stdout (`transport: "stdio"`, the default). An
+adapter that can only listen on a socket and dial back in (Delve's `dlv dap`, never stdio) uses
+`transport: "connect"`: eyedbg creates a fresh private directory (mode 0700, only you can enter
+it), listens on a Unix socket inside it, starts the adapter with `adapter.args` rendered with
+`${socket}` (the socket's path) in place of `AdapterArgs`' usual literal arguments, accepts exactly
+one connection, then closes the listener and removes the directory — before, during and after the
+session, so nothing is left behind or reachable by another user. `connect` needs `${socket}` in at
+least one argument and no other reference; it is refused with `runtime` other than `""` (native
+adapters only), and `${socket}` in a `stdio` adapter's `args` is refused too ("needs transport
+connect"). Delve: `"args": ["dap", "--client-addr=unix:${socket}"]`. A TCP transport is not offered:
+a socket anyone on the machine could connect to and drive the debugger as you would break the
+manifest trust model (ADR 0011); a listen-direction transport (the adapter listens, eyedbg dials
+in) is future work for adapters that host their own debuggee (Ruby's `rdbg`, follow-up F1).
 
 `python` (for `runtime: python`; the adapter runs as `<interpreter> <root>/<entry>`, and the
 interpreter's path is `${runtime}` in templates):
@@ -175,6 +191,9 @@ operators and dunder methods still run code.
 | `${runtime}` | string | the interpreter (python runtime only) |
 | `${pid}` | int | the process to attach to (attach only) |
 | `${opt.NAME}` | the option's type | the option's value, else its default |
+
+`${socket}` (string, the connect transport's socket path) is a separate reference, for
+`adapter.args` only, not `launch`/`attach.arguments` (§ Transports above).
 
 Launch templates may use all but `${pid}`; attach templates `${pid}`, `${runtime}` and options
 (their defaults). Rules:

@@ -43,3 +43,16 @@ func UserManifest(entry, attached string) map[string]any {
 
 	return m
 }
+
+// UserManifestConnect is [UserManifest] on the connect transport: the fake
+// adapter dials the socket eyedbg listens on ([ConnectArg]) instead of
+// speaking DAP on stdio. attach is not supported (no manifest needs both
+// yet).
+func UserManifestConnect(entry string) map[string]any {
+	m := UserManifest(entry, "")
+	adapter, _ := m["adapter"].(map[string]any)
+	adapter["transport"] = "connect"
+	adapter["args"] = []any{noTestsArg, ConnectArg("${socket}")}
+
+	return m
+}
