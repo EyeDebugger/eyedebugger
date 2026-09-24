@@ -36,7 +36,11 @@ passes through, then once more if nothing catches it); uncaught is "uncaught" an
 (one stop, where it leaves your code; frame 0 is where it was raised); with none an uncaught
 exception ends the program with its traceback in the output. Other adapters (including c, cpp and
 rust's lldb-dap) are checked the same way, by the filters their manifest declares; a mode with no
-filter for the adapter is UNSUPPORTED_BY_ADAPTER (exit 4), naming the filters it has.
+filter for the adapter is UNSUPPORTED_BY_ADAPTER (exit 4), naming the filters it has: cpp's all is
+lldb-dap's "cpp_throw" (any throw, caught or not), and it has no uncaught-only filter; c and rust
+have no exception filters at all. For go (Delve): both all and uncaught map to the same two
+filters, "unrecovered-panic" and "runtime-fatal-throw" (Delve has no separate filter for a
+recovered panic); continuing past an unrecovered panic exits the program with code 2.
 
 At an exception stop, 'eyedbg status' shows the exception's type, message, first stack lines and
 inner exceptions; 'eyedbg eval $exception' has the rest. Returns at once.` + sessionHelp,
