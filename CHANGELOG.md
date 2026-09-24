@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-24
+
 ### Added
 
 - Ship (milestone 6): `eyedbg skill print` (writes SKILL.md to stdout) and `eyedbg skill install [--dir ROOT] [--force]` (installs it to a skills root, Claude Code's personal one by default). CLI end-to-end tests drive the real `eyedbg`/`eyedbgd` binaries against the sample apps (`internal/e2e/`), covering autostart, session status, run-until, `vars`, `eval` (including `SIDE_EFFECTS`), lease contention, an unsupported `attach`, logpoints, `events` and daemon shutdown, on both a fake in-process adapter and real Python/.NET ones; `drivers/dotnet` and `drivers/generic` keep the driver-level e2e coverage for `eyedbg test` and a real `attach`. `task e2e` (`COUNT=5` before merging an e2e change) and `task lint:workflows` (actionlint). CI now runs on 6 OS/architecture targets (Linux, macOS, Windows × x64/arm64) with a real end-to-end job driving .NET (netcoredbg) and Python (debugpy) — .NET is skipped on Intel Macs and Windows on Arm, where netcoredbg has no build — plus a workflow-linting job.
@@ -62,4 +64,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A response over 1 MiB (e.g. `output` after a lot of program output) dropped the connection.
 - Stopping a session that is also ending by itself no longer races over its end reason.
 
-[Unreleased]: https://github.com/EyeDebugger/eyedebugger/commits/main
+[Unreleased]: https://github.com/EyeDebugger/eyedebugger/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/EyeDebugger/eyedebugger/releases/tag/v0.1.0

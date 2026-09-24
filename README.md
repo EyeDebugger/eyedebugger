@@ -4,9 +4,8 @@
 
 [![CI](https://github.com/EyeDebugger/eyedebugger/actions/workflows/ci.yml/badge.svg)](https://github.com/EyeDebugger/eyedebugger/actions/workflows/ci.yml)
 
-> **Alpha, unreleased.** Debug .NET (netcoredbg) and Python (debugpy) programs on Linux, macOS and
-> Windows (x64 and arm64; .NET not on Intel Macs or Windows on Arm). No release yet: build from
-> source.
+> **Alpha (v0.1).** Debug .NET (netcoredbg) and Python (debugpy) programs on Linux, macOS and
+> Windows (x64 and arm64; .NET not on Intel Macs or Windows on Arm). Install below.
 
 ## Why
 
@@ -53,21 +52,24 @@ adapter; more languages.
 
 ## Install
 
-Requires Go 1.26+. No published release yet — build from a clone:
+Download an archive for your platform from
+[Releases](https://github.com/EyeDebugger/eyedebugger/releases) (`gh attestation verify <archive>
+-R EyeDebugger/eyedebugger` checks it was built by this repo's release workflow), or with Go 1.26+:
 
 ```sh
-task build            # or: go build -trimpath -o bin/ ./cmd/...
+go install github.com/eyedebugger/eyedebugger/cmd/eyedbg@latest github.com/eyedebugger/eyedebugger/cmd/eyedbgd@latest
 ```
 
-Keep `eyedbg` and `eyedbgd` together on `PATH`. Then, once per machine:
+Keep `eyedbg` and `eyedbgd` together on `PATH` (`go install` puts both in `$(go env GOPATH)/bin`).
+Then, once per machine:
 
 ```sh
 eyedbg adapters install netcoredbg   # or: python
 eyedbg adapters doctor
 ```
 
-`task snapshot` (GoReleaser) builds release-shaped archives into `dist/` locally, for testing the
-packaging; there is no `go install …@latest` yet since the repo is private.
+From a clone: `task build` (or `go build -trimpath -o bin/ ./cmd/...`); `task snapshot` builds
+release-shaped archives into `dist/`.
 
 ## Quickstart for agents
 
