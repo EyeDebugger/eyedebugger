@@ -338,8 +338,8 @@ func TestDrivers(t *testing.T) {
 		names = append(names, d.Name())
 	}
 
-	if !slices.Equal(names, []string{"python"}) {
-		t.Fatalf("Drivers = %v, want [python] (dotnet is built in)", names)
+	if !slices.Equal(names, []string{"python", "c", "cpp", "rust"}) {
+		t.Fatalf("Drivers = %v, want [python c cpp rust] (dotnet is built in)", names)
 	}
 
 	if _, ok := Drivers(bundled())[0].(session.Attacher); !ok {

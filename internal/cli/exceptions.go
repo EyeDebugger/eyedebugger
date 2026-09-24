@@ -34,8 +34,9 @@ Code); an exception that would end the program always stops it, even with none. 
 (debugpy): all is its "raised" and "uncaught" filters (it stops in every frame the exception
 passes through, then once more if nothing catches it); uncaught is "uncaught" and "userUnhandled"
 (one stop, where it leaves your code; frame 0 is where it was raised); with none an uncaught
-exception ends the program with its traceback in the output. An adapter without such a filter
-is UNSUPPORTED_BY_ADAPTER (exit 4), naming the filters it has.
+exception ends the program with its traceback in the output. Other adapters (including c, cpp and
+rust's lldb-dap) are checked the same way, by the filters their manifest declares; a mode with no
+filter for the adapter is UNSUPPORTED_BY_ADAPTER (exit 4), naming the filters it has.
 
 At an exception stop, 'eyedbg status' shows the exception's type, message, first stack lines and
 inner exceptions; 'eyedbg eval $exception' has the rest. Returns at once.` + sessionHelp,
