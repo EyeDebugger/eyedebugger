@@ -100,9 +100,9 @@ func (d *Driver) Prepare(ctx context.Context, spec session.LaunchSpec) (session.
 // drivers/dotnet's attachHint), these typically attach through the OS's own
 // mechanism, restricted by default on both Linux and macOS.
 const nativeAttachHint = "the process must be yours, not already under a debugger, and the OS must allow it: " +
-	"on Linux check /proc/sys/kernel/yama/ptrace_scope (0 or 1 allows attaching to your own processes), " +
-	"on macOS the adapter needs the task_for_pid entitlement (install Xcode's command line tools, " +
-	"or run as root)"
+	"on Linux /proc/sys/kernel/yama/ptrace_scope must be 0 (1, Ubuntu's default, only allows a debugger " +
+	"to attach to its own child processes; `sudo sysctl kernel.yama.ptrace_scope=0`), " +
+	"on macOS the adapter needs the task_for_pid entitlement (install Xcode's command line tools)"
 
 // PrepareAttach implements session.Attacher. Without an attach template
 // the manifest's language can't attach: UNSUPPORTED_BY_ADAPTER, with the

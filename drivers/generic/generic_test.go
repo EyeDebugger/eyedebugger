@@ -242,7 +242,8 @@ func TestPrepareAttach(t *testing.T) {
 
 	launch, err := d.PrepareAttach(t.Context(), api.AttachSpec{PID: 42})
 	if err != nil || launch.Request != session.RequestAttach || launch.PID != 42 || launch.Arguments["processId"] != 42 ||
-		launch.Arguments["python"] != "/usr/bin/python3.13" || launch.SideEffects == nil || launch.ExceptionFilters == nil {
+		launch.Arguments["python"] != "/usr/bin/python3.13" || launch.SideEffects == nil || launch.ExceptionFilters == nil ||
+		launch.AttachHint != "" {
 		t.Fatalf("PrepareAttach = %+v, %v", launch, err)
 	}
 }

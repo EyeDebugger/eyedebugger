@@ -302,7 +302,7 @@ func (sf *startFlags) params(args []string, dash int) (api.StartParams, error) {
 		LaunchSpec: api.LaunchSpec{
 			Project: absPath(project), Program: absPath(sf.program), Cwd: absPath(sf.cwd),
 			Args: progArgs, NoBuild: sf.noBuild, StopOnEntry: sf.stopOnEntry, ClientDir: workDir(),
-			VirtualEnv: os.Getenv("VIRTUAL_ENV"),
+			VirtualEnv: absPath(os.Getenv("VIRTUAL_ENV")),
 		},
 	}
 
