@@ -16,6 +16,8 @@
   (https://golangci-lint.run/docs/welcome/install/local/). Older versions report different issues.
 - Optional: goreleaser v2 for `task snapshot`.
 - `task test:race` needs cgo and a C compiler (on Windows, MinGW-w64 gcc).
+- For `task e2e`: the .NET 10 SDK and `eyedbg adapters install netcoredbg`; Python 3.10+ and
+  `eyedbg adapters install debugpy`.
 - Without Task, use the raw commands below.
 
 ## Everyday commands
@@ -26,12 +28,18 @@
 | `task test` | `go test -shuffle=on ./...` |
 | `task test:race` | `go test -race -shuffle=on ./...` |
 | `task test:golden` | `EYEDBG_UPDATE_GOLDEN=1 go test ./...` |
+| `task e2e` | `EYEDBG_E2E=1 go test -count=1 -p 1 -timeout 40m ./drivers/... ./internal/e2e/...` |
 | `task lint` | `golangci-lint run` |
+| `task lint:workflows` | `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12` |
 | `task fmt` | `golangci-lint fmt` |
 | `task vuln` | `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...` |
 | `task tidy:check` | `go mod tidy -diff` |
 | `task build:cross` | cross-compile all 6 os/arch targets, `CGO_ENABLED=0` |
 | `task ci` | runs the checks CI runs |
+
+A change to `drivers/...` or `internal/e2e` needs a clean `task e2e COUNT=5` run before it merges —
+these tests spawn real processes and daemons, so run them repeatedly to catch flakes a single pass
+would miss.
 
 ## Commits and PR titles
 

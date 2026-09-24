@@ -13,6 +13,9 @@ tests (docs/DESIGN.md §12-13). Go tooling ignores `testdata/`.
 - `python/basic`: the Python e2e app (`drivers/generic`, `TestPython*`); run it
   as `python app.py loop|raise|child|wait`.
 
+`dotnet/console` and `python/basic` are also used by `internal/e2e`'s CLI-level end-to-end test
+(`TestCLI`), which drives `eyedbg`/`eyedbgd` as real binaries against them behind `EYEDBG_E2E=1`.
+
 Lines the tests look up end in a `// marker: NAME` comment (`# marker: NAME`
 in Python), so editing an app doesn't break line numbers in the tests. Tests copy an app to a temporary
 directory before building it (`copyApp` in `drivers/dotnet`), so builds never
