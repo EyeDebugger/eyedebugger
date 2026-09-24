@@ -6,7 +6,6 @@ package dotnet_test
 import (
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,9 +34,7 @@ func newApp(t *testing.T) string {
 // locals, changed locals, expand, eval, stepping, conditional run-until,
 // output and exit.
 func TestDebugConsoleApp(t *testing.T) {
-	if os.Getenv(envE2E) != "1" {
-		t.Skip("set " + envE2E + "=1 (needs the .NET SDK and 'eyedbg adapters install netcoredbg')")
-	}
+	requireE2E(t)
 
 	dir := newApp(t)
 	src := filepath.Join(dir, "Program.cs")
@@ -92,9 +89,7 @@ func TestDebugConsoleApp(t *testing.T) {
 // breakpoint ownership, one shared line, the handoff lease and the event
 // log, through netcoredbg.
 func TestTwoClients(t *testing.T) {
-	if os.Getenv(envE2E) != "1" {
-		t.Skip("set " + envE2E + "=1 (needs the .NET SDK and 'eyedbg adapters install netcoredbg')")
-	}
+	requireE2E(t)
 
 	agentE2E := api.Client{ID: "agent:e2e", Kind: api.KindAgent, Name: "e2e"}
 	humanE2E := api.Client{ID: "human:e2e", Kind: api.KindHuman, Name: "e2e"}

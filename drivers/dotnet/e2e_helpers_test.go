@@ -6,28 +6,57 @@ package dotnet_test
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/eyedebugger/eyedebugger/drivers/dotnet"
+	"github.com/eyedebugger/eyedebugger/internal/adapters"
 	"github.com/eyedebugger/eyedebugger/internal/session"
 )
 
 // appsDir holds the sample apps (testdata/apps/dotnet at the repo root).
 var appsDir = filepath.Join("..", "..", "testdata", "apps", "dotnet")
 
-// requireE2E skips the test unless the end-to-end tests are enabled.
+// requireE2E skips the test unless the end-to-end tests are enabled, and
+// unless netcoredbg's bundled manifest has a download for this platform
+// (D7): e2e-count=5 in CI only runs where the adapter can actually install.
 func requireE2E(t *testing.T) {
 	t.Helper()
 
 	if os.Getenv(envE2E) != "1" {
 		t.Skip("set " + envE2E + "=1 (needs the .NET SDK and 'eyedbg adapters install netcoredbg')")
 	}
+
+	reg := adapters.Load(adapters.LoadConfig{Bundled: adapters.Bundled(), Builtin: []string{dotnet.Language}})
+
+	m := reg.Language(dotnet.Language)
+	if m == nil || m.Install == nil {
+		t.Fatal("no bundled netcoredbg manifest for dotnet (or it has no install section)")
+	}
+
+	_, found := m.Install.Downloads[runtime.GOOS+"/"+runtime.GOARCH]
+
+	if skip, reason := dotnetE2ESkip(runtime.GOOS, runtime.GOARCH, found); skip {
+		t.Skip(reason)
+	}
+}
+
+// dotnetE2ESkip decides whether the .NET e2e tests should skip on this
+// platform (D7): found reports whether netcoredbg's bundled manifest has a
+// download for goos/goarch.
+func dotnetE2ESkip(goos, goarch string, found bool) (skip bool, reason string) {
+	if !found {
+		return true, fmt.Sprintf("netcoredbg has no download for %s/%s", goos, goarch)
+	}
+
+	return false, ""
 }
 
 // copyApp copies sample app name to a temporary directory (without bin and
@@ -95,6 +124,40 @@ func buildApp(t *testing.T, dir, name string) string {
 	}
 
 	return dll
+}
+
+// TestDotnetE2ESkip covers dotnetE2ESkip's platform decision (D7): only
+// found decides, goos/goarch merely shape the reason.
+func TestDotnetE2ESkip(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		goos, goarch string
+		found        bool
+		wantSkip     bool
+	}{
+		{goos: "darwin", goarch: "amd64", found: false, wantSkip: true},
+		{goos: "darwin", goarch: "amd64", found: true, wantSkip: false},
+		{goos: "windows", goarch: "arm64", found: false, wantSkip: true},
+		{goos: "windows", goarch: "arm64", found: true, wantSkip: false},
+		{goos: "linux", goarch: "amd64", found: false, wantSkip: true},
+		{goos: "linux", goarch: "amd64", found: true, wantSkip: false},
+	}
+
+	for _, tt := range tests {
+		skip, reason := dotnetE2ESkip(tt.goos, tt.goarch, tt.found)
+		if skip != tt.wantSkip {
+			t.Errorf("dotnetE2ESkip(%q, %q, %v) skip = %v, want %v", tt.goos, tt.goarch, tt.found, skip, tt.wantSkip)
+		}
+
+		if skip && !strings.Contains(reason, tt.goos+"/"+tt.goarch) {
+			t.Errorf("dotnetE2ESkip(%q, %q, %v) reason = %q, want it to name the platform", tt.goos, tt.goarch, tt.found, reason)
+		}
+
+		if !skip && reason != "" {
+			t.Errorf("dotnetE2ESkip(%q, %q, %v) reason = %q, want empty when not skipping", tt.goos, tt.goarch, tt.found, reason)
+		}
+	}
 }
 
 // newManager returns a manager with the .NET driver, stopped at cleanup.
