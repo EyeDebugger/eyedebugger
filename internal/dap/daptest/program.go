@@ -214,10 +214,21 @@ func (p *program) step() {
 	p.stopAt(next, reason)
 }
 
-func (p *program) pause() {
-	if p.state == stateRunning {
-		p.stopAt(p.line, "pause")
+// pause stops a running program with reason pause, or, asSignal, as a
+// SIGSTOP signal stop (reason exception).
+func (p *program) pause(asSignal bool) {
+	if p.state != stateRunning {
+		return
 	}
+
+	if !asSignal {
+		p.stopAt(p.line, "pause")
+
+		return
+	}
+
+	p.state, p.thrown = stateStopped, false
+	p.emit("stopped", godap.StoppedEventBody{Reason: reasonException, Description: "signal SIGSTOP", ThreadId: threadID, AllThreadsStopped: true})
 }
 
 // exec runs line l, or stops at its throw when the "all" filter is on; it

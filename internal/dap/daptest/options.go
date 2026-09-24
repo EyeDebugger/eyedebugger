@@ -51,6 +51,12 @@ type Options struct {
 	// connecting, until it is killed.
 	ExitBeforeConnect bool `json:"exitBeforeConnect,omitempty"`
 	HangBeforeConnect bool `json:"hangBeforeConnect,omitempty"`
+	// SetVariableResult answers setVariable with the new value under
+	// "result" instead of "value", as lldb-dap 18-20 do.
+	SetVariableResult bool `json:"setVariableResult,omitempty"`
+	// PauseAsSignal reports a pause as a stop with reason exception and
+	// description "signal SIGSTOP", as lldb-dap does on Linux.
+	PauseAsSignal bool `json:"pauseAsSignal,omitempty"`
 }
 
 // DefaultCaps are the capabilities the fake adapter declares by default:
