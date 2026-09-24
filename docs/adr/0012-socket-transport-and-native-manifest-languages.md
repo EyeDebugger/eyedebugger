@@ -74,8 +74,11 @@ End-to-end language selection:
 ## Decision Outcome
 
 **`adapter.transport` gains `"connect"`.** eyedbg creates a fresh, private directory
-(`os.MkdirTemp`, entered by no one but the user — Unix mode bits, and on Windows the same ACL trust
-already relied on for the daemon's own socket, docs/DESIGN.md §14 "AF_UNIX everywhere"), listens on
+(`os.MkdirTemp` under `os.TempDir()`, entered by no one but the user — Unix mode bits; on Windows,
+`os.TempDir()` follows `%TMP%`/`%TEMP%`, which Go's `Mkdir` cannot force a private ACL onto
+regardless of the requested mode, so the directory instead goes under `os.UserCacheDir()`'s
+`eyedbg` subdirectory, the same directory the daemon's own runtime directory already lives in and
+trusts, docs/DESIGN.md §14 "AF_UNIX everywhere"), listens on
 a Unix socket inside it, starts the adapter with `adapter.args` rendered against one new reference,
 `${socket}` (its path), accepts exactly one connection, then closes the listener and removes the
 directory — on every return path, so a failed or hung adapter leaves nothing running or reachable.
