@@ -63,6 +63,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lldb-dap 18–20, `set` reports the new value (their `setVariable` answer carries it as
   `"result"`: the session re-reads the variable), and on Linux a pause stops with reason `pause`,
   not `exception` (`signal SIGSTOP`).
+- Releases include the VS Code extension as `eyedebugger_X.Y.Z_vscode.vsix`, listed in
+  `checksums.txt` and covered by the provenance attestation; the extension's version follows
+  eyedbg's. CI keeps each run's VSIX as the `vsix` artifact. A publish workflow for the VS Code
+  Marketplace and Open VSX runs after each release and does nothing until its secrets are
+  configured (`docs/MAINTAINING.md`).
 
 ### Changed
 

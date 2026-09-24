@@ -3,7 +3,12 @@ name: Release
 # Publishes a GitHub release for a pushed version tag: archives for 6
 # OS/architecture targets, checksums.txt, and a build-provenance attestation
 # (`gh attestation verify <archive> -R EyeDebugger/eyedebugger`). Release
-# notes are the tag's section of CHANGELOG.md.
+# notes are the tag's section of CHANGELOG.md. The release also carries the
+# VS Code extension as eyedebugger_X.Y.Z_vscode.vsix, listed in checksums.txt
+# and covered by the same attestation; it's built in the unprivileged `vsix`
+# job below, never beside the `release` job's write and id-token permissions.
+# publish-extension.yml then publishes it to the VS Code Marketplace and Open
+# VSX, doing nothing until the user configures its secrets (docs/MAINTAINING.md).
 on:
   push:
     tags: ["v*"]
@@ -17,10 +22,59 @@ concurrency:
 env:
   GO_VERSION: "1.27.x" # keep equal to ci.yml
   GORELEASER_VERSION: v2.18.2 # keep equal to ci.yml
+  NODE_VERSION: "24.x" # keep equal to ci.yml
 
 jobs:
+  # npm code runs here, never beside the release job's write and id-token permissions.
+  vsix:
+    name: vsix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The tag is the extension's version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          want="${TAG#v}"
+          got=$(node -p 'require("./extensions/vscode/package.json").version')
+          if [ "$got" != "$want" ]; then
+            echo "::error::extensions/vscode/package.json has version $got; tag $TAG needs $want (bump it in the release commit, docs/MAINTAINING.md)"
+            exit 1
+          fi
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - name: Enable pnpm (corepack)
+        run: |
+          corepack enable
+          cd extensions/vscode && pnpm --version
+      - name: Install dependencies
+        working-directory: extensions/vscode
+        run: pnpm install --frozen-lockfile
+      - name: Package
+        working-directory: extensions/vscode
+        run: pnpm run package
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vsix
+          path: extensions/vscode/out/eyedbg.vsix
+          if-no-files-found: error
+          retention-days: 7
+
   release:
     name: release
+    needs: vsix
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -37,6 +91,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
           cache: false # never restore a cache that a PR could have written
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: vsix
+          path: extensions/vscode/out
       - name: Release notes from CHANGELOG.md
         env:
           TAG: ${{ github.ref_name }}
@@ -62,3 +120,14 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-checksums: dist/checksums.txt
+
+  publish-extension:
+    name: publish extension
+    needs: release
+    permissions:
+      contents: read # download the release's assets
+      attestations: read # verify the VSIX's provenance
+    # zizmor wants `$/`; actionlint v1.7.12 can't parse it yet (rhysd/actionlint#711).
+    uses: ./.github/workflows/publish-extension.yml # zizmor: ignore[self-repository]
+    with:
+      tag: ${{ github.ref_name }}

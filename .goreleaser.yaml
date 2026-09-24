@@ -1,6 +1,8 @@
 # GoReleaser v2 configuration. Docs: https://goreleaser.com/customization/
-# Publishing is disabled (release.disable) until the project cuts its first release;
-# use `goreleaser release --snapshot --clean` for a local dry run.
+# Releases run from .github/workflows/release.yml, on a pushed tag. The VS Code
+# extension's VSIX must be built first (`task ext:package`) so extra_files below
+# find it; use `goreleaser release --snapshot --clean` (or `task snapshot`) for a
+# local dry run.
 version: 2
 
 project_name: eyedebugger
@@ -48,6 +50,9 @@ archives:
 checksum:
   name_template: checksums.txt
   algorithm: sha256
+  extra_files: # the VS Code extension, built before goreleaser runs (release.yml `vsix` job; task snapshot)
+    - glob: ./extensions/vscode/out/eyedbg.vsix
+      name_template: "{{ .ProjectName }}_{{ .Version }}_vscode.vsix"
 
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot+{{ .ShortCommit }}"
@@ -60,3 +65,6 @@ release:
     owner: EyeDebugger
     name: eyedebugger
   prerelease: auto # tags like v0.2.0-rc.1 are marked pre-release
+  extra_files: # keep equal to checksum.extra_files
+    - glob: ./extensions/vscode/out/eyedbg.vsix
+      name_template: "{{ .ProjectName }}_{{ .Version }}_vscode.vsix"

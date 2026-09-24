@@ -14,7 +14,7 @@
   https://taskfile.dev/installation/.
 - **golangci-lint v2.13.2**, installed as a binary
   (https://golangci-lint.run/docs/welcome/install/local/). Older versions report different issues.
-- Optional: goreleaser v2 for `task snapshot`.
+- Optional: goreleaser v2 for `task snapshot` (which also packages the extension: Node and pnpm).
 - `task test:race` needs cgo and a C compiler (on Windows, MinGW-w64 gcc).
 - For `task e2e`: the .NET 10 SDK and `eyedbg adapters install netcoredbg`; Python 3.10+ and
   `eyedbg adapters install debugpy`; a C/C++ compiler (`cc`/`c++`), rustc, and lldb-dap (on PATH,

@@ -332,7 +332,7 @@
     "lint": "biome ci .",
     "fmt": "biome check --write .",
     "test": "node esbuild.mjs unit && node --test out/unit/all.test.js",
-    "package": "node esbuild.mjs extension && vsce package --no-dependencies --out out/eyedbg.vsix && node scripts/check-vsix.mjs",
+    "package": "node esbuild.mjs extension && node -e \"require('node:fs').mkdirSync('out',{recursive:true})\" && vsce package --no-dependencies --out out/eyedbg.vsix && node scripts/check-vsix.mjs",
     "test:integration": "node esbuild.mjs extension && node esbuild.mjs integration && node out/integration/runner.js"
   },
   "devDependencies": {
