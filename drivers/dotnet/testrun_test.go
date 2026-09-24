@@ -125,6 +125,76 @@ func TestUsesMTP(t *testing.T) {
 	}
 }
 
+func TestUsesXunitV3(t *testing.T) {
+	t.Parallel()
+
+	ref := func(pkg string) string {
+		return `<Project><ItemGroup><PackageReference Include="` + pkg + `" Version="3.2.2" /></ItemGroup></Project>`
+	}
+
+	tests := []struct {
+		name      string
+		project   string
+		buildRoot string // Directory.Build.props above the project; "" for none
+		want      bool
+	}{
+		{name: "xunit.v3", project: ref("xunit.v3"), want: true},
+		{name: "core, any case", project: ref("XUnit.V3.Core"), want: true},
+		{name: "mtp flavor", project: ref("xunit.v3.mtp-v2"), want: true},
+		{name: "attributes split over lines", project: "<PackageReference\n  Version=\"3.2.2\"\n  Include=\"xunit.v3\" />", want: true},
+		{name: "in Directory.Build.props", project: ref("Moq"), buildRoot: ref("xunit.v3"), want: true},
+		{name: "xunit v2", project: ref("xunit") + ref("xunit.runner.visualstudio")},
+		{name: "only the assertions", project: ref("xunit.v3.assert")},
+		{name: "a version, not a reference", project: ref("Moq"), buildRoot: `<PackageVersion Include="xunit.v3" Version="3.2.2" />`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			project := filepath.Join(root, "tests", "tests.csproj")
+
+			if err := os.Mkdir(filepath.Dir(project), 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.WriteFile(project, []byte(tt.project), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if tt.buildRoot != "" {
+				if err := os.WriteFile(filepath.Join(root, "Directory.Build.props"), []byte(tt.buildRoot), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if got := usesXunitV3(project); got != tt.want {
+				t.Fatalf("usesXunitV3 = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestShellArg(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct{ in, want string }{
+		{in: "/src/tests/tests.csproj", want: "/src/tests/tests.csproj"},
+		{in: `C:\src\tests.csproj`, want: `C:\src\tests.csproj`},
+		{in: "/src/Project Lunegit/t.csproj", want: "'/src/Project Lunegit/t.csproj'"},
+		{in: "/src/it's/t.csproj", want: `'/src/it'\''s/t.csproj'`},
+		{in: "/src/$HOME/t.csproj", want: "'/src/$HOME/t.csproj'"},
+		{in: "", want: "''"},
+	}
+
+	for _, tt := range tests {
+		if got := shellArg(tt.in); got != tt.want {
+			t.Errorf("shellArg(%q) = %s, want %s", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestHostPID(t *testing.T) {
 	t.Parallel()
 

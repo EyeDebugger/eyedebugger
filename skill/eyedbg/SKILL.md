@@ -62,7 +62,8 @@ eyedbg stop                                       # always, when done
 - `eyedbg start dotnet` builds the project in the current directory (`--project P`,
   `--program app.dll --no-build`). Program arguments go after `--`.
 - A failing test: `eyedbg test dotnet 'Adds' --bp 'CalculatorTests.cs@"Assert.Equal"'` (VSTest;
-  ends with `dotnet test`'s exit code).
+  ends with `dotnet test`'s exit code). xUnit v3 is refused: run the test app with
+  `eyedbg start dotnet --project tests --bp ... -- -method '*Adds'`.
 - `eyedbg attach dotnet --pid N` (your own processes); `eyedbg stop` then detaches.
 - Eval can't run lambdas or LINQ; property getters run anyway. `$exception` at an exception stop.
   An unhandled exception always stops. No .NET on Intel Macs or Windows on Arm.

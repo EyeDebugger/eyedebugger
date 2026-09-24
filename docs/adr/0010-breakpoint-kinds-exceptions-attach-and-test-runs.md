@@ -105,7 +105,8 @@ Getters, indexers and operators are invisible to the check; the help says so.
 session, attaches to the first `Process Id: N` it prints, and ends the session with `dotnet
 test`'s exit code; `stop` kills the group. The session exists (state starting) while it builds.
 Microsoft.Testing.Platform projects are refused with `NO_TEST_HOST` and a hint to debug the test
-app with `start`.
+app with `start`. (Amended 2026-09-24: xUnit v3 projects are refused the same way. Their VSTest
+adapter runs the tests in a child process of the test host, so a run passed without stopping.)
 
 **Anchors resolve once.** `FILE@"TEXT"` names the one line holding TEXT (whitespace runs as one
 space, case-sensitive); several lines are `ANCHOR_AMBIGUOUS`, none `ANCHOR_NOT_FOUND` with up to

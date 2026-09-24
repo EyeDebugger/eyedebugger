@@ -24,8 +24,10 @@ output. With --bp, test waits (up to --timeout, on top of building) for the firs
 session ends when 'dotnet test' exits, with its exit code (0: all passed, 1: a test failed).
 'eyedbg stop' kills the run; detaching is refused.
 
-Microsoft.Testing.Platform projects (global.json "test": {"runner": ...}) are refused with
-NO_TEST_HOST (exit 3): debug the test app with 'eyedbg start' instead. A build error is
+Microsoft.Testing.Platform projects (global.json "test": {"runner": ...}) and xUnit v3 projects
+(which run their tests outside the test host) are refused with NO_TEST_HOST (exit 3): debug the
+test app with 'eyedbg start' instead, e.g. 'eyedbg start dotnet --project tests -- -method
+"*Adds"'. A build error is
 BUILD_FAILED, a run that ends without a test host (e.g. no test matches the filter) NO_TEST_HOST,
 both with the end of the output.
 
