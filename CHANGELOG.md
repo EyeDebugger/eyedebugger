@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-24
+
 ### Fixed
 
 - `eyedbg test dotnet` refuses xUnit v3 projects with `NO_TEST_HOST` and a hint to debug the test
@@ -72,5 +74,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A response over 1 MiB (e.g. `output` after a lot of program output) dropped the connection.
 - Stopping a session that is also ending by itself no longer races over its end reason.
 
-[Unreleased]: https://github.com/EyeDebugger/eyedebugger/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/EyeDebugger/eyedebugger/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/EyeDebugger/eyedebugger/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/EyeDebugger/eyedebugger/releases/tag/v0.1.0
