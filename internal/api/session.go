@@ -60,6 +60,11 @@ type LaunchSpec struct {
 	// the program's working directory to it (like running the program
 	// from there).
 	ClientDir string `json:"clientDir,omitempty"`
+	// VirtualEnv is the caller's $VIRTUAL_ENV, if set: a Python driver
+	// tries it as an interpreter before a project venv. The daemon's own
+	// environment is not used for this, since it is fixed at daemon
+	// start and would miss whichever venv the caller has active.
+	VirtualEnv string `json:"virtualEnv,omitempty"`
 }
 
 // StartParams are the params of [MethodSessionStart].

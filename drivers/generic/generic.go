@@ -72,7 +72,7 @@ func (d *Driver) Prepare(ctx context.Context, spec session.LaunchSpec) (session.
 		programDir = filepath.Dir(spec.Program)
 	}
 
-	in := adapters.PythonInput{Cwd: cwd, ProgramDir: programDir}
+	in := adapters.PythonInput{Cwd: cwd, ProgramDir: programDir, VirtualEnv: spec.VirtualEnv}
 	if o := d.interpreterOption(); o != "" {
 		in.Interpreter = clientPath(opts[o], spec.ClientDir)
 	}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"slices"
@@ -151,8 +152,8 @@ func newAdaptersDoctorCommand(g *globals) *cobra.Command {
 		Long: `Check what debugging needs on this machine and say what to fix. For dotnet: that netcoredbg
 is found (and where from: EYEDBG_NETCOREDBG, installed, or PATH) and runs, and that the dotnet
 host is found and reports its version. For python: which interpreter a start from this directory
-would use (EYEDBG_PYTHON, else a .venv or venv here, else python3, python or 'py -3' on PATH;
-start's --opt python=PATH overrides them) and which debugpy it runs (the one 'eyedbg adapters
+would use (EYEDBG_PYTHON, else your active $VIRTUAL_ENV, else a .venv or venv here, else python3,
+python or 'py -3' on PATH; start's --opt python=PATH overrides them) and which debugpy it runs (the one 'eyedbg adapters
 install debugpy' downloaded, else the interpreter's own). Other adapters are checked the same
 way, by their manifests.
 
@@ -365,7 +366,7 @@ func (d doctor) hostCheck(ctx context.Context) doctorCheck {
 // pythonCheck finds the interpreter and package a Python adapter runs on,
 // as a start in the current directory would.
 func (d doctor) pythonCheck(ctx context.Context, m *adapters.Manifest) doctorCheck {
-	rt, err := d.resolvePython(ctx, m, adapters.PythonInput{Cwd: d.workDir})
+	rt, err := d.resolvePython(ctx, m, adapters.PythonInput{Cwd: d.workDir, VirtualEnv: os.Getenv("VIRTUAL_ENV")})
 	if err != nil {
 		c := doctorCheck{Name: m.Name, Detail: err.Error(), Missing: errors.Is(err, adapters.ErrNotInstalled)}
 		if apiErr, ok := errors.AsType[*api.Error](err); ok {

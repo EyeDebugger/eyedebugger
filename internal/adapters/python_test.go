@@ -128,6 +128,44 @@ func TestResolvePython(t *testing.T) {
 			probed: p("/env/py"),
 		},
 		{
+			name: "VIRTUAL_ENV wins over a project venv",
+			sys: fakeSystem{
+				files:   map[string]bool{p("/venv/pyvenv.cfg"): true, p("/w/.venv/pyvenv.cfg"): true, installed: true},
+				pythons: map[string]probeResult{p("/venv/bin/python"): bare(p("/venv/bin/python"), "3.11.4")},
+			},
+			in:     PythonInput{Cwd: p("/w"), VirtualEnv: p("/venv")},
+			want:   Runtime{Exe: p("/venv/bin/python"), Version: "3.11.4", Source: PythonFromVirtualEnv, Root: p("/data/debugpy/1.8.22"), RootSource: RootInstalled, ModuleVersion: "1.8.22"},
+			probed: p("/venv/bin/python"),
+		},
+		{
+			name: "env wins over VIRTUAL_ENV",
+			sys: fakeSystem{
+				files:   map[string]bool{p("/env/py"): true, p("/venv/pyvenv.cfg"): true, installed: true},
+				env:     map[string]string{"EYEDBG_PYTHON": p("/env/py")},
+				pythons: map[string]probeResult{p("/env/py"): bare(p("/env/real"), "3.13.5")},
+			},
+			in:     PythonInput{VirtualEnv: p("/venv")},
+			want:   Runtime{Exe: p("/env/real"), Version: "3.13.5", Source: PythonFromEnv, Root: p("/data/debugpy/1.8.22"), RootSource: RootInstalled, ModuleVersion: "1.8.22"},
+			probed: p("/env/py"),
+		},
+		{
+			name:   "a VIRTUAL_ENV without pyvenv.cfg doesn't fall back",
+			sys:    fakeSystem{path: map[string]string{"python3": p("/bin/python3")}},
+			in:     PythonInput{VirtualEnv: p("/venv")},
+			code:   api.CodeAdapterMissing,
+			errHas: "$VIRTUAL_ENV=" + p("/venv") + " has no pyvenv.cfg",
+		},
+		{
+			name: "a VIRTUAL_ENV another user owns is refused",
+			sys: fakeSystem{
+				files: map[string]bool{p("/venv/pyvenv.cfg"): true}, foreign: map[string]bool{p("/venv"): true},
+				path: map[string]string{"python3": p("/bin/python3")},
+			},
+			in:     PythonInput{VirtualEnv: p("/venv")},
+			code:   api.CodeAdapterMissing,
+			errHas: "$VIRTUAL_ENV=" + p("/venv") + " is not safe to run",
+		},
+		{
 			name: "venv in the cwd before the program's",
 			sys: fakeSystem{
 				files:   map[string]bool{p("/w/venv/pyvenv.cfg"): true, p("/w/app/.venv/pyvenv.cfg"): true, installed: true},

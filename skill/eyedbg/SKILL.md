@@ -72,9 +72,9 @@ eyedbg stop                                       # always, when done
 - `eyedbg adapters install debugpy` once (or have debugpy in your environment).
 - `eyedbg start python --program app.py -- ARGS`; a module:
   `eyedbg start python --opt module=pytest -- -x tests/test_x.py`.
-- The interpreter is `--opt python=PATH`, `EYEDBG_PYTHON`, the project's `.venv`/`venv` (on Windows
-  only inside your profile; a project elsewhere needs `--opt python=PATH`), else `python3`/`python`/
-  `py -3`. It runs where you ran eyedbg.
+- The interpreter is `--opt python=PATH`, `EYEDBG_PYTHON`, your active `$VIRTUAL_ENV`, the
+  project's `.venv`/`venv` (on Windows only inside your profile; a project elsewhere needs
+  `--opt python=PATH`), else `python3`/`python`/`py -3`. It runs where you ran eyedbg.
 - `func:NAME` matches the bare function name. `attach` is not supported. Child processes aren't
   debugged.
 
