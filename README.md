@@ -79,7 +79,7 @@ eyedbg adapters doctor
 ```
 
 From a clone: `task build` (or `go build -trimpath -o bin/ ./cmd/...`); `task snapshot` builds
-release-shaped archives into `dist/`.
+release-shaped archives (and the VSIX's checksum) into `dist/`.
 
 ## Quickstart for agents
 

@@ -25,3 +25,24 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+
+  # The VS Code extension's dev dependencies (pnpm lockfile). Pins that follow the
+  # supported VS Code floor stay manual (docs/adr/0015-the-vs-code-extension.md).
+  - package-ecosystem: npm
+    directory: /extensions/vscode
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7 # = pnpm-workspace.yaml minimumReleaseAge
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      extension:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "@types/vscode" # equals engines.vscode
+      - dependency-name: "@types/node" # Node 20 = VS Code 1.100's Electron
+        update-types: ["version-update:semver-major"]
+      - dependency-name: typescript # 7 is the native port; ADR 0015 chose 6
+        update-types: ["version-update:semver-major"]

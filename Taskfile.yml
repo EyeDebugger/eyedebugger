@@ -103,8 +103,9 @@ tasks:
       - goreleaser check
 
   snapshot:
-    desc: Build release archives locally into ./dist without publishing (needs goreleaser v2)
+    desc: Build release archives and the VSIX's checksum into ./dist without publishing (needs goreleaser v2, Node and pnpm)
     cmds:
+      - task: ext:package
       - goreleaser release --snapshot --clean
 
   clean:

@@ -1,0 +1,192 @@
+name: Publish extension
+
+# Publishes a release's VSIX (eyedebugger_X.Y.Z_vscode.vsix) to the VS Code
+# Marketplace and Open VSX. release.yml calls it after each release; to
+# publish a past release: gh workflow run publish-extension.yml --ref vX.Y.Z -f tag=vX.Y.Z
+# Each registry's job only prints a notice until its secret is set in its
+# environment (docs/MAINTAINING.md). Pre-release tags are never published.
+# The VSIX must match checksums.txt and carry release.yml's provenance for
+# that tag before anything is uploaded.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The release tag (vX.Y.Z)
+        type: string
+        required: true
+      dry-run:
+        description: Download and verify only; publish nothing
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag (vX.Y.Z)
+        type: string
+        required: true
+      dry-run:
+        description: Download and verify only; publish nothing
+        type: boolean
+        default: false
+
+permissions: {}
+
+env:
+  NODE_VERSION: "24.x" # keep equal to ci.yml
+
+jobs:
+  marketplace:
+    name: VS Code Marketplace
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: vscode-marketplace
+    permissions:
+      contents: read # download the release's assets
+      attestations: read # verify the VSIX's provenance
+    defaults:
+      run:
+        shell: bash
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    steps:
+      - name: Decide
+        id: gate
+        env:
+          TAG: ${{ inputs.tag }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          HAS_SECRET: ${{ secrets.VSCE_PAT != '' }}
+          SECRET_NAME: VSCE_PAT
+          ENVIRONMENT: vscode-marketplace
+        run: |
+          set -euo pipefail
+          re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$'
+          if [[ ! "$TAG" =~ $re ]]; then echo "::error::the tag input is not vMAJOR.MINOR.PATCH[-PRERELEASE]"; exit 1; fi  # never echo the raw input
+          version="${TAG#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          skip() { echo "::notice title=Not published::$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; echo "go=false" >> "$GITHUB_OUTPUT"; echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          [[ "$version" == *-* ]] && skip "$TAG is a pre-release: not published (docs/MAINTAINING.md)"
+          [ "$DRY_RUN" = true ] && { echo "go=true" >> "$GITHUB_OUTPUT"; echo "publish=false" >> "$GITHUB_OUTPUT"; echo "::notice::dry run: download and verify only"; exit 0; }
+          [ "$HAS_SECRET" = true ] || skip "$SECRET_NAME isn't set in environment $ENVIRONMENT: nothing published (docs/MAINTAINING.md)"
+          echo "go=true" >> "$GITHUB_OUTPUT"; echo "publish=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.gate.outputs.go == 'true'
+        with:
+          persist-credentials: false
+      - name: Download and verify the VSIX
+        id: vsix
+        if: steps.gate.outputs.go == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/release"; name="eyedebugger_${VERSION}_vscode.vsix"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$dir" --pattern "$name" --pattern checksums.txt
+          cd "$dir"
+          awk -v n="$name" '$2 == n' checksums.txt > vsix.sha256
+          [ "$(wc -l < vsix.sha256)" -eq 1 ] || { echo "::error::checksums.txt has no single line for $name"; exit 1; }
+          sha256sum --check --strict vsix.sha256
+          gh attestation verify "$name" --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
+          got=$(unzip -p "$name" extension/package.json | jq -r .version)
+          [ "$got" = "$VERSION" ] || { echo "::error::the VSIX says version $got, not $VERSION"; exit 1; }
+          echo "path=$dir/$name" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.gate.outputs.go == 'true' && steps.gate.outputs.publish == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - name: Enable pnpm (corepack)
+        if: steps.gate.outputs.go == 'true' && steps.gate.outputs.publish == 'true'
+        run: |
+          corepack enable
+          cd extensions/vscode && pnpm --version
+      - name: Install dependencies
+        if: steps.gate.outputs.go == 'true' && steps.gate.outputs.publish == 'true'
+        working-directory: extensions/vscode
+        run: pnpm install --frozen-lockfile
+      - name: Publish
+        if: steps.gate.outputs.publish == 'true'
+        working-directory: extensions/vscode
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          VSIX: ${{ steps.vsix.outputs.path }}
+        run: ./node_modules/.bin/vsce publish --packagePath "$VSIX" --skip-duplicate
+
+  open-vsx:
+    name: Open VSX
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: open-vsx
+    permissions:
+      contents: read # download the release's assets
+      attestations: read # verify the VSIX's provenance
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Decide
+        id: gate
+        env:
+          TAG: ${{ inputs.tag }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          HAS_SECRET: ${{ secrets.OVSX_PAT != '' }}
+          SECRET_NAME: OVSX_PAT
+          ENVIRONMENT: open-vsx
+        run: |
+          set -euo pipefail
+          re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$'
+          if [[ ! "$TAG" =~ $re ]]; then echo "::error::the tag input is not vMAJOR.MINOR.PATCH[-PRERELEASE]"; exit 1; fi  # never echo the raw input
+          version="${TAG#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          skip() { echo "::notice title=Not published::$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; echo "go=false" >> "$GITHUB_OUTPUT"; echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          [[ "$version" == *-* ]] && skip "$TAG is a pre-release: not published (docs/MAINTAINING.md)"
+          [ "$DRY_RUN" = true ] && { echo "go=true" >> "$GITHUB_OUTPUT"; echo "publish=false" >> "$GITHUB_OUTPUT"; echo "::notice::dry run: download and verify only"; exit 0; }
+          [ "$HAS_SECRET" = true ] || skip "$SECRET_NAME isn't set in environment $ENVIRONMENT: nothing published (docs/MAINTAINING.md)"
+          echo "go=true" >> "$GITHUB_OUTPUT"; echo "publish=true" >> "$GITHUB_OUTPUT"
+      # keep equal to the marketplace job's Download and verify step
+      - name: Download and verify the VSIX
+        id: vsix
+        if: steps.gate.outputs.go == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/release"; name="eyedebugger_${VERSION}_vscode.vsix"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$dir" --pattern "$name" --pattern checksums.txt
+          cd "$dir"
+          awk -v n="$name" '$2 == n' checksums.txt > vsix.sha256
+          [ "$(wc -l < vsix.sha256)" -eq 1 ] || { echo "::error::checksums.txt has no single line for $name"; exit 1; }
+          sha256sum --check --strict vsix.sha256
+          gh attestation verify "$name" --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
+          got=$(unzip -p "$name" extension/package.json | jq -r .version)
+          [ "$got" = "$VERSION" ] || { echo "::error::the VSIX says version $got, not $VERSION"; exit 1; }
+          echo "path=$dir/$name" >> "$GITHUB_OUTPUT"
+      - name: Publish
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+          VSIX: ${{ steps.vsix.outputs.path }}
+        run: |
+          set -euo pipefail
+          curl --version
+          out="$RUNNER_TEMP/ovsx.json"
+          code=$(printf '%s' "$OVSX_PAT" | curl --silent --show-error --max-time 300 \
+            --url-query 'token@-' --header 'Content-Type: application/octet-stream' \
+            --data-binary "@$VSIX" --output "$out" --write-out '%{http_code}' \
+            https://open-vsx.org/api/-/publish)
+          error=$(jq -r '.error // empty' "$out" 2>/dev/null | tr -d '\r\n' || true)
+          if [[ "$code" == 2?? && -z "$error" ]]; then
+            warning=$(jq -r '.warning // empty' "$out" | tr -d '\r\n'); [ -z "$warning" ] || echo "::warning::Open VSX: $warning"
+            echo "Published $(jq -r '"\(.namespace).\(.name) \(.version)"' "$out")"
+          elif [[ "$error" == *" is already published." ]]; then
+            echo "::notice::$error"
+          else
+            echo "::error::Open VSX answered HTTP $code: ${error:-no error message}"; exit 1
+          fi

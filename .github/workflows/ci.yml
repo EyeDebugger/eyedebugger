@@ -327,6 +327,43 @@ jobs:
         working-directory: extensions/vscode
         run: pnpm run test:integration
 
+  # Builds the VSIX the same way release.yml's `vsix` job does, and keeps it as
+  # a run artifact, so every CI run proves the extension packages and the
+  # `goreleaser` job below can prove it lands in checksums.txt.
+  vsix:
+    name: vsix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - name: Enable pnpm (corepack)
+        run: |
+          corepack enable
+          cd extensions/vscode && pnpm --version
+      - name: Install dependencies
+        working-directory: extensions/vscode
+        run: pnpm install --frozen-lockfile
+      - name: Package
+        working-directory: extensions/vscode
+        run: pnpm run package
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vsix
+          path: extensions/vscode/out/eyedbg.vsix
+          if-no-files-found: error
+          retention-days: 14
+
   workflows:
     name: workflows
     runs-on: ubuntu-latest
@@ -367,6 +404,7 @@ jobs:
 
   goreleaser:
     name: goreleaser (snapshot, no publish)
+    needs: vsix
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -379,6 +417,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
           cache: false # release-shaped job: never restore a cache that a PR could have written
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: vsix
+          path: extensions/vscode/out
       - name: Check configuration
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
@@ -391,12 +433,20 @@ jobs:
           distribution: goreleaser
           version: ${{ env.GORELEASER_VERSION }}
           args: release --snapshot --clean
+      - name: The VSIX is in checksums.txt
+        run: |
+          set -euo pipefail
+          want=$(sha256sum extensions/vscode/out/eyedbg.vsix | cut -d' ' -f1)
+          line=$(grep -E '^[0-9a-f]{64}  eyedebugger_.+_vscode\.vsix$' dist/checksums.txt)
+          if [ "$(printf '%s\n' "$line" | wc -l)" -ne 1 ] || [ "${line%% *}" != "$want" ]; then
+            echo "::error::dist/checksums.txt doesn't list the VSIX with its sha256"; cat dist/checksums.txt; exit 1
+          fi
 
   # Single required status check for branch protection; add new jobs to `needs`.
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, test, build, e2e-matrix, e2e, extension, workflows, vuln, goreleaser]
+    needs: [lint, test, build, e2e-matrix, e2e, extension, vsix, workflows, vuln, goreleaser]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

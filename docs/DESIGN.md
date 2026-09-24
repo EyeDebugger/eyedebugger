@@ -317,8 +317,9 @@ Built (P2-M3, ADR 0015):
   `eyedbg events` phrases them. Every string from a session is rendered as plain text; nothing in a
   notification can become a link.
 
-Next: packaging and publishing the extension (VSIX in releases, Marketplace and Open VSX gated on
-secrets) (P2-M4), then views of the activity and the clients (P2-M5).
+Releases carry the VSIX (checksummed, attested); a workflow publishes it to the Marketplace and
+Open VSX once the maintainer adds the secrets (ADR 0015 addendum). Next: views of the activity and
+the clients (P2-M5).
 
 ## 10. Agent integration
 

@@ -218,5 +218,36 @@ consecutive clean runs before merging an extension change), the VSIX file-list c
 
 ## More Information
 
-Supersedes nothing; builds on ADR 0012 and ADR 0014. Publishing (Marketplace and Open VSX,
-secrets-gated) and the activity and clients views come later.
+Supersedes nothing; builds on ADR 0012 and ADR 0014. Publishing is covered by the addendum below;
+the activity and clients views come later.
+
+## Addendum (2026-09-25, P2-M4): releases and publishing
+
+- **Lockstep version, guarded.** `package.json` `version` == the release tag, bumped by hand in the
+  release commit; the release's `vsix` job fails before building or publishing if they differ.
+  Rejected: deriving the version from the tag at package time (`vsce package <version>
+  --no-update-package-json`) — the repo would no longer say which version it is.
+- **Pre-release tags** get a VSIX built and attached, but publishing is skipped on both registries
+  with a notice — the Marketplace rejects semver pre-release versions outright.
+- **npm code never runs in a privileged job.** `release.yml` gets an unprivileged `vsix` job
+  (`contents: read`, no caches) that builds the VSIX and hands it to `release` as a run artifact.
+  Rejected: building inside `release` or a goreleaser `before` hook, beside `contents: write`/`id-token: write`.
+- **goreleaser** gets `release.extra_files` and `checksum.extra_files` for the VSIX, so it lands in
+  `checksums.txt` and inherits the existing build-provenance attestation for free.
+- **Publish trigger is `workflow_call` (from `release.yml`) plus `workflow_dispatch`**, not
+  `on: release: published` (releases made with `GITHUB_TOKEN` never fire that event). Rejected:
+  `workflow_run` (a zizmor `dangerous-triggers` finding), `gh workflow run` from the release job
+  (needs `actions: write`), and a separate long-lived PAT just to make `release` events fire.
+- **One job per registry, secrets environment-scoped** (`vscode-marketplace`, `open-vsx`). A
+  `Decide` step checks `secrets.X != ''` as a boolean and gates every later step; with no secret,
+  nothing is downloaded, installed or published, only a notice is printed.
+- **Verify before publishing**: the VSIX's checksum against the release's `checksums.txt`, the
+  release's build-provenance attestation for that exact tag, and the VSIX's own
+  `extension/package.json` version — all before either registry sees the file.
+- **Open VSX via its REST API with curl, not an `ovsx` npm dependency.** `ovsx` 1.2.0 would add
+  +223 locked packages, a second `vsce`, and a native `keytar` install script to deny, just to run
+  one documented `POST .../api/-/publish`. The token goes to curl on stdin (`--url-query
+  'token@-'`), never in argv or a file; the `open-vsx` job has no checkout and no Node.
+- **Marketplace via the lockfile-pinned `vsce`** (`./node_modules/.bin/vsce publish`, not `pnpm
+  exec vsce publish`, avoiding a zizmor `use-trusted-publishing` false positive). **Azure DevOps
+  global PATs retire 2026-12-01**; moving to Entra ID (`--azure-credential`) is a follow-up.

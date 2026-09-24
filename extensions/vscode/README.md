@@ -5,6 +5,18 @@ debugger that agents drive from the shell; this extension lets you join the agen
 session in VS Code — see where it stopped, its breakpoints, what it does — and take or ask for
 control. Or start a session yourself with F5 and let the agent join you.
 
+## Install
+
+Download `eyedebugger_X.Y.Z_vscode.vsix` from a [GitHub
+release](https://github.com/EyeDebugger/eyedebugger/releases), then:
+
+```sh
+code --install-extension eyedebugger_X.Y.Z_vscode.vsix
+```
+
+Optionally check its provenance: `gh attestation verify eyedebugger_X.Y.Z_vscode.vsix -R
+EyeDebugger/eyedebugger`.
+
 ## Requirements
 
 - `eyedbg` with editor support (`eyedbg version --json` lists `dap.collab`), on your `PATH` or set
