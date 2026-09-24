@@ -24,16 +24,19 @@ Dependabot handles only action SHAs and `go.mod`; everything else is a manual bu
   used by `task lint:workflows`) — bump both.
 - `zizmor`: `ci.yml` `env` (`ZIZMOR_VERSION`) only; it isn't wired into any task, run it by hand
   (see Workflow security rules below).
-- Runner labels (the `test`/`e2e` job matrices' `os:` values): bump when GitHub renames or retires
-  one (e.g. `-latest` moving to a new default).
+- Runner labels (the `test` job matrix's `os:` values, and the `full`/`reduced` `os:` values in the
+  `e2e-matrix` job's script): bump when GitHub renames or retires one (e.g. `-latest` moving to a
+  new default).
 
 ## CI cost while private
 
 Private-repo runners are billed per minute past the included quota: Linux x64 $0.006, Linux
 arm64 $0.005, Windows x64/arm64 $0.010, macOS $0.062 — **macOS costs about 10× Linux x64**. The
-full 6-platform matrix (`test` and `e2e`, two of the six rows each are macOS and Windows) runs on
-every push to `main`. Watch usage under Settings → Billing while the repo is private; making it
-public removes the cost (hosted runners are free for public repos).
+`test` job's full 6-platform matrix (two of the six rows are macOS, two are Windows) runs on every
+push to `main`, but `e2e` runs on `ubuntu-latest` only on push/pull_request; its full 6-platform
+matrix runs only on `workflow_dispatch` and the weekly `schedule`. Watch usage under Settings →
+Billing while the repo is private; making it public removes the cost (hosted runners are free for
+public repos).
 
 ## Workflow security rules
 

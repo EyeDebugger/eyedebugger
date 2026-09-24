@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CI's `e2e` job runs on `ubuntu-latest` only for `push`/`pull_request`; the full 6-platform matrix
+  now runs only on `workflow_dispatch` and the weekly `schedule` (the `test` job's unit-test matrix
+  is unchanged). The matrix is computed by a small `e2e-matrix` job from `github.event_name` so
+  `e2e` always has at least one entry and is never itself skipped, which would otherwise fail
+  `ci-ok`.
 - CI's unit-test matrix grew from Linux/macOS/Windows to 6 OS/architecture targets (adds `ubuntu-24.04-arm`, `macos-15-intel`, `windows-11-arm`; the race detector is skipped on windows/arm64).
 - README replaces "there is nothing to install yet" with an Install section (build from a clone, install adapters) and a Quickstart for agents.
 - netcoredbg's pinned release, digests, lookup order and launch arguments moved from Go code into its bundled manifest (`internal/adapters/manifests/netcoredbg.json`); install, doctor and start behave as before (an install whose archive lacks the adapter now also removes what it extracted).

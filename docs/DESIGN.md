@@ -259,13 +259,14 @@ Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; mor
 
 ## 14. Risks & open questions
 
-- netcoredbg eval limits and macOS arm64 stability → SharpDbg as fallback; e2e now runs in CI on all
-  6 platforms (milestone 6): .NET on Linux (x64/arm64), macOS (arm64) and Windows (x64) — not on
+- netcoredbg eval limits and macOS arm64 stability → SharpDbg as fallback; e2e runs in CI on
+  `ubuntu-latest` on every push, and on all 6 platforms (milestone 6) on `workflow_dispatch` and
+  the weekly schedule: .NET on Linux (x64/arm64), macOS (arm64) and Windows (x64) — not on
   Intel Macs or Windows on Arm, where netcoredbg has no build; Python on all 6.
 - netcoredbg release cadence (~2/yr, single corporate maintainer) → pin versions, keep our own builds.
 - Test debugging flow (`VSTEST_HOST_DEBUG`) and `attach`: validated on Linux, macOS (arm64) and
-  Windows (x64) by CI e2e (milestone 6); still unexercised on Intel Macs and Windows on Arm (no
-  netcoredbg there).
+  Windows (x64) by CI e2e's weekly/dispatch full matrix (milestone 6); still unexercised on Intel
+  Macs and Windows on Arm (no netcoredbg there).
 - Lease policy default for P2 (`handoff` vs `human-priority`) — decide with real usage.
 - Anchor re-resolution after edits: decided (ADR 0010) — anchors resolve once, exactly; a changed file gets a note, and a future `restart` can re-resolve every anchor against the rebuilt program.
 - Windows: decided (§6) — AF_UNIX everywhere; no named-pipe fallback needed so far.
