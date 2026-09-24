@@ -25,9 +25,9 @@ Dependabot handles only action SHAs and `go.mod`; everything else is a manual bu
 - `zizmor`: `ci.yml` `env` (`ZIZMOR_VERSION`) and the `zizmorcore/zizmor-action` SHA/version comment
   in the `workflows` job — bump both; not wired into any task, run it by hand for local iteration
   (see Workflow security rules below).
-- Runner labels (the `test` job matrix's `os:` values, and the `full`/`reduced` `os:` values in the
-  `e2e-matrix` job's script): bump when GitHub renames or retires one (e.g. `-latest` moving to a
-  new default).
+- Runner labels (the `test` job matrix's `os:` values, and the `full` array's `os:` values in the
+  `e2e-matrix` job's script — `reduced` is derived from `full`'s first row): bump when GitHub
+  renames or retires one (e.g. `-latest` moving to a new default).
 
 ## CI cost while private
 

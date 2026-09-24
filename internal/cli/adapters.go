@@ -425,8 +425,8 @@ func newAdaptersListCommand(g *globals) *cobra.Command {
 		Use:     "ls",
 		Aliases: []string{"list"},
 		Short:   "List the adapters eyedbg knows",
-		Long: `List every adapter manifest eyedbg loaded: the bundled ones and yours (from the adapters/
-directory of eyedbg's config directory; EYEDBG_CONFIG_DIR overrides it), with the version
+		Long: `List every adapter manifest eyedbg loaded: the bundled ones and yours (from ~/.eyedbg/adapters;
+EYEDBG_CONFIG_DIR or EYEDBG_HOME moves it), with the version
 'eyedbg adapters install' fetches, the language each debugs ("built-in" when a Go driver serves
 it) and its --opt options for 'eyedbg start'. A manifest of yours replaces the bundled one of the
 same name or language. Manifests that could not be loaded are listed as "ignored" with why (also
