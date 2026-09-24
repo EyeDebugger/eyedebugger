@@ -12,12 +12,33 @@ import (
 	"github.com/eyedebugger/eyedebugger/internal/api"
 )
 
-// setCaps stores the capabilities the adapter declared in initialize.
+// setCaps stores the capabilities the adapter declared in initialize, and
+// wakes waiters.
 func (s *Session) setCaps(caps godap.Capabilities) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.caps, s.capsKnown = caps, true
+	s.bump()
+}
+
+// Capabilities returns a copy of the capabilities the adapter declared,
+// and whether it declared them yet.
+func (s *Session) Capabilities() (godap.Capabilities, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return cloneCaps(s.caps), s.capsKnown
+}
+
+// cloneCaps copies caps, its lists included.
+func cloneCaps(caps godap.Capabilities) godap.Capabilities {
+	caps.ExceptionBreakpointFilters = slices.Clone(caps.ExceptionBreakpointFilters)
+	caps.CompletionTriggerCharacters = slices.Clone(caps.CompletionTriggerCharacters)
+	caps.AdditionalModuleColumns = slices.Clone(caps.AdditionalModuleColumns)
+	caps.SupportedChecksumAlgorithms = slices.Clone(caps.SupportedChecksumAlgorithms)
+
+	return caps
 }
 
 // capsLocked returns the adapter's capabilities and whether it declared

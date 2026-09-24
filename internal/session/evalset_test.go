@@ -61,7 +61,7 @@ func TestEvalSideEffects(t *testing.T) {
 	}
 
 	last := eventsOf(s, api.EventExec)
-	if e := last[len(last)-1]; e.Action != execEval || e.Text != "$context" || e.Client != agentC.ID {
+	if e := last[len(last)-1]; e.Action != ExecEval || e.Text != "$context" || e.Client != agentC.ID {
 		t.Errorf("exec event = %+v, want agent's eval of $context", e)
 	}
 }
@@ -164,7 +164,7 @@ func checkAfterSet(t *testing.T, s *Session) {
 	}
 
 	last := eventsOf(s, api.EventExec)
-	if e := last[len(last)-1]; e.Action != execSet || e.Text != "line" {
+	if e := last[len(last)-1]; e.Action != ExecSet || e.Text != "line" {
 		t.Errorf("exec event = %+v, want set line", e)
 	}
 }

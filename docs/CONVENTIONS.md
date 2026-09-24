@@ -5,7 +5,10 @@
 - `cmd/*` is wiring only: signal ctx, build info, `cli.Run`, `os.Exit`.
 - `internal/cli` is the only importer of cobra and pflag.
 - `internal/api` holds wire types and stable error codes.
-- `internal/session` owns session state; `internal/dap` alone speaks DAP.
+- `internal/session` owns session state. `internal/dap` frames DAP in both directions (client
+  toward adapters, server toward editors); `internal/session` talks to adapters and may expose
+  adapter-level go-dap values (capabilities, passthrough requests and responses);
+  `internal/facade` alone speaks DAP to editors and turns their requests into session calls.
 - `drivers/*` implement the DESIGN §7 Driver interface and are registered explicitly (no `init()`).
 - No package-level mutable state (`//nolint` only for link-time vars).
 - Dependencies point inward: cli → daemon/session/api, never the reverse.

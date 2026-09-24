@@ -5,6 +5,7 @@ package daptest
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -82,13 +83,32 @@ type program struct {
 	fids    map[string]int
 	nextID  int
 	filters []string
+	// lateVerify leaves breakpoints unverified until the next resume;
+	// pending are those to verify then, by id, and verified those it
+	// verified (they stay verified).
+	lateVerify bool
+	pending    map[int]godap.Breakpoint
+	verified   map[int]bool
 }
 
-func newProgram(emit func(string, any), stepHits bool) *program {
+func newProgram(emit func(string, any), stepHits, lateVerify bool) *program {
 	return &program{
-		emit: emit, stepHits: stepHits, state: stateLoaded, x: "0",
+		emit: emit, stepHits: stepHits, lateVerify: lateVerify, state: stateLoaded, x: "0",
 		bps: make(map[string][]fakeBreakpoint), ids: make(map[bpKey]int), fids: make(map[string]int),
+		pending: make(map[int]godap.Breakpoint), verified: make(map[int]bool),
 	}
+}
+
+// verifyPending sends a breakpoint changed event verifying each breakpoint
+// LateVerify left unverified, in id order.
+func (p *program) verifyPending() {
+	ids := slices.Sorted(maps.Keys(p.pending))
+	for _, id := range ids {
+		p.emit("breakpoint", godap.BreakpointEventBody{Reason: "changed", Breakpoint: p.pending[id]})
+		p.verified[id] = true
+	}
+
+	clear(p.pending)
 }
 
 func (p *program) load(args launchArgs, attached bool) {
@@ -277,6 +297,8 @@ func (p *program) holds(cond string, l int) bool {
 
 // setBreakpoints replaces path's breakpoints. Two on one line are an error.
 func (p *program) setBreakpoints(path string, req []godap.SourceBreakpoint) ([]godap.Breakpoint, error) {
+	maps.DeleteFunc(p.pending, func(_ int, b godap.Breakpoint) bool { return b.Source.Path == path })
+
 	list := make([]fakeBreakpoint, 0, len(req))
 	out := make([]godap.Breakpoint, 0, len(req))
 
@@ -296,6 +318,11 @@ func (p *program) setBreakpoints(path string, req []godap.SourceBreakpoint) ([]g
 		b := godap.Breakpoint{Id: p.ids[key], Verified: true, Line: sb.Line, Source: &godap.Source{Path: path}}
 		if path == p.path && (sb.Line < 1 || sb.Line > p.lines) {
 			b.Verified, b.Message = false, "no code at this line"
+		}
+
+		if p.lateVerify && b.Verified && !p.verified[b.Id] {
+			p.pending[b.Id] = b
+			b.Verified, b.Message = false, "pending"
 		}
 
 		out = append(out, b)

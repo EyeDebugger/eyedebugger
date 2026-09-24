@@ -215,7 +215,7 @@ func (s *server) serveConn(ctx context.Context, conn net.Conn) {
 			return
 		}
 
-		resp, stop := s.dispatch(ctx, req, &authed)
+		resp, stop, hand := s.dispatch(ctx, req, &authed)
 		if err := c.Write(resp); err != nil {
 			return
 		}
@@ -227,6 +227,13 @@ func (s *server) serveConn(ctx context.Context, conn net.Conn) {
 			return
 		}
 
+		// The connection speaks another protocol from now on, for good.
+		if hand != nil {
+			hand(ctx, c.Reader(), conn)
+
+			return
+		}
+
 		if !authed {
 			return
 		}
@@ -234,53 +241,66 @@ func (s *server) serveConn(ctx context.Context, conn net.Conn) {
 }
 
 // dispatch handles one request. stop reports that the daemon must exit once
-// the response is written.
-func (s *server) dispatch(ctx context.Context, req api.Request, authed *bool) (resp api.Response, stop bool) {
+// the response is written; a non-nil hand takes the connection over then
+// (only an authenticated facade.open returns one).
+func (s *server) dispatch(ctx context.Context, req api.Request, authed *bool) (resp api.Response, stop bool, hand handover) {
 	if !*authed {
 		if req.Method != api.MethodHello {
 			return api.NewErrorResponse(req.ID, api.NewError(api.CodeUnauthorized,
-				"the first request must be "+api.MethodHello, "")), false
+				"the first request must be "+api.MethodHello, "")), false, nil
 		}
 
 		result, apiErr := s.hello(req.Params)
 		if apiErr != nil {
 			s.cfg.Logger.WarnContext(ctx, "rejected connection", slog.String("code", string(apiErr.Code)))
 
-			return api.NewErrorResponse(req.ID, apiErr), false
+			return api.NewErrorResponse(req.ID, apiErr), false, nil
 		}
 
 		*authed = true
 
-		return s.result(req.ID, result), false
+		return s.result(req.ID, result), false, nil
 	}
 
 	switch req.Method {
 	case api.MethodDaemonStatus:
-		return s.result(req.ID, s.status()), false
+		return s.result(req.ID, s.status()), false, nil
 	case api.MethodDaemonStop:
 		var params api.StopParams
 		if err := decodeParams(req.Params, &params); err != nil {
-			return api.NewErrorResponse(req.ID, err), false
+			return api.NewErrorResponse(req.ID, err), false, nil
 		}
 
 		result, apiErr := s.stop(ctx, params)
 		if apiErr != nil {
-			return api.NewErrorResponse(req.ID, apiErr), false
+			return api.NewErrorResponse(req.ID, apiErr), false, nil
 		}
 
-		return s.result(req.ID, result), true
+		return s.result(req.ID, result), true, nil
+	case api.MethodFacadeOpen:
+		result, hand, apiErr := s.facadeOpen(req.Params)
+		if apiErr != nil {
+			return api.NewErrorResponse(req.ID, apiErr), false, nil
+		}
+
+		resp := s.result(req.ID, result)
+		if resp.Error != nil {
+			return resp, false, nil
+		}
+
+		return resp, false, hand
 	default:
 		if h, ok := s.handlers[req.Method]; ok {
 			result, err := h(ctx, req.Params)
 			if err != nil {
-				return api.NewErrorResponse(req.ID, toAPIError(err)), false
+				return api.NewErrorResponse(req.ID, toAPIError(err)), false, nil
 			}
 
-			return s.result(req.ID, result), false
+			return s.result(req.ID, result), false, nil
 		}
 
 		return api.NewErrorResponse(req.ID, api.NewError(api.CodeUnknownMethod,
-			"unknown method "+req.Method, "the daemon may be older than this client; see 'eyedbg daemon status'")), false
+			"unknown method "+req.Method, "the daemon may be older than this client; see 'eyedbg daemon status'")), false, nil
 	}
 }
 

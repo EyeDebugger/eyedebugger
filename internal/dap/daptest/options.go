@@ -37,6 +37,15 @@ type Options struct {
 	// GlobalsScope marks the Locals scope with presentationHint "locals"
 	// and adds a cheap "Globals" scope holding g = 1, as debugpy does.
 	GlobalsScope bool `json:"globalsScope,omitempty"`
+	// LateVerify answers setBreakpoints with the breakpoints it would
+	// verify unverified, and verifies them (breakpoint events, reason
+	// changed) when the program next resumes, as netcoredbg does once a
+	// module loads.
+	LateVerify bool `json:"lateVerify,omitempty"`
+	// VerifyOnSetBreakpoints (with LateVerify) also verifies the pending
+	// breakpoints when a setBreakpoints request arrives, before answering
+	// it: an adapter verifying while another request is in flight.
+	VerifyOnSetBreakpoints bool `json:"verifyOnSetBreakpoints,omitempty"`
 }
 
 // DefaultCaps are the capabilities the fake adapter declares by default:

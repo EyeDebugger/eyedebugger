@@ -17,9 +17,11 @@ decisions are recorded in `docs/adr/`.
 - `internal/api/` — native JSON-RPC schema shared by the CLI and the extension.
 - `internal/daemon/` — daemon lifecycle, IPC, token auth.
 - `internal/session/` — session, lease, breakpoint ownership, event log, stop snapshot.
-- `internal/dap/` — DAP client: framing, seq mapping, reverse requests.
+- `internal/dap/` — DAP framing both ways (bounded reader): the client toward adapters (seq mapping,
+  reverse requests) and the server side of editor connections.
 - `internal/dap/daptest/` — fake DAP adapter for tests (the test binary re-executes itself as it).
-- `internal/facade/` — per-session DAP facade (phase 2).
+- `internal/facade/` — the DAP facade: serves an editor's DAP connection (`eyedbg dap`, ADR 0012)
+  as session calls under the CLI's rules.
 - `internal/present/` — budgeting, truncation, text/JSON renderers.
 - `internal/proc/` — process owner lookup (attach's same-user check) and process groups (test runs).
 - `internal/adapters/` — adapter manifests (schema, loader, trust check, templates), installer,

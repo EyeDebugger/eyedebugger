@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/version"
 )
 
@@ -27,6 +28,11 @@ type versionOutput struct {
 	Date      string `json:"date"`
 	GoVersion string `json:"goVersion"`
 	Platform  string `json:"platform"`
+	// Protocol is the native API version it speaks (api.ProtocolVersion).
+	Protocol int `json:"protocol"`
+	// Features are optional capabilities of this build: "dap" (eyedbg dap
+	// and the daemon's DAP facade).
+	Features []string `json:"features"`
 }
 
 func newVersionCommand(binName string, info version.Info, g *globals) *cobra.Command {
@@ -39,7 +45,8 @@ toolchain version and platform.
 Never blocks and has no effect on any debug session. Exits 0 on success, 1 on a usage error (e.g.
 extra arguments) or a write error. Default output is text for LLM/human reading; --json prints the
 machine-readable form with a stable "schema" field (docs/DESIGN.md §5) that only changes on
-purpose.`, binName),
+purpose, plus the native protocol version it speaks and its optional features ("dap": 'eyedbg
+dap' and the daemon's DAP facade).`, binName),
 		Example: fmt.Sprintf("  %[1]s version\n  %[1]s version --json", binName),
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -58,6 +65,8 @@ func writeVersion(w io.Writer, name string, info version.Info, asJSON bool) erro
 			Date:      info.Date,
 			GoVersion: info.GoVersion,
 			Platform:  info.Platform,
+			Protocol:  api.ProtocolVersion,
+			Features:  []string{"dap"},
 		}
 		if err := json.NewEncoder(w).Encode(out); err != nil {
 			return fmt.Errorf("write version: %w", err)

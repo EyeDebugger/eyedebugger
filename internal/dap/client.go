@@ -86,7 +86,7 @@ func (c *Client) Do(ctx context.Context, req godap.RequestMessage) (godap.Messag
 	c.seq++
 	r := req.GetRequest()
 	r.Seq = c.seq
-	r.Type = "request"
+	r.Type = typeRequest
 
 	if !c.register(r.Seq, ch) {
 		c.wmu.Unlock()
@@ -160,7 +160,19 @@ func (c *Client) readLoop(r *bufio.Reader) {
 	for {
 		var raw []byte
 
-		raw, err = godap.ReadBaseMessage(r)
+		raw, err = ReadMessage(r, MaxAdapterMessage)
+		if tooLarge, ok := errors.AsType[*TooLargeError](err); ok {
+			// Skip it, staying in sync: one huge value (a response's waiter
+			// then times out) must not end the session.
+			if _, err = io.CopyN(io.Discard, r, tooLarge.Size); err != nil {
+				err = unexpectedEOF(err)
+
+				break
+			}
+
+			continue
+		}
+
 		if err != nil {
 			break
 		}
@@ -218,7 +230,7 @@ func (c *Client) deliver(seq int, msg godap.Message) {
 
 func (c *Client) deliverUnknown(raw []byte) {
 	var resp godap.Response
-	if err := json.Unmarshal(raw, &resp); err != nil || resp.Type != "response" {
+	if err := json.Unmarshal(raw, &resp); err != nil || resp.Type != typeResponse {
 		return
 	}
 
@@ -245,7 +257,7 @@ func (c *Client) answer(req godap.RequestMessage) {
 	c.seq++
 	out := resp.GetResponse()
 	out.Seq = c.seq
-	out.Type = "response"
+	out.Type = typeResponse
 	out.RequestSeq = r.Seq
 	out.Command = r.Command
 

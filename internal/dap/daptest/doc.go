@@ -26,7 +26,10 @@
 //
 // setBreakpoints rejects two breakpoints on one line in one request
 // (netcoredbg keeps only one per line) and keeps ids stable per file and
-// line. setFunctionBreakpoints maps function fN to line N and rejects a name
+// line; with [Options.LateVerify] it answers them unverified and verifies
+// them with breakpoint events when the program next resumes (continue or a
+// step), or with [Options.VerifyOnSetBreakpoints] when the next
+// setBreakpoints arrives; a verified breakpoint stays verified. setFunctionBreakpoints maps function fN to line N and rejects a name
 // twice in one request. setExceptionBreakpoints knows the filters all and
 // user-unhandled; with all, the lines in Throws stop with reason exception
 // (a caught Fake.Error, described by exceptionInfo). setExpression and

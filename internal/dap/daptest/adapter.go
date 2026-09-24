@@ -102,7 +102,7 @@ func Serve(r io.Reader, w io.Writer) error {
 // ServeWith is [Serve] with opts.
 func ServeWith(r io.Reader, w io.Writer, opts Options) error {
 	a := &adapter{opts: opts, w: w}
-	a.prog = newProgram(a.emit, opts.StepHitsBreakpoints)
+	a.prog = newProgram(a.emit, opts.StepHitsBreakpoints, opts.LateVerify)
 	br := bufio.NewReader(r)
 
 	defer func() {
@@ -206,6 +206,10 @@ func (a *adapter) handle(req godap.RequestMessage, raw []byte) {
 func (a *adapter) configure(req godap.RequestMessage) {
 	switch r := req.(type) {
 	case *godap.SetBreakpointsRequest:
+		if a.opts.VerifyOnSetBreakpoints {
+			a.prog.verifyPending()
+		}
+
 		got, err := a.prog.setBreakpoints(r.Arguments.Source.Path, r.Arguments.Breakpoints)
 		a.respondOr(req, godap.SetBreakpointsResponseBody{Breakpoints: got}, err)
 	case *godap.SetFunctionBreakpointsRequest:
@@ -337,9 +341,11 @@ func (a *adapter) disconnect(req godap.RequestMessage, raw []byte) {
 	a.done = true
 }
 
-// resume answers continue and the steps: continued first, then the
-// response, then whatever running produces.
+// resume answers continue and the steps: breakpoints LateVerify left
+// pending are verified, then continued, the response, and whatever running
+// produces.
 func (a *adapter) resume(req godap.RequestMessage) {
+	a.prog.verifyPending()
 	a.emit("continued", godap.ContinuedEventBody{ThreadId: threadID, AllThreadsContinued: true})
 
 	if _, ok := req.(*godap.ContinueRequest); ok {
