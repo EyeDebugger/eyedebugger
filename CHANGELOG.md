@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- C, C++ and Rust debugging through LLVM's lldb-dap (`eyedbg start c|cpp|rust --program FILE`),
+  manifest only (`lldb-dap-c.json`, `lldb-dap-cpp.json`, `lldb-dap-rust.json`; `EYEDBG_LLDB_DAP` or
+  PATH; no managed download). Go debugging through Delve (`eyedbg start go --program DIR`,
+  `--opt mode=debug|exec|test`, `--opt buildFlags`), served by a new
+  `adapter.transport: "connect"` (a private Unix socket the adapter dials in to) since `dlv dap`
+  never speaks stdio; `eyedbg adapters install delve` downloads the pinned release. A new
+  `${envList}` launch template variable lets `lldb-dap`'s pre-20 `--env` array shape work from a
+  manifest. Manifest schema, session and trust model unchanged otherwise (ADR 0012).
+
 ## [0.1.2] - 2026-09-24
 
 ### Fixed

@@ -53,10 +53,11 @@ func newAdaptersCommand(g *globals) *cobra.Command {
 		Short: "List, install and check debug adapters",
 		Long: `List, install and check the debug adapters eyedbg drives (docs/DESIGN.md §7, §8). Each is
 described by an adapter manifest (docs/adapter-manifests.md): dotnet uses netcoredbg (Samsung,
-MIT), python uses debugpy (Microsoft, MIT), and c, cpp and rust share LLVM's lldb-dap
-(Apache-2.0 WITH LLVM-exception), found on PATH or via EYEDBG_LLDB_DAP. Downloads are pinned to
-one release and verified by SHA-256 before use. Microsoft's vsdbg is never used: its license
-restricts it to Microsoft's IDEs.
+MIT), python uses debugpy (Microsoft, MIT), c, cpp and rust share LLVM's lldb-dap
+(Apache-2.0 WITH LLVM-exception), found on PATH or via EYEDBG_LLDB_DAP, and go uses Delve (MIT),
+which speaks DAP over a private socket it dials in to rather than stdio (docs/adapter-manifests.md
+§ Transports). Downloads are pinned to one release and verified by SHA-256 before use. Microsoft's
+vsdbg is never used: its license restricts it to Microsoft's IDEs.
 
 Adapters are installed per user under ~/.eyedbg/tools (override with EYEDBG_DATA_DIR); set
 EYEDBG_NETCOREDBG to use your own netcoredbg build instead. Your own manifests go in
@@ -86,7 +87,8 @@ func newAdaptersInstallCommand(g *globals) *cobra.Command {
 platform, check its size and SHA-256 against its manifest, and extract it. Bundled adapters:
 netcoredbg ` + bundledVersion("netcoredbg") + ` for dotnet (prebuilt for linux x64/arm64, macOS arm64 and Windows x64)
 and debugpy ` + bundledVersion("debugpy") + ` for python (pure Python, any platform; runs on your own Python
-3.10+, which needs no debugpy of its own then). c, cpp and rust have no download: install lldb-dap
+3.10+, which needs no debugpy of its own then), and delve ` + bundledVersion("delve") + ` for go (linux x64/arm64,
+macOS x64/arm64 and Windows x64). c, cpp and rust have no download: install lldb-dap
 yourself (your OS's LLVM/Clang package) and put it on PATH, or set EYEDBG_LLDB_DAP.
 'eyedbg adapters ls' lists them all.
 
