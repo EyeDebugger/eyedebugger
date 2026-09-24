@@ -52,13 +52,13 @@ type harness struct {
 // prepares a fresh, private runtime and config directory for one daemon.
 // EYEDBG_RUNTIME_DIR uses os.MkdirTemp rather than t.TempDir: the latter
 // embeds the (sub)test's full name, which can push the daemon's socket
-// path past the AF_UNIX sun_path budget (internal/daemon/paths.go, F13).
+// path past the AF_UNIX sun_path budget (internal/daemon/paths.go).
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 
 	eyedbg, _ := binariesFor(t)
 
-	runtimeDir, err := os.MkdirTemp("", "e2e") //nolint:usetesting // t.TempDir embeds the full (sub)test name, which can push the daemon's socket path past the AF_UNIX sun_path budget (internal/daemon/paths.go, F13).
+	runtimeDir, err := os.MkdirTemp("", "e2e") //nolint:usetesting // t.TempDir embeds the full (sub)test name, which can push the daemon's socket path past the AF_UNIX sun_path budget (internal/daemon/paths.go).
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +98,7 @@ func (h *harness) env(overrides map[string]string) []string {
 		"EYEDBG_NO_AUTOSTART": "",
 		"EYEDBG_CLIENT":       "",
 		"EYEDBG_SESSION":      "",
+		"EYEDBG_DAEMON_PATH":  "",
 	}
 
 	maps.Copy(all, overrides)
@@ -257,7 +258,7 @@ func runScript(t *testing.T, lc langCase) {
 		fakeManifestFiles(t, h.configDir)
 	}
 
-	stepNoDaemon(t, h)
+	stepNoDaemon(t, h, lc)
 	stepStart(t, h, lc)
 	stepStatus(t, h, lc)
 	stepRunUntil(t, h, lc)
@@ -272,12 +273,13 @@ func runScript(t *testing.T, lc langCase) {
 	stepDaemonStop(t, h)
 }
 
-// stepNoDaemon is step 1: with no daemon running and autostart disabled,
-// NO_SESSION, not the plan's stated DAEMON_NOT_RUNNING (deviation; see
-// log.md). Session-scoped commands fold "no daemon" into "no session"
-// (internal/cli/session.go's call()): there cannot be a session without a
-// daemon.
-func stepNoDaemon(t *testing.T, h *harness) {
+// stepNoDaemon is step 1: with no daemon running and autostart disabled, a
+// command needing an existing session gets NO_SESSION (exit 2) — there
+// cannot be a session without a daemon, so internal/cli/session.go's call()
+// deliberately folds "no daemon" into "no session" — while a command that
+// creates one gets DAEMON_NOT_RUNNING (exit 3) instead, since there it is
+// the daemon itself, not a session, that is missing (docs/DESIGN.md §5).
+func stepNoDaemon(t *testing.T, h *harness, lc langCase) {
 	t.Helper()
 
 	noAutostart := map[string]string{"EYEDBG_NO_AUTOSTART": "1"}
@@ -297,6 +299,12 @@ func stepNoDaemon(t *testing.T, h *harness) {
 	if errEnv.Schema != 1 || errEnv.Error.Code != string(api.CodeNoSession) {
 		t.Fatalf("--json status with no daemon = %+v, want schema 1 and %s", errEnv, api.CodeNoSession)
 	}
+
+	startArgs := append([]string{"start", lc.lang}, lc.startArgs(t)...)
+	startArgs = append(startArgs, "--timeout", startTimeout)
+
+	h.runEnv(noAutostart, startArgs...).
+		wantCode(exitEnvironment).wantStderr("[" + string(api.CodeDaemonNotRunning) + "]")
 }
 
 // stepStart is step 2: start, stopped at the anchor; proves autostart.

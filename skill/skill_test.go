@@ -154,6 +154,60 @@ func assertMode(t *testing.T, path string, want os.FileMode) {
 	}
 }
 
+// TestInstallReplacesSymlinkInsteadOfWritingThrough checks Install's
+// documented atomic-write property: when SKILL.md is a symlink to another
+// file, Install's rename replaces the symlink itself rather than writing
+// through it to the link's target. Unix-only: creating a symlink on Windows
+// needs elevated privileges or developer mode, so it is not portable here.
+func TestInstallReplacesSymlinkInsteadOfWritingThrough(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need elevated privileges or developer mode on Windows")
+	}
+
+	root := t.TempDir()
+	dir := filepath.Join(root, skill.Name)
+	path := filepath.Join(dir, "SKILL.md")
+
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	elsewhere := filepath.Join(root, "elsewhere.md")
+	const elsewhereContent = "not the skill, do not touch\n"
+
+	if err := os.WriteFile(elsewhere, []byte(elsewhereContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(elsewhere, path); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := skill.Install(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Status != skill.StatusReplaced {
+		t.Errorf("status = %q, want %q", result.Status, skill.StatusReplaced)
+	}
+
+	assertContent(t, elsewhere, elsewhereContent)
+
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("%s: still a symlink after Install, want a regular file", path)
+	}
+
+	assertContent(t, path, skill.Markdown())
+}
+
 func TestInstallCreatesRoot(t *testing.T) {
 	t.Parallel()
 

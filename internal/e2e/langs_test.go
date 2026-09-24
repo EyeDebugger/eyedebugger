@@ -128,7 +128,7 @@ func pythonCase(t *testing.T) langCase {
 }
 
 // dotnetCase needs EYEDBG_E2E=1 and a platform netcoredbg has a download
-// for (D7); testdata/apps/dotnet/console/Program.cs has no markers, so its
+// for; testdata/apps/dotnet/console/Program.cs has no markers, so its
 // lines are literal.
 func dotnetCase(t *testing.T) langCase {
 	t.Helper()
@@ -138,6 +138,14 @@ func dotnetCase(t *testing.T) langCase {
 	if os.Getenv(envE2E) == "1" {
 		if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "..", "testdata", "apps", "dotnet", "console"))); err != nil {
 			t.Fatal(err)
+		}
+
+		// A build in the source tree (ignored by git) is not the test's
+		// (drivers/dotnet's copyApp does the same).
+		for _, d := range []string{"bin", "obj"} {
+			if err := os.RemoveAll(filepath.Join(dir, d)); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 
@@ -162,9 +170,10 @@ func dotnetCase(t *testing.T) langCase {
 }
 
 // requireDotnetE2E skips t unless EYEDBG_E2E=1 and netcoredbg's bundled
-// manifest has a download for this platform (D7, drivers/dotnet's
+// manifest has a download for this platform, or netcoredbg can otherwise be
+// found (EYEDBG_NETCOREDBG, already installed, or on PATH) — drivers/dotnet's
 // dotnetE2ESkip; duplicated here since that helper is unexported in a
-// _test.go file of another package).
+// _test.go file of another package.
 func requireDotnetE2E(t *testing.T) {
 	t.Helper()
 
@@ -179,8 +188,11 @@ func requireDotnetE2E(t *testing.T) {
 		t.Fatal("no bundled netcoredbg manifest for dotnet (or it has no install section)")
 	}
 
-	if _, found := m.Install.Downloads[runtime.GOOS+"/"+runtime.GOARCH]; !found {
-		t.Skipf("netcoredbg has no download for %s/%s", runtime.GOOS, runtime.GOARCH)
+	_, hasDownload := m.Install.Downloads[runtime.GOOS+"/"+runtime.GOARCH]
+	_, findErr := adapters.Find(m)
+
+	if !hasDownload && findErr != nil {
+		t.Skipf("netcoredbg has no download for %s/%s, and none was otherwise found (EYEDBG_NETCOREDBG, installed, or PATH)", runtime.GOOS, runtime.GOARCH)
 	}
 }
 
@@ -210,7 +222,8 @@ func markerLine(t *testing.T, file, marker string) int {
 
 // fakeManifestFiles writes the fakelang user manifest (this test binary as
 // the adapter, EnvFakeAdapter=1; see main_test.go) into dir/adapters,
-// created private (M7 D4's trust check on Unix): dir must not exist yet.
+// created private (internal/adapters/trust_unix.go's permission check):
+// dir must not exist yet.
 func fakeManifestFiles(t *testing.T, configDir string) {
 	t.Helper()
 

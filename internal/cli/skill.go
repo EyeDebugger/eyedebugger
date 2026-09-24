@@ -6,7 +6,9 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -82,7 +84,9 @@ func newSkillInstallCommand(g *globals) *cobra.Command {
 		Long: `Write the embedded SKILL.md to ROOT/eyedbg/SKILL.md, creating directories as needed. ROOT is a
 skills root: by default Claude Code's personal one (~/.claude/skills, or %USERPROFILE%\.claude\skills
 on Windows); --dir names a different one, e.g. --dir .claude/skills for a project, or
---dir ~/.codex/skills for another agent.
+--dir ~/.codex/skills for another agent. A leading ~ (or ~\ on Windows) in --dir is expanded to your
+home directory ourselves, since the shell does not always do it (bash never does after "=", cmd.exe
+never does at all).
 
 Idempotent: an identical existing file is left alone. A different one is left alone and refused
 (INVALID_REQUEST) unless --force replaces it. Prints the path written and one of "installed",
@@ -121,10 +125,17 @@ write error.`,
 }
 
 // resolveSkillRoot returns dir as an absolute path, or [skill.DefaultRoot]
-// when dir is "".
+// when dir is "". A leading "~" is expanded to the user's home directory
+// first: neither bash (after "=") nor cmd.exe (ever) expands it for us, so
+// without this a literal "~" directory would be created in the cwd.
 func resolveSkillRoot(dir string) (string, error) {
 	if dir == "" {
 		return skill.DefaultRoot()
+	}
+
+	dir, err := expandHome(dir)
+	if err != nil {
+		return "", err
 	}
 
 	abs, err := filepath.Abs(dir)
@@ -133,6 +144,23 @@ func resolveSkillRoot(dir string) (string, error) {
 	}
 
 	return abs, nil
+}
+
+// expandHome expands a leading "~", "~/" or "~\" (Windows) to the user's
+// home directory. "~name" (another user's home) has no portable stdlib
+// lookup and is left as a literal path, same as an unexpanded "~" alone
+// would resolve to a directory literally named "~".
+func expandHome(dir string) (string, error) {
+	if dir != "~" && !strings.HasPrefix(dir, "~/") && !strings.HasPrefix(dir, `~\`) {
+		return dir, nil
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("expand %s: %w", dir, err)
+	}
+
+	return filepath.Join(home, dir[1:]), nil
 }
 
 // skillInstallError maps a [skill.DiffersError] to INVALID_REQUEST with the

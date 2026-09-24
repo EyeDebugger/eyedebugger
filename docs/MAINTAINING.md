@@ -20,14 +20,16 @@ Dependabot handles only action SHAs and `go.mod`; everything else is a manual bu
 - goreleaser: `ci.yml` `env`.
 - `actions/setup-dotnet` and `actions/setup-python`: pinned by SHA in `ci.yml`; bump the version
   comment alongside. `DOTNET_VERSION` and `PYTHON_VERSION`: `ci.yml` `env`.
-- `actionlint` and `zizmor`: `ci.yml` `env` (`ACTIONLINT_VERSION`, `ZIZMOR_VERSION`), also used by
-  `task lint:workflows`.
+- `actionlint`: `ci.yml` `env` (`ACTIONLINT_VERSION`) **and** `Taskfile.yml` `vars` (its own copy,
+  used by `task lint:workflows`) — bump both.
+- `zizmor`: `ci.yml` `env` (`ZIZMOR_VERSION`) only; it isn't wired into any task, run it by hand
+  (see Workflow security rules below).
 - Runner labels (the `test`/`e2e` job matrices' `os:` values): bump when GitHub renames or retires
   one (e.g. `-latest` moving to a new default).
 
 ## CI cost while private
 
-Private-repo runners are billed per minute past the included quota (G2): Linux x64 $0.006, Linux
+Private-repo runners are billed per minute past the included quota: Linux x64 $0.006, Linux
 arm64 $0.005, Windows x64/arm64 $0.010, macOS $0.062 — **macOS costs about 10× Linux x64**. The
 full 6-platform matrix (`test` and `e2e`, two of the six rows each are macOS and Windows) runs on
 every push to `main`. Watch usage under Settings → Billing while the repo is private; making it
@@ -40,9 +42,9 @@ public removes the cost (hosted runners are free for public repos).
 - Never `pull_request_target` with checkout of PR code.
 - Untrusted values go in via `env`, never `${{ }}` inside `run:`.
 - No caches in release jobs.
-- Run `actionlint` and `zizmor --offline .` on every workflow change (`task lint:workflows`, or
-  directly: `go run github.com/rhysd/actionlint/cmd/actionlint@$ACTIONLINT_VERSION` and
-  `pipx run --spec zizmor==$ZIZMOR_VERSION zizmor --offline .`).
+- Run `actionlint` and `zizmor --offline .` on every workflow change. `task lint:workflows` runs
+  actionlint only; run zizmor by hand: `go run github.com/rhysd/actionlint/cmd/actionlint@$ACTIONLINT_VERSION`
+  and, separately, `pipx run --spec zizmor==$ZIZMOR_VERSION zizmor --offline .`.
 
 ## One-time setup after publishing
 
