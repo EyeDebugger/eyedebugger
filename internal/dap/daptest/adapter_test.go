@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -242,4 +244,65 @@ func TestFakeAdapter(t *testing.T) {
 			tt.run(newSession(t))
 		})
 	}
+}
+
+// newSocketSession is newSession over a Unix socket the fake adapter dials
+// in to (ServeConnect).
+func newSocketSession(t *testing.T) *session {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "s")
+
+	var lc net.ListenConfig
+
+	ln, err := lc.Listen(t.Context(), "unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	s := &session{t: t, events: make(chan godap.EventMessage, 1000), served: make(chan error, 1)}
+
+	go func() { s.served <- daptest.ServeConnect(path, daptest.Options{}) }()
+
+	conn, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.c = dap.NewClient(conn, conn, dap.Handlers{Event: func(e godap.EventMessage) { s.events <- e }})
+
+	t.Cleanup(func() {
+		_ = conn.Close()
+		<-s.c.Done()
+	})
+
+	return s
+}
+
+func TestServeConnect(t *testing.T) {
+	t.Parallel()
+
+	t.Run("serves on the socket", func(t *testing.T) {
+		t.Parallel()
+
+		s := newSocketSession(t)
+		s.launch(3, true, false, godap.SourceBreakpoint{Line: 2})
+		s.expectStop("entry", 1)
+		s.do(&godap.ContinueRequest{Request: godap.Request{Command: "continue"}})
+		s.expectStop("breakpoint", 2)
+		s.do(&godap.DisconnectRequest{Request: godap.Request{Command: "disconnect"}})
+
+		if err := <-s.served; err != nil {
+			t.Errorf("ServeConnect = %v", err)
+		}
+	})
+
+	t.Run("fails without a listener", func(t *testing.T) {
+		t.Parallel()
+
+		if err := daptest.ServeConnect(filepath.Join(t.TempDir(), "none"), daptest.Options{}); err == nil {
+			t.Error("ServeConnect to a missing socket succeeded")
+		}
+	})
 }

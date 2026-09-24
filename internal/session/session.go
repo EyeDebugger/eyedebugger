@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os/exec"
 	"slices"
 	"sort"
@@ -61,8 +62,14 @@ type Session struct {
 	// immutable.
 	run *testRun
 
-	cmd     *exec.Cmd
-	client  *dap.Client
+	cmd    *exec.Cmd
+	client *dap.Client
+	// conn is the adapter's connection on the connect transport (nil on
+	// stdio), and exited is closed once its process has been waited for
+	// (nil on stdio: watchAdapter waits for it). All three are set with
+	// client, under mu, and never change after.
+	conn    net.Conn
+	exited  <-chan struct{}
 	logger  *slog.Logger
 	starter api.Client
 	// life is the manager's context; shutdown work started by adapter
@@ -209,8 +216,14 @@ func (s *Session) logStarted() {
 	s.log.append(api.Event{Kind: api.EventStarted, Client: s.starter.ID, Program: s.Program, Lease: &info, Action: s.mode})
 }
 
-// startAdapter launches the adapter process and connects a DAP client to it.
-func (s *Session) startAdapter(ctx context.Context, launch Launch, stderr io.Writer) error {
+// startAdapter launches the adapter process and connects a DAP client to it,
+// on its stdio or, with launch.SocketArgs, on the socket it dials in to
+// within connectTimeout.
+func (s *Session) startAdapter(ctx context.Context, launch Launch, stderr io.Writer, connectTimeout time.Duration) error {
+	if launch.SocketArgs != nil {
+		return s.startSocketAdapter(ctx, launch, stderr, connectTimeout)
+	}
+
 	cmd := exec.CommandContext(ctx, launch.Adapter, launch.AdapterArgs...) //nolint:gosec // The adapter path comes from the driver (installed netcoredbg or EYEDBG_NETCOREDBG).
 	cmd.Env = append(cmd.Environ(), launch.AdapterEnv...)
 	cmd.Stderr = stderr
@@ -501,7 +514,13 @@ func (s *Session) watchAdapter() {
 		s.mu.Unlock()
 	}
 
-	_ = s.cmd.Wait()
+	// On stdio, Wait only now: it closes the pipes the DAP stream was read
+	// from. On a socket, another goroutine owns Wait.
+	if s.exited != nil {
+		<-s.exited
+	} else {
+		_ = s.cmd.Wait()
+	}
 
 	if s.mode != api.ModeTest {
 		s.closeRecording()
@@ -565,6 +584,12 @@ func (s *Session) shutdownAdapter(ctx context.Context, terminate bool) {
 
 	if s.cmd.Process != nil {
 		_ = s.cmd.Process.Kill()
+	}
+
+	// On a socket, the stream may outlive the adapter (a child that
+	// inherited it): closing it ends the DAP client.
+	if s.conn != nil {
+		_ = s.conn.Close()
 	}
 }
 
