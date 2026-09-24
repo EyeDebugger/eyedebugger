@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"io"
 	"log/slog"
+	"maps"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -304,41 +305,59 @@ func (m *Manager) forget(ctx context.Context, id string) {
 	}
 }
 
-// Get returns the live session with id, or the only live session when id is
-// empty. A lost session is NO_SESSION, with a hint.
+// Get returns the session with id, or when id is empty the only session
+// that hasn't exited (else the only session). A lost session is
+// NO_SESSION, with a hint.
 func (m *Manager) Get(id string) (*Session, error) {
+	if id == "" {
+		return m.only()
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if id != "" {
-		if s, ok := m.sessions[id]; ok {
-			return s, nil
-		}
-
-		if info, ok := m.lost[id]; ok {
-			hint := "'eyedbg stop -s " + id + "' forgets it"
-			if info.Recording != "" {
-				hint += "; its recording: " + info.Recording
-			}
-
-			return nil, api.NewError(api.CodeNoSession, "session "+id+" was lost: eyedbgd exited while it was live", hint)
-		}
-
-		return nil, api.NewError(api.CodeNoSession, "no session "+id, "see 'eyedbg sessions'")
+	if s, ok := m.sessions[id]; ok {
+		return s, nil
 	}
 
-	switch len(m.sessions) {
-	case 0:
+	if info, ok := m.lost[id]; ok {
+		hint := "'eyedbg stop -s " + id + "' forgets it"
+		if info.Recording != "" {
+			hint += "; its recording: " + info.Recording
+		}
+
+		return nil, api.NewError(api.CodeNoSession, "session "+id+" was lost: eyedbgd exited while it was live", hint)
+	}
+
+	return nil, api.NewError(api.CodeNoSession, "no session "+id, "see 'eyedbg sessions'")
+}
+
+// only is Get's default session: an exited session (kept for its output
+// until stopped) is the default only while no other session exists.
+func (m *Manager) only() (*Session, error) {
+	m.mu.Lock()
+	all := slices.Collect(maps.Values(m.sessions))
+	m.mu.Unlock()
+
+	if len(all) == 0 {
 		return nil, api.NewError(api.CodeNoSession, "there are no debug sessions", "start one with 'eyedbg start'")
-	case 1:
-		for _, s := range m.sessions {
-			return s, nil
-		}
 	}
 
-	ids := make([]string, 0, len(m.sessions))
-	for id := range m.sessions {
-		ids = append(ids, id)
+	// Sessions lock themselves after the manager, never while holding it.
+	live := slices.DeleteFunc(slices.Clone(all), func(s *Session) bool { return s.Info().State == api.StateExited })
+
+	switch {
+	case len(live) == 1:
+		return live[0], nil
+	case len(all) == 1:
+		return all[0], nil
+	case len(live) == 0:
+		live = all
+	}
+
+	ids := make([]string, 0, len(live))
+	for _, s := range live {
+		ids = append(ids, s.ID)
 	}
 
 	slices.Sort(ids)

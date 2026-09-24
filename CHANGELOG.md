@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `eyedbg test dotnet` refuses xUnit v3 projects with `NO_TEST_HOST` and a hint to debug the test
+  app with `eyedbg start`: xUnit v3 runs the tests outside the test host eyedbg attaches to, so
+  the run passed without ever stopping at a verified breakpoint.
+- With no `-s`, a session that has exited no longer counts as another session: commands pick the
+  one session that hasn't exited instead of failing with "several sessions exist".
+
 ## [0.1.0] - 2026-09-24
 
 ### Added

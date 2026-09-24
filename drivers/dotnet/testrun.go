@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/session"
@@ -47,10 +48,29 @@ func (*Driver) TestCommand(_ context.Context, spec session.TestSpec) (session.Te
 	if usesMTP(filepath.Dir(project), spec.Env) {
 		return session.TestCommand{}, api.NewError(api.CodeNoTestHost,
 			"eyedbg test supports VSTest runs only, and "+filepath.Base(project)+" runs on "+mtpRunner,
-			"debug the test app directly: eyedbg start dotnet --project "+project+" -- <test options>")
+			"debug the test app directly: eyedbg start dotnet --project "+shellArg(project)+" -- <test options>")
+	}
+
+	if usesXunitV3(project) {
+		return session.TestCommand{}, api.NewError(api.CodeNoTestHost,
+			"eyedbg test can't stop in "+filepath.Base(project)+"'s tests: xUnit v3 runs them in its own process, not VSTest's test host",
+			"debug the test app directly: eyedbg start dotnet --project "+shellArg(project)+" -- -method '<Class.Method>' (xUnit v3's options: -?)")
 	}
 
 	return testCommand(host, project, spec), nil
+}
+
+// shellArg is s as a hint shows it for pasting into a shell: single-quoted
+// unless it's only letters, digits and punctuation no shell interprets.
+func shellArg(s string) string {
+	plain := s != "" && !strings.ContainsFunc(s, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune(`-_./:\@+=,`, r)
+	})
+	if plain {
+		return s
+	}
+
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // testCommand builds the run of project's tests with host.
@@ -154,6 +174,34 @@ func usesMTP(dir string, env map[string]string) bool {
 
 		dir = parent
 	}
+}
+
+// usesXunitV3 reports whether project references xUnit v3, itself or
+// through a Directory.Build.props or .targets above it. Its VSTest adapter
+// runs the tests in a child of the test host, which the session never
+// attaches to.
+func usesXunitV3(project string) bool {
+	// A package that makes a project an xUnit v3 test app: xunit.v3,
+	// xunit.v3.core, xunit.v3[.core].mtp-vN.
+	ref := regexp.MustCompile(`(?i)<PackageReference\s[^>]*Include\s*=\s*"xunit\.v3(\.core)?(\.mtp-v\d+)?"`)
+	files := []string{project}
+
+	for dir := filepath.Dir(project); ; dir = filepath.Dir(dir) {
+		files = append(files, filepath.Join(dir, "Directory.Build.props"), filepath.Join(dir, "Directory.Build.targets"))
+
+		if filepath.Dir(dir) == dir {
+			break
+		}
+	}
+
+	for _, f := range files {
+		// A missing or unreadable file references nothing.
+		if data, err := os.ReadFile(f); err == nil && ref.Match(data) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // testFailure is the error for a 'dotnet test' that exited before a test

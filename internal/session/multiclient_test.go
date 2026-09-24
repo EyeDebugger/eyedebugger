@@ -580,3 +580,68 @@ func TestStopDoesNotResurrectMetadata(t *testing.T) {
 		t.Errorf("store ops = %v, want a save at start and a remove last", ops)
 	}
 }
+
+// TestDefaultSession: with no -s, an exited session (kept for its output)
+// gives way to the one that hasn't exited, and is the default only alone.
+func TestDefaultSession(t *testing.T) {
+	t.Parallel()
+
+	// ended starts a session and runs it to its exit.
+	ended := func(t *testing.T, m *Manager) *Session {
+		t.Helper()
+
+		s := start(t, m, agentC, api.StartParams{LaunchSpec: api.LaunchSpec{StopOnEntry: true}})
+		if snap := resume(t, s, agentC, ExecContinue); snap.Session.State != api.StateExited {
+			t.Fatalf("after continue: %+v, want exited", snap.Session)
+		}
+
+		return s
+	}
+	live := func(t *testing.T, m *Manager) *Session {
+		t.Helper()
+
+		return start(t, m, agentC, api.StartParams{LaunchSpec: api.LaunchSpec{StopOnEntry: true}})
+	}
+
+	tests := []struct {
+		name  string
+		sets  []func(*testing.T, *Manager) *Session
+		want  int // index into sets of the default; -1 for NO_SESSION
+		inErr int // how many ids the NO_SESSION error lists
+	}{
+		{name: "none", want: -1},
+		{name: "one live", sets: []func(*testing.T, *Manager) *Session{live}, want: 0},
+		{name: "one exited", sets: []func(*testing.T, *Manager) *Session{ended}, want: 0},
+		{name: "exited and live", sets: []func(*testing.T, *Manager) *Session{ended, live}, want: 1},
+		{name: "two live", sets: []func(*testing.T, *Manager) *Session{ended, live, live}, want: -1, inErr: 2},
+		{name: "two exited", sets: []func(*testing.T, *Manager) *Session{ended, ended}, want: -1, inErr: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := newTestManager(t, nil)
+			ss := make([]*Session, len(tt.sets))
+
+			for i, set := range tt.sets {
+				ss[i] = set(t, m)
+			}
+
+			got, err := m.Get("")
+			if tt.want >= 0 {
+				if err != nil || got != ss[tt.want] {
+					t.Fatalf("Get(\"\") = %v, %v; want session %d", got, err, tt.want)
+				}
+
+				return
+			}
+
+			expectCode(t, err, api.CodeNoSession)
+
+			if n := strings.Count(err.Error(), "s-"); n != tt.inErr {
+				t.Errorf("error %q names %d sessions, want %d", err, n, tt.inErr)
+			}
+		})
+	}
+}
