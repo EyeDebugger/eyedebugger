@@ -82,12 +82,26 @@
   `TestMain` that calls `daptest.MaybeRun()` first and returns when it returns true, plus a small
   fake `session.Driver` launching `daptest.Command()` with `daptest.Arguments(...)`. Test runs use
   the fake runner too (`daptest.MaybeRunRunner()` in `TestMain`, `daptest.RunnerCommand`).
-- e2e tests against real adapters (`EYEDBG_E2E=1`) drive the sample apps in `testdata/apps`,
-  copied to a temporary directory first, and find lines by their `// marker: NAME` (`# marker:
-  NAME`) comments, not by number. `drivers/dotnet` needs the .NET SDK and netcoredbg;
-  `drivers/generic` (`TestPython*`) needs Python 3.10+ with debugpy (`EYEDBG_PYTHON=/path/to/venv/
-  bin/python`) or `adapters install debugpy`, and `TestPythonManagedInstall` also
-  `EYEDBG_E2E_NETWORK=1` (it downloads debugpy into a temporary data directory).
+- e2e tests come in three tiers, all driving real, separately built processes rather than calling
+  any eyedbg package directly:
+  1. Driver-level e2e (`drivers/dotnet`, `drivers/generic`) drives one driver's DAP round trip
+     against a real adapter.
+  2. CLI-level e2e (`internal/e2e`) drives `eyedbg`/`eyedbgd` themselves as built binaries, through
+     autostart, exit codes and `--json` output, the way an agent or a human at a shell would.
+  3. Within `internal/e2e`, the fake-adapter case (`daptest`, this test binary re-executing itself)
+     always runs in the unit suite; the python/dotnet cases behind `EYEDBG_E2E=1` are the same
+     script against real adapters.
+  All real-adapter tests (`EYEDBG_E2E=1`) drive the sample apps in `testdata/apps`, copied to a
+  temporary directory first, and find lines by their `// marker: NAME` (`# marker: NAME`) comments,
+  not by number. `drivers/dotnet` needs the .NET SDK and netcoredbg; `drivers/generic`
+  (`TestPython*`) needs Python 3.10+ with debugpy (`EYEDBG_PYTHON=/path/to/venv/bin/python`) or
+  `adapters install debugpy`, and `TestPythonManagedInstall` also `EYEDBG_E2E_NETWORK=1` (it
+  downloads debugpy into a temporary data directory). `requireE2E`/`require` closures are the only
+  skip point: without `EYEDBG_E2E=1` the test skips; with it set and the adapter missing or broken,
+  it fails, never skips silently. `task e2e` runs all real-adapter tests (`drivers/...` and
+  `internal/e2e`) in one command; run it with `COUNT=5` before merging a change under `drivers/...`
+  or `internal/e2e` to catch flakes a single pass would miss. Never add retries, sleeps or
+  `-run`-scoped workarounds to make a flaky e2e test pass — fix the race or report it.
 - Bundled adapter manifests are validated by a unit test (`internal/adapters`); a language that
   needs no Go logic gets a manifest, not a driver, and the generic driver's fake-adapter tests
   (`drivers/generic`) show how to debug a manifest-only language in tests.
