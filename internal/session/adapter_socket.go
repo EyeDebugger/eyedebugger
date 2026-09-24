@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -32,12 +33,22 @@ const (
 )
 
 // startSocketAdapter is startAdapter on the connect transport. The socket
-// lives in a fresh directory only this user can enter (the same trust as
-// the daemon's own socket, docs/DESIGN.md §14), exists only until the
-// adapter's one connection is accepted, and is gone, with its directory,
-// on every return. An adapter that fails to connect is killed.
+// lives in a fresh directory only this user can enter — a 0700 directory
+// under os.TempDir() on Unix, or, on Windows, a directory under
+// os.UserCacheDir()\eyedbg (socketParentDir), the same trusted parent the
+// daemon's own runtime directory already uses (internal/daemon/paths.go),
+// since os.TempDir() there follows %TMP%/%TEMP% and Go's Mkdir cannot force
+// a private ACL onto a directory on Windows regardless of the requested
+// mode. The directory exists only until the adapter's one connection is
+// accepted, and is gone, with its directory, on every return. An adapter
+// that fails to connect is killed.
 func (s *Session) startSocketAdapter(ctx context.Context, launch Launch, stderr io.Writer, timeout time.Duration) error {
-	dir, err := os.MkdirTemp("", "eyedbg-dap-")
+	parent, err := socketParentDir()
+	if err != nil {
+		return api.NewError(api.CodeAdapterFailed, "locate the debug adapter's socket directory: "+err.Error(), "")
+	}
+
+	dir, err := os.MkdirTemp(parent, "eyedbg-dap-")
 	if err != nil {
 		return api.NewError(api.CodeAdapterFailed, "create the debug adapter's socket directory: "+err.Error(), "")
 	}
@@ -97,6 +108,34 @@ func (s *Session) startSocketAdapter(ctx context.Context, launch Launch, stderr 
 	go s.watchAdapter()
 
 	return nil
+}
+
+// socketParentDir is the directory startSocketAdapter creates its private
+// socket directory under: os.TempDir() on Unix, already 0700 and owned by
+// the user (os.MkdirTemp's own guarantee); on Windows, os.UserCacheDir()'s
+// eyedbg subdirectory instead, since os.TempDir() there follows %TMP%/
+// %TEMP%, which may not be under the user's profile and whose ACL Go's
+// Mkdir cannot restrict (it ignores the requested mode on Windows and the
+// new directory just inherits its parent's ACL) — %LocalAppData%\eyedbg is
+// the same directory the daemon's own runtime directory already lives in
+// and trusts (internal/daemon/paths.go's DefaultPaths), so it inherits that
+// same private, per-user ACL instead.
+func socketParentDir() (string, error) {
+	if runtime.GOOS != "windows" {
+		return os.TempDir(), nil
+	}
+
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("locate the user cache directory: %w", err)
+	}
+
+	dir := filepath.Join(cache, "eyedbg")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create %s: %w", dir, err)
+	}
+
+	return dir, nil
 }
 
 // abandon kills an adapter that didn't connect and waits until it is gone
