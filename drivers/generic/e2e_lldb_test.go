@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/session"
@@ -257,6 +258,39 @@ func TestCppExceptions(t *testing.T) {
 	}
 }
 
+// pauseAttached pauses s, again (up to pauseAttempts times) while it keeps
+// running. lldb-dap 18 answers a pause that arrives before its event thread
+// has seen the program resume after configurationDone with success and no
+// stop (request_pause ignores Process::Halt's "Process is not running."):
+// a sub-millisecond window this in-process pause, sent the moment Start
+// returns, hits often and a CLI round trip practically never.
+func pauseAttached(t *testing.T, s *session.Session) api.Snapshot {
+	t.Helper()
+
+	for range pauseAttempts {
+		snap, err := s.Resume(t.Context(), agent, session.ExecPause, 0, pauseWait, api.DumpSpec{})
+
+		switch {
+		case api.CodeOf(err) == api.CodeNotRunning: // the last pause's stop came after its wait
+			return s.Wait(t.Context(), 0, e2eWait, api.DumpSpec{})
+		case err != nil:
+			t.Fatalf("pause: %v", err)
+		case !snap.TimedOut:
+			return snap
+		}
+	}
+
+	t.Fatalf("still running after %d pauses", pauseAttempts)
+
+	return api.Snapshot{}
+}
+
+// How TestCAttach pauses (pauseAttached).
+const (
+	pauseAttempts = 3
+	pauseWait     = 5 * time.Second
+)
+
 // TestCAttach: attach, pause, detach, the process keeps running. Linux
 // only (ptrace_scope 0): macOS needs the task_for_pid entitlement.
 func TestCAttach(t *testing.T) {
@@ -297,7 +331,7 @@ func TestCAttach(t *testing.T) {
 		t.Fatalf("info = %+v, want attached to %d", info, pid)
 	}
 
-	snap := pyResume(t, s, session.ExecPause)
+	snap := pauseAttached(t, s)
 	if snap.Session.State != api.StateStopped || snap.Session.Stop == nil || snap.Session.Stop.Reason != "pause" {
 		t.Fatalf("pause = %+v, want stopped (pause)", snap.Session)
 	}
