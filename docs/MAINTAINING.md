@@ -18,6 +18,20 @@ Dependabot handles only action SHAs and `go.mod`; everything else is a manual bu
 - golangci-lint and govulncheck: `ci.yml` `env` + `Taskfile.yml` `vars` + CONTRIBUTING/AGENTS
   mentions.
 - goreleaser: `ci.yml` `env`.
+- `actions/setup-dotnet` and `actions/setup-python`: pinned by SHA in `ci.yml`; bump the version
+  comment alongside. `DOTNET_VERSION` and `PYTHON_VERSION`: `ci.yml` `env`.
+- `actionlint` and `zizmor`: `ci.yml` `env` (`ACTIONLINT_VERSION`, `ZIZMOR_VERSION`), also used by
+  `task lint:workflows`.
+- Runner labels (the `test`/`e2e` job matrices' `os:` values): bump when GitHub renames or retires
+  one (e.g. `-latest` moving to a new default).
+
+## CI cost while private
+
+Private-repo runners are billed per minute past the included quota (G2): Linux x64 $0.006, Linux
+arm64 $0.005, Windows x64/arm64 $0.010, macOS $0.062 — **macOS costs about 10× Linux x64**. The
+full 6-platform matrix (`test` and `e2e`, two of the six rows each are macOS and Windows) runs on
+every push to `main`. Watch usage under Settings → Billing while the repo is private; making it
+public removes the cost (hosted runners are free for public repos).
 
 ## Workflow security rules
 
@@ -26,7 +40,9 @@ Dependabot handles only action SHAs and `go.mod`; everything else is a manual bu
 - Never `pull_request_target` with checkout of PR code.
 - Untrusted values go in via `env`, never `${{ }}` inside `run:`.
 - No caches in release jobs.
-- Run `actionlint` and `zizmor --offline .` on every workflow change.
+- Run `actionlint` and `zizmor --offline .` on every workflow change (`task lint:workflows`, or
+  directly: `go run github.com/rhysd/actionlint/cmd/actionlint@$ACTIONLINT_VERSION` and
+  `pipx run --spec zizmor==$ZIZMOR_VERSION zizmor --offline .`).
 
 ## One-time setup after publishing
 
@@ -50,6 +66,8 @@ Dependabot handles only action SHAs and `go.mod`; everything else is a manual bu
 
 ## Releasing (not enabled)
 
+- `task snapshot` (GoReleaser, local) is the dry run: it builds release-shaped archives into
+  `dist/` without publishing, so packaging can be checked before any of this is wired up.
 - Remove `release.disable`.
 - Add a tag-triggered release workflow with `contents: write` only in that job and no caches.
 - Move `[Unreleased]` to the version.
