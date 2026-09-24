@@ -46,10 +46,10 @@ type testServer struct {
 
 // startServer runs Serve in the background and waits until it accepts
 // connections. Cleanup stops it and waits for Serve to return.
-func startServer(t *testing.T, idle time.Duration) *testServer {
+func startServer(t *testing.T) *testServer {
 	t.Helper()
 
-	return startServerIn(t, PathsIn(shortTempDir(t)), idle)
+	return startServerIn(t, PathsIn(shortTempDir(t)), time.Hour)
 }
 
 // startServerIn is startServer with the fake driver, in paths.
@@ -127,7 +127,7 @@ func dialUntil(t *testing.T, p Paths, done <-chan error) *Client {
 func TestHelloStatusStop(t *testing.T) {
 	t.Parallel()
 
-	ts := startServer(t, time.Hour)
+	ts := startServer(t)
 
 	cl, err := Dial(t.Context(), ts.paths, testInfo)
 	if err != nil {
@@ -175,7 +175,7 @@ func assertStatus(t *testing.T, cl *Client, p Paths, idle time.Duration) {
 func TestUnknownMethod(t *testing.T) {
 	t.Parallel()
 
-	ts := startServer(t, time.Hour)
+	ts := startServer(t)
 
 	cl, err := Dial(t.Context(), ts.paths, testInfo)
 	if err != nil {
@@ -213,7 +213,7 @@ func TestRejectsUnauthenticatedConnections(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			assertRejected(t, startServer(t, time.Hour), req)
+			assertRejected(t, startServer(t), req)
 		})
 	}
 }
@@ -259,7 +259,7 @@ func assertRejected(t *testing.T, ts *testServer, req api.Request) {
 func TestOneDaemonPerUser(t *testing.T) {
 	t.Parallel()
 
-	ts := startServer(t, time.Hour)
+	ts := startServer(t)
 
 	err := Serve(t.Context(), Config{Paths: ts.paths, Info: testInfo, Logger: slog.New(slog.DiscardHandler)})
 	if !errors.Is(err, ErrAlreadyRunning) {
@@ -277,9 +277,15 @@ func TestOneDaemonPerUser(t *testing.T) {
 func TestIdleExit(t *testing.T) {
 	t.Parallel()
 
-	ts := startServer(t, 50*time.Millisecond)
-
-	if err := ts.wait(t); err != nil {
+	// No connection is needed (or reliable: a slow machine may already be
+	// idle before a client dials): Serve must return nil on its own.
+	err := Serve(t.Context(), Config{
+		Paths:       PathsIn(shortTempDir(t)),
+		IdleTimeout: 50 * time.Millisecond,
+		Info:        testInfo,
+		Logger:      slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
 		t.Fatalf("Serve = %v, want nil after idle timeout", err)
 	}
 }
@@ -291,7 +297,7 @@ func TestExitsWhenSocketRemoved(t *testing.T) {
 		t.Skip("the removal it guards against is systemd's cleanup of $XDG_RUNTIME_DIR")
 	}
 
-	ts := startServer(t, time.Hour)
+	ts := startServer(t)
 
 	if err := os.Remove(ts.paths.Socket); err != nil {
 		t.Fatal(err)

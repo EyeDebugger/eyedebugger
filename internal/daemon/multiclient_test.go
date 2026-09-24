@@ -81,7 +81,7 @@ func eventKinds(events []api.Event) string {
 func TestMultiClientSession(t *testing.T) {
 	t.Parallel()
 
-	ts := startServer(t, time.Hour)
+	ts := startServer(t)
 	p := ts.paths
 	snap := startFake(t, p, "", api.LeaseHandoff)
 	id, file := snap.Session.ID, snap.Session.Program
@@ -185,7 +185,7 @@ func assertListed(t *testing.T, p Paths, id string) {
 func TestInvalidClient(t *testing.T) {
 	t.Parallel()
 
-	ts := startServer(t, time.Hour)
+	ts := startServer(t)
 
 	for _, tt := range []struct {
 		method string
@@ -254,7 +254,7 @@ func TestLostSessions(t *testing.T) {
 func TestCleanShutdownLeavesNoMetadata(t *testing.T) {
 	t.Parallel()
 
-	ts := startServer(t, time.Hour)
+	ts := startServer(t)
 	snap := startFake(t, ts.paths, "", "")
 	meta := filepath.Join(ts.paths.Sessions, snap.Session.ID+".json")
 
@@ -280,7 +280,7 @@ func TestCleanShutdownLeavesNoMetadata(t *testing.T) {
 func TestRecordingFile(t *testing.T) {
 	t.Parallel()
 
-	ts := startServer(t, time.Hour)
+	ts := startServer(t)
 	snap := startFake(t, ts.paths, "", "", "lines=2")
 	ref := api.SessionRef{SessionID: snap.Session.ID}
 
