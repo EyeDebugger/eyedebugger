@@ -108,10 +108,13 @@ renamed into place.
 then an absolute `entry`, then the installed copy (`<data dir>/<name>/<version>/`), then PATH
 (netcoredbg's order and messages, unchanged). A Python adapter runs as `<interpreter>
 <root>/<entry>` on one interpreter chosen by `--opt python`, then the manifest's env variable
-(`EYEDBG_PYTHON`; a relative `--opt python` path is taken from the caller's directory), then a
-project venv (`.venv` or `venv` with `pyvenv.cfg`, in the working directory, then the program's
-directory and its parents, searching only directories the user owns and running a venv only if it
-passes the same permission check as manifests), then the commands on PATH (`python3`,
+(`EYEDBG_PYTHON`; a relative `--opt python` path is taken from the caller's directory), then the
+caller's `$VIRTUAL_ENV` (the CLI reads its own `$VIRTUAL_ENV` and sends it in the start request,
+the same way it sends the client's directory, since the daemon's environment is fixed at daemon
+start and would otherwise miss whichever venv the caller had active), then a project venv (`.venv`
+or `venv` with `pyvenv.cfg`, in the working directory, then the program's directory and its
+parents, searching only directories the user owns and running a venv only if it passes the same
+permission check as manifests — `$VIRTUAL_ENV` included), then the commands on PATH (`python3`,
 `python`, `py -3`); only PATH candidates fall through a failed probe. The probe runs the
 interpreter with `-c` and the package name as an argument, drops the working directory from
 `sys.path` first and never imports the package. The root is the installed copy (when the
@@ -131,7 +134,8 @@ one (debugpy's capabilities are accurate for what eyedbg uses). Unknown fields b
 What stays in Go, and why: the schema, loader, trust check, template renderer and downloader
 (the boundary itself); the Python runtime (interpreter discovery is ecosystem knowledge, reusable by
 any Python-hosted adapter, but names no adapter); the generic driver and its eval-guard tokenizer
-(the rules are manifest data); `--opt` and the client's directory in the start request; and one
+(the rules are manifest data); `--opt`, the client's directory and its `$VIRTUAL_ENV` in the start
+request; and one
 session change, in DAP's terms rather than debugpy's: stop snapshots read only the scopes the
 adapter marks `presentationHint: "locals"` when it marks any.
 

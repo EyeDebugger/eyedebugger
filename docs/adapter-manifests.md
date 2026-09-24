@@ -107,16 +107,20 @@ interpreter's path is `${runtime}` in templates):
 | `module` | required | the import name of the package holding `entry` |
 
 The interpreter is the `option`'s value (a relative path is taken from the directory eyedbg ran
-in), else `env`'s, else a venv (a `venvs` directory holding `pyvenv.cfg`, in the working
+in), else `env`'s, else the caller's `$VIRTUAL_ENV` (the CLI reads it and passes it in the start
+request, the same way it passes the client's working directory; the daemon's own environment is
+not used for it), else a venv (a `venvs` directory holding `pyvenv.cfg`, in the working
 directory, then the program's directory and its parents; `bin/python`, or `Scripts\python.exe` on
 Windows), else the first of `commands` that runs. Only that last step moves on when an interpreter
-fails. On Unix only directories you own are searched for a venv (the walk up stops at the first
-one you don't), and a venv found must pass the manifest permission check (its directory, its
-`bin` or `Scripts` directory and `pyvenv.cfg` yours and not writable by group or others), else the
-start fails: a venv someone else controls is never run. Windows has no mode bits to check, so there
-only your profile directory (`%USERPROFILE%`) and what is inside it count as yours: a project outside
-it names its interpreter with `--opt python`. The package root is the installed copy when it
-exists and the interpreter meets `minVersion`, else the interpreter's own copy of `module`.
+fails; `$VIRTUAL_ENV`, like `option` and `env`, is a hard failure if set but not a valid venv — it
+is not silently skipped. On Unix only directories you own are searched for a venv (the walk up
+stops at the first one you don't), and a venv found — including `$VIRTUAL_ENV`'s — must pass the
+manifest permission check (its directory, its `bin` or `Scripts` directory and `pyvenv.cfg` yours
+and not writable by group or others), else the start fails: a venv someone else controls is never
+run. Windows has no mode bits to check, so there only your profile directory (`%USERPROFILE%`) and
+what is inside it count as yours: a project outside it names its interpreter with `--opt python`.
+The package root is the installed copy when it exists and the interpreter meets `minVersion`, else
+the interpreter's own copy of `module`.
 
 `install.downloads`: keys `linux`, `darwin` or `windows` / `amd64` or `arm64` (e.g.
 `linux/amd64`), or `"*"` for any platform (a specific key wins). Each value:

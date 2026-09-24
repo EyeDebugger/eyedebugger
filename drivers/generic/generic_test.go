@@ -313,3 +313,19 @@ func TestRelativeInterpreter(t *testing.T) {
 		}
 	}
 }
+
+// TestVirtualEnvPassedThrough: the start request's VirtualEnv (the
+// caller's $VIRTUAL_ENV, read by the CLI) reaches PythonInput unchanged.
+func TestVirtualEnvPassedThrough(t *testing.T) {
+	t.Parallel()
+
+	app := appFile(t)
+	venv := filepath.Join(t.TempDir(), "venv")
+
+	var in adapters.PythonInput
+
+	_, err := pythonDriver(t, &in).Prepare(t.Context(), session.LaunchSpec{Program: app, VirtualEnv: venv})
+	if err != nil || in.VirtualEnv != venv {
+		t.Fatalf("VirtualEnv = %q, %v; want %q", in.VirtualEnv, err, venv)
+	}
+}

@@ -23,10 +23,11 @@ import (
 
 // Where a Python interpreter came from (Runtime.Source).
 const (
-	PythonFromOption = "option"
-	PythonFromEnv    = "env"
-	PythonFromVenv   = "venv"
-	PythonFromPath   = "path"
+	PythonFromOption     = "option"
+	PythonFromEnv        = "env"
+	PythonFromVirtualEnv = "virtualenv"
+	PythonFromVenv       = "venv"
+	PythonFromPath       = "path"
 )
 
 // Where a Python adapter's package came from (Runtime.RootSource).
@@ -69,6 +70,10 @@ type PythonInput struct {
 	// ProgramDir is the program's directory: venvs are looked for there
 	// and in its parents.
 	ProgramDir string
+	// VirtualEnv is the caller's $VIRTUAL_ENV, if any ("" for none): tried
+	// as a venv (like a project venv) after Interpreter and the
+	// manifest's environment variable, before a project venv.
+	VirtualEnv string
 }
 
 // Runtime is the interpreter a Python adapter and its program run on.
@@ -77,8 +82,8 @@ type Runtime struct {
 	Exe string
 	// Version is its version, X.Y.Z.
 	Version string
-	// Source is PythonFromOption, PythonFromEnv, PythonFromVenv or
-	// PythonFromPath.
+	// Source is PythonFromOption, PythonFromEnv, PythonFromVirtualEnv,
+	// PythonFromVenv or PythonFromPath.
 	Source string
 	// Root is the directory holding the adapter's package.
 	Root string
@@ -125,8 +130,9 @@ func systemPythonEnv() pythonEnv {
 
 // ResolvePython finds the interpreter for Python adapter m and the
 // package root to run the adapter from. Order: in.Interpreter, the
-// manifest's environment variable, a project venv, then the manifest's
-// commands on PATH; only PATH candidates fall through to the next.
+// manifest's environment variable, in.VirtualEnv, a project venv, then the
+// manifest's commands on PATH; only PATH candidates fall through to the
+// next.
 func ResolvePython(ctx context.Context, m *Manifest, in PythonInput) (Runtime, error) {
 	return systemPythonEnv().resolve(ctx, m, in)
 }
@@ -145,6 +151,12 @@ func (e pythonEnv) resolve(ctx context.Context, m *Manifest, in PythonInput) (Ru
 	c, found, err := e.explicit(m, in)
 	if err != nil {
 		return Runtime{}, err
+	}
+
+	if !found {
+		if found, err = e.virtualEnv(m, in, &c); err != nil {
+			return Runtime{}, err
+		}
 	}
 
 	if !found {
@@ -240,22 +252,15 @@ func (e pythonEnv) venv(m *Manifest, in PythonInput, c *candidate) (bool, error)
 	for _, dir := range venvDirs(in, e.owned) {
 		for _, name := range m.Python.Venvs {
 			root := filepath.Join(dir, name)
-			cfg := filepath.Join(root, "pyvenv.cfg")
 
-			if _, err := e.stat(cfg); err != nil {
+			bin, exe, found, err := e.venvRoot(root)
+			if !found {
 				continue
 			}
 
-			bin, exe := filepath.Join(root, "bin"), "python"
-			if e.goos == goosWindows {
-				bin, exe = filepath.Join(root, "Scripts"), "python.exe"
-			}
-
-			for _, p := range []string{root, bin, cfg} {
-				if err := e.trust(p); err != nil {
-					return false, api.NewError(api.CodeAdapterMissing, "the virtual environment "+root+" is not safe to run: "+err.Error(),
-						"fix its permissions, or choose the interpreter"+optionOrEnv(m))
-				}
+			if err != nil {
+				return false, api.NewError(api.CodeAdapterMissing, "the virtual environment "+root+" is not safe to run: "+err.Error(),
+					"fix its permissions, or choose the interpreter"+optionOrEnv(m))
 			}
 
 			*c = candidate{argv: []string{filepath.Join(bin, exe)}, source: PythonFromVenv}
@@ -265,6 +270,57 @@ func (e pythonEnv) venv(m *Manifest, in PythonInput, c *candidate) (bool, error)
 	}
 
 	return false, nil
+}
+
+// virtualEnv checks the caller's $VIRTUAL_ENV (in.VirtualEnv), if set, as a
+// venv root directly, not a directory to search: unlike a project venv, a
+// missing pyvenv.cfg or a failed permission check is a hard failure, like
+// in.Interpreter and the manifest's environment variable, not silently
+// skipped.
+func (e pythonEnv) virtualEnv(m *Manifest, in PythonInput, c *candidate) (bool, error) {
+	if in.VirtualEnv == "" {
+		return false, nil
+	}
+
+	bin, exe, found, err := e.venvRoot(in.VirtualEnv)
+
+	switch {
+	case !found:
+		return false, api.NewError(api.CodeAdapterMissing, "$VIRTUAL_ENV="+in.VirtualEnv+" has no pyvenv.cfg",
+			"fix $VIRTUAL_ENV, or choose the interpreter"+optionOrEnv(m))
+	case err != nil:
+		return false, api.NewError(api.CodeAdapterMissing, "$VIRTUAL_ENV="+in.VirtualEnv+" is not safe to run: "+err.Error(),
+			"fix its permissions, or choose the interpreter"+optionOrEnv(m))
+	}
+
+	*c = candidate{argv: []string{filepath.Join(bin, exe)}, source: PythonFromVirtualEnv}
+
+	return true, nil
+}
+
+// venvRoot checks whether root is a venv (it has pyvenv.cfg) and, if so,
+// that it passes the manifest permission check (root, its bin or Scripts
+// directory and pyvenv.cfg all the user's and writable by no one else).
+// found is false when root has no pyvenv.cfg; err is the permission
+// failure, if any.
+func (e pythonEnv) venvRoot(root string) (bin, exe string, found bool, err error) {
+	cfg := filepath.Join(root, "pyvenv.cfg")
+	if _, statErr := e.stat(cfg); statErr != nil {
+		return "", "", false, nil //nolint:nilerr // no pyvenv.cfg means "not a venv", not a failure.
+	}
+
+	bin, exe = filepath.Join(root, "bin"), "python"
+	if e.goos == goosWindows {
+		bin, exe = filepath.Join(root, "Scripts"), "python.exe"
+	}
+
+	for _, p := range []string{root, bin, cfg} {
+		if trustErr := e.trust(p); trustErr != nil {
+			return "", "", true, trustErr
+		}
+	}
+
+	return bin, exe, true, nil
 }
 
 // venvDirs are the directories searched for a venv, nearest first: the

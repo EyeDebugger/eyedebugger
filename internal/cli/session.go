@@ -197,9 +197,10 @@ For python: --program takes the script, or --opt module=NAME runs a module like 
 (e.g. pytest). Nothing is built (--project and --no-build are ignored). The working directory
 defaults to where you run eyedbg, as with 'python app.py'. The interpreter, which runs both
 debugpy and your program, is --opt python=PATH (relative to the current directory), else
-EYEDBG_PYTHON (as the daemon was started with), else a .venv or venv (with pyvenv.cfg) in the
-working directory or in the program's directory or its parents (only directories you own, and a
-venv others can write is refused), else python3, python or 'py -3' on PATH; it needs Python 3.10+.
+EYEDBG_PYTHON (as the daemon was started with), else your active $VIRTUAL_ENV, else a .venv or
+venv (with pyvenv.cfg) in the working directory or in the program's directory or its parents (only
+directories you own, and a venv others can write is refused), else python3, python or 'py -3' on
+PATH; it needs Python 3.10+.
 --opt justMyCode=false also stops and steps in library code. Child processes the program
 starts run, but are not debugged. Language options are NAME=VALUE (--opt, repeatable); an
 unknown one is an error that lists the language's options.
@@ -301,6 +302,7 @@ func (sf *startFlags) params(args []string, dash int) (api.StartParams, error) {
 		LaunchSpec: api.LaunchSpec{
 			Project: absPath(project), Program: absPath(sf.program), Cwd: absPath(sf.cwd),
 			Args: progArgs, NoBuild: sf.noBuild, StopOnEntry: sf.stopOnEntry, ClientDir: workDir(),
+			VirtualEnv: os.Getenv("VIRTUAL_ENV"),
 		},
 	}
 
