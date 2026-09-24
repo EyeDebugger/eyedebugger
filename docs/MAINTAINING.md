@@ -29,15 +29,18 @@ Dependabot handles only action SHAs and `go.mod`; everything else is a manual bu
   `e2e-matrix` job's script — `reduced` is derived from `full`'s first row): bump when GitHub
   renames or retires one (e.g. `-latest` moving to a new default).
 
-## CI cost while private
+## CI cost
 
-Private-repo runners are billed per minute past the included quota: Linux x64 $0.006, Linux
-arm64 $0.005, Windows x64/arm64 $0.010, macOS $0.062 — **macOS costs about 10× Linux x64**. The
-`test` job's full 6-platform matrix (two of the six rows are macOS, two are Windows) runs on every
-push to `main`, but `e2e` runs on `ubuntu-latest` only on push/pull_request; its full 6-platform
-matrix runs only on `workflow_dispatch` and the weekly `schedule`. Watch usage under Settings →
-Billing while the repo is private; making it public removes the cost (hosted runners are free for
-public repos).
+The repo is public, so GitHub-hosted runners are free. `e2e` still runs on `ubuntu-latest` only on
+push/pull_request (its full 6-platform matrix runs on `workflow_dispatch` and the weekly
+`schedule`) to keep feedback fast.
+
+## Releasing
+
+1. Move `CHANGELOG.md`'s `[Unreleased]` entries under a new `## [X.Y.Z] - YYYY-MM-DD` heading.
+2. Commit, then tag and push: `git tag -a vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`.
+3. `.github/workflows/release.yml` builds the archives with GoReleaser, publishes the GitHub
+   release with that CHANGELOG section as its notes, and attests their provenance.
 
 ## Workflow security rules
 
