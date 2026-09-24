@@ -6,6 +6,7 @@ package facade
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -565,9 +566,17 @@ func (c *connection) respond(ctx context.Context, req godap.RequestMessage, resp
 	return true
 }
 
-// fail writes an error response for err.
+// fail writes an error response for err. A request the connection's end
+// canceled isn't answered: its client left (or the daemon is stopping).
 func (c *connection) fail(ctx context.Context, req godap.RequestMessage, err error, showUser bool) {
 	command := req.GetRequest().Command
+
+	if abandoned(ctx, err) {
+		c.logger.DebugContext(ctx, "facade request abandoned: the connection is closing", slog.String("command", command))
+
+		return
+	}
+
 	holder := ""
 
 	if api.CodeOf(err) == api.CodeLeaseHeld {
@@ -582,6 +591,15 @@ func (c *connection) fail(ctx context.Context, req godap.RequestMessage, err err
 	if werr := c.srv.Fail(req, message, body); werr != nil {
 		c.broken(ctx, req)
 	}
+}
+
+// abandoned reports whether err, with no code of its own, is ctx's end:
+// the connection's context, canceled once its reader stopped. Any other
+// error, a timeout of the request's own included, is still a failure.
+func abandoned(ctx context.Context, err error) bool {
+	cause := ctx.Err()
+
+	return cause != nil && api.CodeOf(err) == "" && errors.Is(err, cause)
 }
 
 // send writes an event outside the follower (before it starts).

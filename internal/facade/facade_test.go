@@ -4,6 +4,8 @@
 package facade
 
 import (
+	"context"
+	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -1745,4 +1747,81 @@ func TestBreakpointsEventCoalesced(t *testing.T) {
 	if n := len(named(tc.events, CommandBreakpoints)); n < 2 || n > 4 {
 		t.Errorf("%d eyedbg/breakpoints events (1 at the join), want 1 to 3 for the three changes", n)
 	}
+}
+
+// TestLeavingAbandonsRequests: a request still in flight when the client
+// leaves (a disconnect request, or closing the connection) is canceled by
+// the connection's end; it is neither answered nor reported as a failure.
+func TestLeavingAbandonsRequests(t *testing.T) {
+	t.Parallel()
+
+	for _, how := range []string{"disconnect", "close"} {
+		t.Run(how, func(t *testing.T) {
+			t.Parallel()
+
+			drv := fakeDriver{opts: daptest.Options{Unanswered: []string{"threads"}}}
+			s := startSession(t, drv, startParams(stopOnEntry, ""))
+
+			logs := &logRecorder{}
+			tc := joinWith(t, Config{Session: s, Client: humanC, Logger: slog.New(logs)})
+			tc.handshake("")
+
+			threads := tc.send("threads", "")
+			// Answered after threads was dispatched: its handler is running.
+			tc.ok(CommandClients, "")
+
+			if how == "disconnect" {
+				tc.ok("disconnect", "")
+			} else {
+				_ = tc.conn.Close()
+			}
+
+			tc.waitClosed()
+
+			if r, ok := tc.responses[threads]; ok {
+				t.Errorf("threads answered after leaving: %s", errorText(r))
+			}
+
+			if got := logs.atLeast(slog.LevelWarn); len(got) != 0 {
+				t.Errorf("logged at warn or above: %v", got)
+			}
+		})
+	}
+}
+
+// logRecorder is a slog handler keeping the messages of every record.
+type logRecorder struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (*logRecorder) Enabled(context.Context, slog.Level) bool { return true }
+
+func (l *logRecorder) Handle(_ context.Context, r slog.Record) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.records = append(l.records, r)
+
+	return nil
+}
+
+func (l *logRecorder) WithAttrs([]slog.Attr) slog.Handler { return l }
+
+func (l *logRecorder) WithGroup(string) slog.Handler { return l }
+
+// atLeast returns the messages of the records at level or above.
+func (l *logRecorder) atLeast(level slog.Level) []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	var msgs []string
+
+	for i := range l.records {
+		if r := &l.records[i]; r.Level >= level {
+			msgs = append(msgs, r.Level.String()+" "+r.Message)
+		}
+	}
+
+	return msgs
 }
