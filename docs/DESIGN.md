@@ -220,7 +220,9 @@ Two lldb-dap quirks the session absorbs for every adapter: lldb-dap 18–20 answ
 `"result"` instead of `"value"`, so an answer without a value makes `set` re-read the variable from
 its parent; and on Linux lldb-dap pauses with SIGSTOP and reports the stop as reason `exception`
 (`signal SIGSTOP`), so a SIGSTOP signal stop while a pause is outstanding is reported as `pause`
-(its description kept).
+(its description kept). Not absorbed: lldb-dap 18 answers a pause sent before its event thread has
+seen the program resume after `configurationDone` (a sub-millisecond window right after attach) with
+success and no stop; the pause times out and a second one stops the program.
 
 ### Go
 
