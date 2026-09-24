@@ -75,12 +75,8 @@ push/pull_request (its full 6-platform matrix runs on `workflow_dispatch` and th
    - Required checks `ci-ok`, `conventional-commits`, `DCO`.
    - Block force-push and deletion; require linear history.
 
-## Releasing (not enabled)
+## Release dry run and open items
 
 - `task snapshot` (GoReleaser, local) is the dry run: it builds release-shaped archives into
-  `dist/` without publishing, so packaging can be checked before any of this is wired up.
-- Remove `release.disable`.
-- Add a tag-triggered release workflow with `contents: write` only in that job and no caches.
-- Move `[Unreleased]` to the version.
-- Ship third-party license notices in archives (pflag is BSD-3-Clause).
-- Consider signing and provenance.
+  `dist/` without publishing.
+- Open: ship third-party license notices in archives (pflag is BSD-3-Clause).
