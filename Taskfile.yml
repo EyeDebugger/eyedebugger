@@ -112,11 +112,79 @@ tasks:
     cmds:
       - rm -rf bin dist
 
-  ci:
-    desc: Run the checks CI runs
+  # The VS Code extension (extensions/vscode; docs/adr/0015): Node 24 LTS
+  # (>= 22.13) and pnpm (corepack enable, or any pnpm >= 11, which switches
+  # itself to the version package.json pins). pnpm only: never npm or npx.
+  ext:install:
+    desc: Install the extension's pinned dev dependencies (frozen lockfile; no install scripts run)
+    dir: extensions/vscode
+    cmds:
+      - pnpm install --frozen-lockfile
+
+  ext:typecheck:
+    desc: Type-check the extension (tsc --noEmit)
+    dir: extensions/vscode
+    cmds:
+      - pnpm run typecheck
+
+  ext:lint:
+    desc: Lint and format-check the extension (Biome)
+    dir: extensions/vscode
+    cmds:
+      - pnpm run lint
+
+  ext:fmt:
+    desc: Format the extension and apply safe lint fixes (Biome)
+    dir: extensions/vscode
+    cmds:
+      - pnpm run fmt
+
+  ext:test:
+    desc: Run the extension's unit tests (node --test)
+    dir: extensions/vscode
+    cmds:
+      - pnpm test
+
+  ext:build:
+    desc: Bundle the extension into extensions/vscode/dist
+    dir: extensions/vscode
+    cmds:
+      - pnpm run build
+
+  ext:package:
+    desc: Package the extension into extensions/vscode/out/eyedbg.vsix and check its file list
+    dir: extensions/vscode
+    cmds:
+      - pnpm run package
+
+  ext:test:integration:
+    desc: Run the extension's integration tests in VS Code 1.100.0 and 1.139.0 (downloads VS Code; Linux needs xvfb; EYEDBG_DATA_DIR with debugpy); pass COUNT=5 before merging an extension change
+    dir: extensions/vscode
+    env:
+      EYEDBG_TEST_COUNT: '{{.COUNT | default "1"}}'
+    cmds:
+      - pnpm run test:integration
+
+  ext:ci:
+    desc: Run the extension checks CI runs (without the integration tests)
+    cmds:
+      - task: ext:install
+      - task: ext:typecheck
+      - task: ext:lint
+      - task: ext:test
+      - task: ext:package
+
+  ci:go:
+    desc: Run the Go checks CI runs
     cmds:
       - task: tidy:check
       - task: lint
       - task: test:race
       - task: build:cross
       - task: vuln
+
+  ci:
+    desc: Run the checks CI runs (Go and the VS Code extension; needs Node and pnpm — 'task ci:go' for Go only)
+    cmds:
+      - task: ci:go
+      - task: ext:ci

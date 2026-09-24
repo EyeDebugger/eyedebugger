@@ -30,6 +30,10 @@ env:
   GORELEASER_VERSION: v2.18.2
   DOTNET_VERSION: "10.0.x"
   PYTHON_VERSION: "3.13"
+  # The VS Code extension's toolchain (extensions/vscode): Node Active LTS;
+  # pnpm comes from corepack (bundled through Node 24), which downloads the
+  # version package.json's packageManager pins and checks its hash.
+  NODE_VERSION: "24.x"
   ACTIONLINT_VERSION: v1.7.12
   ZIZMOR_VERSION: "1.30.1"
 
@@ -255,6 +259,74 @@ jobs:
           [ -n "$RACE" ] && flags+=("$RACE")
           go test "${flags[@]}" -count="$E2E_COUNT" -p 1 -timeout 50m ./drivers/... ./internal/e2e/...
 
+  # The VS Code extension: checks, the VSIX file list, and the integration
+  # suite in real VS Code (1.100.0 and 1.139.0, downloaded and checked against
+  # the update server's sha256) against the real eyedbg and debugpy, on every
+  # OS on every run. No caches; no secrets.
+  extension:
+    name: extension (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - name: Enable pnpm (corepack)
+        run: |
+          corepack enable
+          cd extensions/vscode && pnpm --version
+      - name: Install xvfb (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+      - name: Build eyedbg
+        run: |
+          go build -trimpath -o "$RUNNER_TEMP/eyedbg-bin/" ./cmd/eyedbg ./cmd/eyedbgd
+          echo "EYEDBG_DATA_DIR=$RUNNER_TEMP/eyedbg-data" >> "$GITHUB_ENV"
+          echo "EYEDBG_TEST_BIN_DIR=$RUNNER_TEMP/eyedbg-bin" >> "$GITHUB_ENV"
+      - name: Install debugpy
+        run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters install debugpy"
+      - name: Install dependencies
+        working-directory: extensions/vscode
+        run: pnpm install --frozen-lockfile
+      - name: Type-check
+        working-directory: extensions/vscode
+        run: pnpm run typecheck
+      - name: Lint
+        working-directory: extensions/vscode
+        run: pnpm run lint
+      - name: Unit tests
+        working-directory: extensions/vscode
+        run: pnpm test
+      - name: Package
+        working-directory: extensions/vscode
+        run: pnpm run package
+      - name: Integration tests
+        working-directory: extensions/vscode
+        run: pnpm run test:integration
+
   workflows:
     name: workflows
     runs-on: ubuntu-latest
@@ -324,7 +396,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, test, build, e2e-matrix, e2e, workflows, vuln, goreleaser]
+    needs: [lint, test, build, e2e-matrix, e2e, extension, workflows, vuln, goreleaser]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -1,0 +1,348 @@
+{
+  "name": "eyedbg",
+  "displayName": "EyeDebugger",
+  "description": "Join an AI agent's live eyedbg debug session from VS Code: see what the agent sees, its breakpoints included, and take or request control.",
+  "version": "0.0.0",
+  "private": true,
+  "publisher": "eyedebugger",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EyeDebugger/eyedebugger.git",
+    "directory": "extensions/vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/EyeDebugger/eyedebugger/issues"
+  },
+  "categories": [
+    "Debuggers"
+  ],
+  "keywords": [
+    "debug",
+    "debugger",
+    "dap",
+    "agent",
+    "eyedbg"
+  ],
+  "icon": "icon.png",
+  "main": "./dist/extension.js",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "EyeDebugger runs the eyedbg CLI, which builds and runs the workspace's code."
+    },
+    "virtualWorkspaces": false
+  },
+  "activationEvents": [
+    "onDebugResolve:eyedbg",
+    "onDebugDynamicConfigurations:eyedbg"
+  ],
+  "contributes": {
+    "configuration": {
+      "title": "EyeDebugger",
+      "properties": {
+        "eyedbg.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Absolute path of the `eyedbg` executable (a leading `~/` is your home directory). Empty: look for `eyedbg` on `PATH` (absolute entries only; on Windows `eyedbg.exe`). Can only be set in user settings."
+        },
+        "eyedbg.clientName": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Your name in eyedbg sessions: you join as `human:NAME`. 1 to 64 of letters, digits and `. _ @ + -`. Empty: your OS user name."
+        },
+        "eyedbg.lease.afterTakeOver": {
+          "type": "string",
+          "default": "ask",
+          "scope": "window",
+          "enum": [
+            "ask",
+            "humanPriority",
+            "keep"
+          ],
+          "enumDescriptions": [
+            "Under the free policy, ask once per session whether to switch it to human-priority.",
+            "Under the free policy, switch the session to human-priority without asking.",
+            "Leave the session's lease policy as it is."
+          ],
+          "markdownDescription": "After you take control from an agent while the lease policy is `free` (where the agent's next run or step takes control back): switch the session to `human-priority`, so the agent has to ask. Under `handoff` and `human-priority` nothing happens: the agent already can't take control back without asking or forcing it."
+        }
+      }
+    },
+    "debuggers": [
+      {
+        "type": "eyedbg",
+        "label": "EyeDebugger",
+        "configurationAttributes": {
+          "attach": {
+            "properties": {
+              "session": {
+                "type": "string",
+                "pattern": "^s-[a-z0-9]{1,32}$",
+                "description": "The eyedbg session to join (see 'eyedbg sessions'). Omit it to pick one."
+              }
+            }
+          },
+          "launch": {
+            "required": [
+              "lang"
+            ],
+            "properties": {
+              "lang": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_+-]{0,31}$",
+                "description": "The language: dotnet, python, c, cpp, rust, go, ... (see 'eyedbg adapters ls')."
+              },
+              "program": {
+                "type": "string",
+                "description": "The program to run (for dotnet an already-built .dll or apphost: no build)."
+              },
+              "project": {
+                "type": "string",
+                "description": "A project file or directory to build first (dotnet)."
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The program's arguments."
+              },
+              "cwd": {
+                "type": "string",
+                "description": "The program's working directory; a relative one is resolved against the workspace folder."
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Environment variables for the program."
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "default": false,
+                "description": "Stop at the program's entry point."
+              },
+              "noBuild": {
+                "type": "boolean",
+                "default": false,
+                "description": "Don't build (needs program)."
+              },
+              "opts": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Language options, as 'eyedbg start --opt NAME=VALUE' (e.g. module, python, justMyCode for python)."
+              },
+              "leasePolicy": {
+                "type": "string",
+                "enum": [
+                  "free",
+                  "handoff",
+                  "human-priority"
+                ],
+                "default": "free",
+                "description": "Who may take control: free (anyone), handoff (only when given), human-priority (a human may take it from an agent)."
+              },
+              "exceptions": {
+                "type": "string",
+                "enum": [
+                  "all",
+                  "uncaught",
+                  "none"
+                ],
+                "description": "Which exceptions stop the program for you."
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "eyedbg",
+            "request": "attach",
+            "name": "Join eyedbg session"
+          },
+          {
+            "type": "eyedbg",
+            "request": "launch",
+            "name": "Launch Python file (eyedbg)",
+            "lang": "python",
+            "program": "${file}",
+            "stopOnEntry": true
+          }
+        ]
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "csharp"
+      },
+      {
+        "language": "python"
+      },
+      {
+        "language": "c"
+      },
+      {
+        "language": "cpp"
+      },
+      {
+        "language": "rust"
+      },
+      {
+        "language": "go"
+      }
+    ],
+    "commands": [
+      {
+        "command": "eyedbg.joinSession",
+        "title": "Join Session…",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.lease.menu",
+        "title": "Control…",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.lease.take",
+        "title": "Take Control",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.lease.request",
+        "title": "Request Control…",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.lease.release",
+        "title": "Release Control",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.lease.grant",
+        "title": "Give Control to…",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.lease.policy",
+        "title": "Change Lease Policy…",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.breakpoints.copyAsMine",
+        "title": "Copy as My Breakpoint",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.breakpoints.removeForEveryone",
+        "title": "Remove Breakpoint for Everyone…",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.showActivity",
+        "title": "Show Activity",
+        "category": "EyeDebugger"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "eyedbg.lease.menu",
+          "when": "debugType == 'eyedbg'"
+        },
+        {
+          "command": "eyedbg.lease.take",
+          "when": "debugType == 'eyedbg'"
+        },
+        {
+          "command": "eyedbg.lease.request",
+          "when": "debugType == 'eyedbg'"
+        },
+        {
+          "command": "eyedbg.lease.release",
+          "when": "debugType == 'eyedbg'"
+        },
+        {
+          "command": "eyedbg.lease.grant",
+          "when": "debugType == 'eyedbg'"
+        },
+        {
+          "command": "eyedbg.lease.policy",
+          "when": "debugType == 'eyedbg'"
+        },
+        {
+          "command": "eyedbg.breakpoints.copyAsMine",
+          "when": "debugType == 'eyedbg'"
+        },
+        {
+          "command": "eyedbg.breakpoints.removeForEveryone",
+          "when": "debugType == 'eyedbg'"
+        }
+      ],
+      "editor/lineNumber/context": [
+        {
+          "command": "eyedbg.breakpoints.copyAsMine",
+          "when": "debugType == 'eyedbg'",
+          "group": "eyedbg@1"
+        },
+        {
+          "command": "eyedbg.breakpoints.removeForEveryone",
+          "when": "debugType == 'eyedbg'",
+          "group": "eyedbg@2"
+        }
+      ]
+    },
+    "colors": [
+      {
+        "id": "eyedbg.sharedBreakpoint.foreground",
+        "description": "Text beside another client's breakpoint (whose it is, its condition).",
+        "defaults": {
+          "dark": "editorCodeLens.foreground",
+          "light": "editorCodeLens.foreground",
+          "highContrast": "editorCodeLens.foreground",
+          "highContrastLight": "editorCodeLens.foreground"
+        }
+      },
+      {
+        "id": "eyedbg.sharedBreakpoint.overviewRuler",
+        "description": "Overview ruler mark of another client's breakpoint.",
+        "defaults": {
+          "dark": "debugIcon.breakpointForeground",
+          "light": "debugIcon.breakpointForeground",
+          "highContrast": "debugIcon.breakpointForeground",
+          "highContrastLight": "debugIcon.breakpointForeground"
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node esbuild.mjs extension",
+    "typecheck": "tsc --noEmit -p .",
+    "lint": "biome ci .",
+    "fmt": "biome check --write .",
+    "test": "node esbuild.mjs unit && node --test out/unit/all.test.js",
+    "package": "node esbuild.mjs extension && vsce package --no-dependencies --out out/eyedbg.vsix && node scripts/check-vsix.mjs",
+    "test:integration": "node esbuild.mjs extension && node esbuild.mjs integration && node out/integration/runner.js"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14",
+    "@types/node": "20.19.43",
+    "@types/vscode": "1.100.0",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.0.0",
+    "esbuild": "0.28.2",
+    "typescript": "6.0.3"
+  },
+  "packageManager": "pnpm@11.27.1+sha512.a81d4c21b9b09a4b0aebf90ef5e527d4262bdda322d26082978cb549023ac6d9cafc98b19fffaa5c71db438a65f70224edb78d7311187861ff96480d1cdca23c"
+}

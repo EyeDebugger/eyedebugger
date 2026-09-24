@@ -145,3 +145,31 @@
 - Use `path/filepath` for OS paths.
 - Platform code goes in `_windows.go` / `_unix.go` files; the lint job runs on all 3 OSes.
 - Release builds use `CGO_ENABLED=0`. No build logic in shell scripts.
+
+## TypeScript (extensions/vscode)
+
+The VS Code extension (ADR 0015) follows the same rules where they apply; these are its own.
+
+- `src/core/` is pure — no `vscode` import (a unit test enforces it) — and holds everything that
+  can be unit-tested: parsing, validation, argv building, the mirror model, lease decisions and
+  every string shown to the user. `src/vscode/` is the glue. `src/vscode/exec.ts` is the only
+  place that starts a process.
+- Processes: `child_process.execFile` of the resolved absolute `eyedbg`, never a shell; flag
+  values bound as `--flag=value`, program arguments after `--`; every value from a configuration
+  validated first. Nothing a workspace can set names the binary (`eyedbg.path` is
+  machine-scoped).
+- Text from a session (other clients' names, conditions, log and lease-request messages, the
+  adapter's messages, program paths) is untrusted: build it in `src/core/render.ts`; control
+  characters become spaces and lengths are capped (`plainText`); notifications go through
+  `notificationSafe` (VS Code runs `command:` links in them); hovers are `MarkdownString`s with
+  `isTrusted` and `supportHtml` off, filled with `appendText`; labels that render `$(icon)` go
+  through `noIcons`.
+- Logs never hold debuggee data (values, output, evaluation results); `--env` values are redacted
+  (`redact`).
+- Tests: `node:test` for `src/core`; the integration suite waits on events (DAP messages, the
+  extension's API change event, `eyedbg events --wait`) with deadlines — never sleeps or retries —
+  and always runs VS Code with a throwaway profile (the runner refuses a real one). Act on VS
+  Code's breakpoints after seeing an adapter event only once `synced()` returned.
+- Biome formats and lints (`task ext:fmt`, `task ext:lint`); `// biome-ignore <rule>: <reason>` is
+  the only suppression form.
+- Every `.ts` and `.mjs` file starts with the two-line SPDX header.
