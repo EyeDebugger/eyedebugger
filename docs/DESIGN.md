@@ -153,7 +153,7 @@ Design rules:
 
 Two layers, so simple languages need no Go code (ADR 0011):
 
-1. **Adapter manifest** (declarative JSON, schema 1; field reference in docs/adapter-manifests.md): bundled (`internal/adapters/manifests/`, embedded) or the user's own (`~/.eyedbg/adapters/`; `EYEDBG_CONFIG_DIR` overrides the `~/.eyedbg` part, `EYEDBG_HOME` overrides `~/.eyedbg` itself), one per adapter. It says how to obtain the adapter (pinned download per os/arch or `"*"`, SHA-256, size, archive layout), how to find and spawn it (stdio; a native executable found by env variable, installed copy or PATH, or a `python` runtime: a package run on the user's interpreter), and, for a language served by the generic driver, its `--opt` options, launch/attach templates (`${program}`, `${args}`, `${cwd}`, `${env}`, `${stopOnEntry}`, `${runtime}`, `${pid}`, `${opt.NAME}`), exception-mode filter ids and eval-guard rules. A user manifest replaces the bundled one of the same name or language, whole; invalid or untrusted ones are left out and reported (`adapters ls`, `doctor`, the daemon log).
+1. **Adapter manifest** (declarative JSON, schema 1; field reference in docs/adapter-manifests.md): bundled (`internal/adapters/manifests/`, embedded) or the user's own (`~/.eyedbg/adapters/`; `EYEDBG_CONFIG_DIR` overrides the `~/.eyedbg` part, `EYEDBG_HOME` overrides `~/.eyedbg` itself), one per adapter. It says how to obtain the adapter (pinned download per os/arch or `"*"`, SHA-256, size, archive layout), how to find and spawn it (a native executable found by env variable, installed copy or PATH, or a `python` runtime: a package run on the user's interpreter), how to talk DAP to it once spawned (`transport`: `stdio`, the default, or `connect` — ADR 0013 — a Unix socket in a fresh private directory that the adapter dials in to, its path `${socket}` in `adapter.args`; for an adapter that can only listen, like Delve's `dlv dap`), and, for a language served by the generic driver, its `--opt` options, launch/attach templates (`${program}`, `${args}`, `${cwd}`, `${env}`, `${envList}`, `${stopOnEntry}`, `${runtime}`, `${pid}`, `${opt.NAME}`), exception-mode filter ids and eval-guard rules. A user manifest replaces the bundled one of the same name or language, whole; invalid or untrusted ones are left out and reported (`adapters ls`, `doctor`, the daemon log).
 2. **Driver** (Go interface, compiled in) for languages that need logic (dotnet: project detection and builds, VSTest test runs, the C# side-effect check); its manifest is `"builtin": true` and carries adapter metadata only. Every other language a manifest names is served by the generic driver (`drivers/generic`), registered by `generic.Drivers(registry)` in `internal/cli`: nothing in `internal/session` or `internal/daemon` knows a language.
 
 The interface as designed:
@@ -172,7 +172,7 @@ type Driver interface {
 
 As built (`internal/session/driver.go`): `Name()` and `Prepare(ctx, LaunchSpec) (Launch, error)`, which returns the adapter command and the DAP request body, plus per-driver behaviour the session applies: `Request` (`launch`/`attach`), `PID`, `ExceptionFilters` (mode → adapter filter ids), `SideEffects` (the eval check), `AttachHint`. `LaunchSpec` carries the language's `Options` (`--opt`) and the caller's working directory (`ClientDir`). Optional interfaces: `Attacher` (`PrepareAttach(ctx, AttachSpec)`) and `Tester` (`TestCommand(ctx, TestSpec)`: the command, how to find the test host's pid in its output, and how to explain an exit without one; a Tester is also an Attacher). The generic driver is always an Attacher: without an `attach` template it answers `UNSUPPORTED_BY_ADAPTER` with the manifest's hint. Language detection from a manifest's `extensions` and `markers` is not wired yet (`start` names the language).
 
-- **Trust:** a user manifest names commands eyedbg runs, so it is trusted like the user's shell configuration: never read from a project; on Unix its directory, the parent and the file (checked through the opened handle) must be the user's and writable by neither group nor others (OpenSSH's `st_mode & 022` rule); nothing runs at load; argv never goes through a shell; downloads are https, size-capped and SHA-256-checked before extraction (§11).
+- **Trust:** a user manifest names commands eyedbg runs, so it is trusted like the user's shell configuration: never read from a project; on Unix its directory, the parent and the file (checked through the opened handle) must be the user's and writable by neither group nor others (OpenSSH's `st_mode & 022` rule); nothing runs at load; argv never goes through a shell; downloads are https, size-capped and SHA-256-checked before extraction (§11). A `connect`-transport adapter's socket lives in a directory only the same user can enter and is gone, with the listener, on every return path — no TCP fallback: a same-user guard on the adapter's own side can't be relied on cross-platform (ADR 0013).
 - **Capability degradation:** the daemon caches the adapter's `initialize` capabilities; commands needing unsupported features fail with `UNSUPPORTED_BY_ADAPTER` + a hint (e.g. `memory read` on netcoredbg → "use `eyedbg dotnet heap`"). Checked today: `--if` (conditional breakpoints), `func:` (function breakpoints), exception filters (the error names the adapter's), `set` (setExpression, else setVariable); exception details (exceptionInfo) are left out silently when missing. Manifests can't override capabilities yet (schema 1 has no field for it; it would need a session hook).
 - **Stop captures** read the scopes the adapter marks `presentationHint: "locals"` when it marks any, else every cheap scope; `vars` shows every scope.
 - **Side helpers:** out-of-process, JSON-RPC over stdio, any language. Lets .NET-specific inspection live in C# while the core stays Go.
@@ -199,6 +199,45 @@ Served by the manifest alone (`internal/adapters/manifests/debugpy.json`, debugp
 - Scopes are Locals and Globals; special (dunder) and function variables are hidden, class variables grouped (`variablePresentation`), so snapshots and `--changed` read Locals only (§7). `eval` refuses, without `--allow-side-effects`, calls other than read-only builtins (`len`, `str`, `repr`, `type`, `isinstance`, …), `=`, `:=` and f-/t-strings (the manifest's `evalGuard`; best-effort, as for .NET). Watch-context evaluation of an unknown name is `ADAPTER_ERROR` ("NameError: …"); a string's value is its repr.
 - Function breakpoints match the bare function name (`func:price`), stop with reason `function breakpoint`, and debugpy verifies any name.
 - Stop on entry stops at the module's first executable line.
+
+### C, C++ and Rust
+
+Served by three manifests over one executable, LLVM's **lldb-dap** (Apache-2.0 WITH LLVM-exception,
+stdio by default; ADR 0013): `lldb-dap-c`, `lldb-dap-cpp` and `lldb-dap-rust`, one language each,
+`entry: lldb-dap` found by `EYEDBG_LLDB_DAP` or PATH (rarely on PATH by default: macOS's Command
+Line Tools install it under `/Library/Developer/CommandLineTools/usr/bin/`, Debian/Ubuntu package it
+as `lldb-dap-NN`), `args: ["--repl-mode", "variable"]` (the repl only ever evaluates expressions,
+never LLDB commands). No managed download (LLVM's own archives are 0.25–1.8 GB `.tar.xz`/`.tar.zst`,
+over the installer's cap and needing a new decompression dependency). `--env` reaches the program
+through `${envList}` (a sorted `"NAME=VALUE"` list), the shape lldb-dap 18/19 need (20+ also accepts
+an object); C++ alone maps `--exceptions all` to `cpp_throw` (`uncaught` has no lldb-dap filter and
+is refused with the adapter's own list). Rust's `String`/`Vec`/`HashMap` show raw layouts unless its
+LLDB formatters are imported (`~/.lldbinit`, from `rustc --print sysroot`; a documented manual step,
+not automated — follow-up F7); Rust panics have no exception filter. `eval`'s side-effect guard
+covers `sizeof`/`alignof` (C++ also `decltype`/`typeid`) and the usual assignment operators;
+`strlen()` and similar bare calls still run code, best-effort as for every language's guard.
+
+### Go
+
+Served by the manifest alone (`internal/adapters/manifests/delve.json`, Delve 1.27.2, MIT), the
+first language on the **connect transport** (ADR 0013): `dlv dap` never speaks stdio, only a Unix
+socket it dials in to (`args: ["dap", "--client-addr=unix:${socket}"]`). `eyedbg start go --program
+DIR` (a package directory or `.go` file) debugs with `mode: debug` (the default `--opt`); `--opt
+mode=exec` runs an already-built binary (`go build -gcflags=all=-N -l` first, so breakpoints and
+locals are reliable); `--opt mode=test` runs the package's tests, in `--cwd`, not the package
+directory `go test` itself would use. `--opt buildFlags` passes extra `go build` flags (e.g.
+`-tags=integration`). Delve builds a temporary `__debug_bin*` in the working directory for debug
+mode, removed after the session. Exceptions: both `all` and `uncaught` map to `unrecovered-panic`
+and `runtime-fatal-throw` (Delve has no separate filter for a recovered panic); an unrecovered
+panic's own physical breakpoint sits inside the runtime, not necessarily the frame the client shows
+first. `func:main.price` (package-qualified, unlike Python's bare names) sets a function breakpoint.
+`eval`'s guard allow-lists Go's built-ins (`len`, `cap`, `min`, `max`, `real`, `imag`, `complex`) and
+conversion type names (`int`, `string`, …) as safe bare calls; Delve's own `call ` evaluate prefix
+(actually invoking a function) is invisible to the guard, which flags `name(` regardless of what
+precedes it. Delve 1.27.2 accepts Go 1.25–1.27; a distro Delve older than 1.24 can't dial a Unix
+socket at all (the installed pinned copy always wins over an older PATH one for this reason).
+Downloads: `linux/{amd64,arm64}`, `darwin/{amd64,arm64}`, `windows/amd64` (Delve publishes no
+others for 1.27.2; a future bump may have to skip a release with none at all).
 
 ## 9. Phase 2: editors co-debugging
 
@@ -262,7 +301,7 @@ internal/dap/        DAP over go-dap, both ways: bounded framing, the client tow
 internal/facade/     DAP facade: an editor's connection served as session calls (eyedbg dap, ADR 0012)
 internal/present/    budgeting, truncation, text/JSON renderers
 internal/adapters/   manifest schema, loader and trust check, templates, installer (download + checksum), Python runtime
-internal/adapters/manifests/   bundled adapter manifests (netcoredbg, debugpy)
+internal/adapters/manifests/   bundled adapter manifests (netcoredbg, debugpy, lldb-dap-{c,cpp,rust}, delve)
 internal/proc/       process owner lookup (attach), process groups (test runs)
 internal/cli/        command trees for all binaries (only package importing the CLI framework)
 internal/version/    build metadata (ldflags / debug.ReadBuildInfo)
@@ -271,7 +310,7 @@ drivers/generic/     manifest-only driver
 helpers/dotnet/      C# side helper (ClrMD, EventPipe)
 skill/eyedbg/SKILL.md   agent-facing usage guide, embedded in the binary (`eyedbg skill print|install`)
 internal/e2e/        CLI end-to-end tests driving the real eyedbg/eyedbgd binaries against the sample apps
-testdata/apps/       sample debuggees per language (dotnet/, python/)
+testdata/apps/       sample debuggees per language (dotnet/, python/, c/, cpp/, rust/, go/)
 ```
 
 ## 13. MVP milestones
@@ -296,6 +335,12 @@ Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; mor
 - **P2-M1 facade core** (done): `eyedbg dap`, the connection switch, the DAP facade with the CLI's
   rules, per-connection breakpoints and cleanup, event-log-driven events (ADR 0012).
 
+**More languages** (ADR 0013, run independently of phase 2's own sequencing): C, C++, Rust
+(lldb-dap, manifest-only, no schema change) and Go (Delve, manifest-only through a new
+`adapter.transport: "connect"`) are done. Ruby, Java, Kotlin, JS/TS and PHP were scoped and
+descoped in the same task, each needing strictly more than schema 1 offers today — see ADR 0013's
+follow-ups F1–F5.
+
 ## 14. Risks & open questions
 
 - netcoredbg eval limits and macOS arm64 stability → SharpDbg as fallback; e2e runs in CI on
@@ -310,6 +355,22 @@ Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; mor
 - Anchor re-resolution after edits: decided (ADR 0010) — anchors resolve once, exactly; a changed file gets a note, and a future `restart` can re-resolve every anchor against the rebuilt program.
 - Windows: decided (§6) — AF_UNIX everywhere; no named-pipe fallback needed so far.
 - Python: the downloaded pure-Python debugpy has no compiled speedups (tracing speed unmeasured); attach to a running Python process (gdb/lldb injection, Python 3.14's `sys.remote_exec`) and debugging child processes are future work; interpreter discovery (Windows `py`/Store aliases, conda/poetry venvs outside the project) is checked by unit tests only; the end-to-end tests now run on all 6 CI platforms (milestone 6).
+- Delve dialing out over `AF_UNIX` on Windows (ADR 0013): Go has supported it since Windows 10
+  1803, and Delve's own dial call is unconditional, but it was unverified at runtime when the
+  connect transport was added — CI's `windows-latest` matrix entry now exercises it on every run;
+  if it fails, the fix is not a TCP fallback (that needs its own authentication design, ADR 0013's
+  "Considered Options"), but confirming Windows's Unix-socket support against the specific runner
+  image, or reporting the gap upstream to Delve.
+- lldb-dap discovery (ADR 0013 follow-up F6): it is rarely on PATH by default (macOS Command Line
+  Tools, Debian/Ubuntu's `lldb-dap-NN` packages), so `EYEDBG_LLDB_DAP` is the only way past a bare
+  `path` lookup finding nothing on a stock machine; `adapters doctor` reports it missing until set.
+- C++ `--exceptions uncaught` and Rust panics have no lldb-dap exception filter (documented, not
+  fixed); Rust's own value formatters need a manual `~/.lldbinit` step (follow-up F7) or its
+  `String`/`Vec`/`HashMap` show raw layouts.
+- lldb-dap breakpoints for c/cpp/rust never bind when the build/working directory is reached
+  through a symlink (e.g. macOS's `/tmp`, `/var`): lldb-dap matches the compiler's own unresolved
+  path, while eyedbg resolves symlinks before sending a breakpoint. debugpy, netcoredbg and Delve
+  are not affected (documented, not fixed).
 
 ## 15. References
 

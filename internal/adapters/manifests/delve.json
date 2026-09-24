@@ -1,0 +1,97 @@
+{
+  "schema": 1,
+  "name": "delve",
+  "description": "Go debugger (MIT); set EYEDBG_DLV if dlv isn't on PATH",
+  "homepage": "https://github.com/go-delve/delve",
+  "license": "MIT",
+  "version": "1.27.2",
+  "adapter": {
+    "id": "go",
+    "transport": "connect",
+    "entry": "dlv",
+    "args": ["dap", "--client-addr=unix:${socket}"],
+    "env": "EYEDBG_DLV",
+    "path": true,
+    "versionArgs": ["version"],
+    "notRunningHint": "check that dlv runs on its own; reinstall Delve if not"
+  },
+  "install": {
+    "downloads": {
+      "linux/amd64": {
+        "url": "https://github.com/go-delve/delve/releases/download/v1.27.2/dlv_1.27.2_linux_amd64.tar.gz",
+        "sha256": "30783eb68dc1598d965491cc97762270cd63ce13f09d0cac22faa7e3eafc1b9c",
+        "archive": "tar.gz",
+        "root": "",
+        "size": 12970664
+      },
+      "linux/arm64": {
+        "url": "https://github.com/go-delve/delve/releases/download/v1.27.2/dlv_1.27.2_linux_arm64.tar.gz",
+        "sha256": "b2969e00711f905d189784654e485ea5bc6c2eaa8c5d3effcb646487f4e0bb2f",
+        "archive": "tar.gz",
+        "root": "",
+        "size": 10942815
+      },
+      "darwin/amd64": {
+        "url": "https://github.com/go-delve/delve/releases/download/v1.27.2/dlv_1.27.2_darwin_amd64.tar.gz",
+        "sha256": "66992990307bd0328994960df0cbfa34ecfb16e9cd32f5cf6c83c34912e59cc3",
+        "archive": "tar.gz",
+        "root": "",
+        "size": 12662970
+      },
+      "darwin/arm64": {
+        "url": "https://github.com/go-delve/delve/releases/download/v1.27.2/dlv_1.27.2_darwin_arm64.tar.gz",
+        "sha256": "c32fc68e11ff3820ba267ab12c96fa68e3804319f807fc5db4fba3b9d868df26",
+        "archive": "tar.gz",
+        "root": "",
+        "size": 11278797
+      },
+      "windows/amd64": {
+        "url": "https://github.com/go-delve/delve/releases/download/v1.27.2/dlv_1.27.2_windows_amd64.zip",
+        "sha256": "630b5b9b14c89becb1123790563111c70f7e0cf90820a666582ad1caba05dbd6",
+        "archive": "zip",
+        "root": "",
+        "size": 12410128
+      }
+    }
+  },
+  "language": {
+    "name": "go",
+    "extensions": [".go"],
+    "markers": ["go.mod", "go.work"]
+  },
+  "options": {
+    "mode": {
+      "default": "debug",
+      "help": "debug builds --program (a package directory or .go file); exec runs a built binary given as --program; test runs the package's tests (test flags after --)"
+    },
+    "buildFlags": {
+      "help": "extra 'go build' flags, e.g. -tags=integration or \"-ldflags=-X main.Hello=World\""
+    }
+  },
+  "launch": {
+    "require": ["program"],
+    "arguments": {
+      "name": "eyedbg", "type": "go", "request": "launch", "mode": "${opt.mode}",
+      "program": "${program}", "args": "${args}", "cwd": "${cwd}", "dlvCwd": "${cwd}",
+      "env": "${env}", "stopOnEntry": "${stopOnEntry}", "buildFlags": "${opt.buildFlags}",
+      "outputMode": "remote", "hideSystemGoroutines": true
+    }
+  },
+  "attach": {
+    "arguments": {"name": "eyedbg", "type": "go", "request": "attach", "mode": "local", "processId": "${pid}"}
+  },
+  "exceptions": {
+    "all": ["unrecovered-panic", "runtime-fatal-throw"],
+    "uncaught": ["unrecovered-panic", "runtime-fatal-throw"]
+  },
+  "evalGuard": {
+    "quotes": ["\"", "'", "`"],
+    "safeCalls": [
+      "len", "cap", "min", "max", "real", "imag", "complex",
+      "int", "int8", "int16", "int32", "int64",
+      "uint", "uint8", "uint16", "uint32", "uint64", "uintptr",
+      "float32", "float64", "complex64", "complex128", "string", "byte", "rune", "bool"
+    ],
+    "assignOps": ["=", ":=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", "&^=", "++", "--"]
+  }
+}

@@ -1,6 +1,6 @@
 ---
 name: eyedbg
-description: Debug a running .NET or Python program from the shell with eyedbg — breakpoints, stepping, locals, eval, exception stops, attaching, and debugging a failing test. Use it when a bug survives one or two fix attempts, when you need a value the program really has at runtime, or to see where an exception or a wrong result comes from. Not for compile errors or questions that reading the code answers.
+description: Debug a running .NET, Python, C, C++, Rust or Go program from the shell with eyedbg — breakpoints, stepping, locals, eval, exception stops, attaching, and debugging a failing test. Use it when a bug survives one or two fix attempts, when you need a value the program really has at runtime, or to see where an exception or a wrong result comes from. Not for compile errors or questions that reading the code answers.
 license: Apache-2.0
 ---
 
@@ -79,6 +79,24 @@ eyedbg stop                                       # always, when done
   `--opt python=PATH`), else `python3`/`python`/`py -3`. It runs where you ran eyedbg.
 - `func:NAME` matches the bare function name. `attach` is not supported. Child processes aren't
   debugged.
+
+## C, C++ and Rust
+
+- lldb-dap on PATH (macOS Command Line Tools, or a distro `lldb-dap-NN` package), or
+  `EYEDBG_LLDB_DAP`; no managed download.
+- `eyedbg start c --program ./app --bp main.c:20` (also `cpp`, `rust`).
+- `cpp`'s `eyedbg bp exceptions all` stops at any throw (`uncaught` is not supported — lldb-dap has
+  no filter for it). Rust `String`/`Vec`/`HashMap` show raw layouts unless `~/.lldbinit` imports
+  its formatters (`rustc --print sysroot`).
+
+## Go
+
+- `eyedbg adapters install delve` once (or have `dlv` on PATH, or `EYEDBG_DLV`).
+- `eyedbg start go --program ./cmd/app --bp main.go:20` (a package directory or a `.go` file);
+  `--opt mode=exec` debugs an already-built binary, `--opt mode=test` runs the package's tests
+  (test flags after `--`); `--opt buildFlags='-tags=integration'` for extra `go build` flags.
+- `func:main.price` is package-qualified, unlike Python's bare names. `eyedbg bp exceptions
+  uncaught` stops at an unrecovered panic; continuing then exits 2.
 
 ## Exit codes
 

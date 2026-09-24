@@ -88,6 +88,22 @@ func TestParseValid(t *testing.T) {
 	}
 }
 
+func TestParseEnvListInLaunch(t *testing.T) {
+	t.Parallel()
+
+	m := validManifest()
+	at(m, "launch.arguments")["env"] = "${envList}"
+
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Parse(raw); err != nil {
+		t.Fatalf("Parse(${envList} in launch) = %v, want no error", err)
+	}
+}
+
 func TestParseInvalid(t *testing.T) {
 	t.Parallel()
 
@@ -108,7 +124,38 @@ func TestParseInvalid(t *testing.T) {
 		{"missing version", func(m map[string]any) { delete(m, "version") }, "version:"},
 		{"http homepage", func(m map[string]any) { m["homepage"] = "http://example.com" }, "homepage:"},
 		{"missing adapter id", func(m map[string]any) { delete(at(m, "adapter"), "id") }, "adapter.id: is required"},
-		{"tcp transport", func(m map[string]any) { at(m, "adapter")["transport"] = "tcp" }, "not supported yet"},
+		{"tcp transport", func(m map[string]any) { at(m, "adapter")["transport"] = "tcp" }, "must be stdio or connect"},
+		{"connect with python runtime", func(m map[string]any) {
+			at(m, "adapter")["transport"] = "connect"
+			at(m, "adapter")["args"] = []any{"--client-addr=unix:${socket}"}
+		}, "connect is only for a native adapter"},
+		{"connect without ${socket}", func(m map[string]any) {
+			delete(m, "python")
+			at(m, "adapter")["runtime"] = ""
+			at(m, "adapter")["entry"] = "toy"
+			at(m, "adapter")["transport"] = "connect"
+			at(m, "adapter")["args"] = []any{"--listen"}
+			delete(at(m, "launch.arguments"), "python")
+		}, "connect needs ${socket}"},
+		{"connect with another reference in args", func(m map[string]any) {
+			delete(m, "python")
+			at(m, "adapter")["runtime"] = ""
+			at(m, "adapter")["entry"] = "toy"
+			at(m, "adapter")["transport"] = "connect"
+			at(m, "adapter")["args"] = []any{"--client-addr=unix:${socket}", "${program}"}
+			delete(at(m, "launch.arguments"), "python")
+		}, "${program} is not a variable here"},
+		{"connect for a built-in language", func(m map[string]any) {
+			delete(m, "python")
+			at(m, "adapter")["runtime"] = ""
+			at(m, "adapter")["entry"] = "toy"
+			at(m, "adapter")["transport"] = "connect"
+			at(m, "adapter")["args"] = []any{"--client-addr=unix:${socket}"}
+			at(m, "language")["builtin"] = true
+		}, "connect is not supported for a built-in language's driver"},
+		{"socket in a stdio arg", func(m map[string]any) {
+			at(m, "adapter")["args"] = []any{"--socket=${socket}"}
+		}, `"--socket=${socket}" needs transport connect`},
 		{"unknown runtime", func(m map[string]any) { at(m, "adapter")["runtime"] = "node" }, "adapter.runtime:"},
 		{"missing entry", func(m map[string]any) { delete(at(m, "adapter"), "entry") }, "adapter.entry: is required"},
 		{"python entry with ..", func(m map[string]any) { at(m, "adapter")["entry"] = "../x/adapter" }, "adapter.entry:"},
@@ -173,6 +220,8 @@ func TestParseInvalid(t *testing.T) {
 			at(m, "adapter")["entry"] = "toy"
 		}, "${runtime} needs adapter.runtime python"},
 		{"interpolated args", func(m map[string]any) { at(m, "launch.arguments")["x"] = "a ${args}" }, "can only stand alone"},
+		{"interpolated envList", func(m map[string]any) { at(m, "launch.arguments")["x"] = "a ${envList}" }, "can only stand alone"},
+		{"envList in attach", func(m map[string]any) { at(m, "attach.arguments")["x"] = "${envList}" }, "${envList} is not a variable"},
 		{"interpolated bool option", func(m map[string]any) { at(m, "launch.arguments")["x"] = "a ${opt.fast}" }, "can only stand alone"},
 		{"malformed reference", func(m map[string]any) { at(m, "launch.arguments")["x"] = "${program" }, "without a closing"},
 		{"empty reference", func(m map[string]any) { at(m, "launch.arguments")["x"] = "${}" }, "is not a variable name"},

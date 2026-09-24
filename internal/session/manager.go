@@ -34,6 +34,9 @@ type Config struct {
 	OnLive func(int)
 	// Store persists session metadata and recordings; nil for none.
 	Store Store
+	// ConnectTimeout bounds how long an adapter on the connect transport
+	// ([Launch.SocketArgs]) may take to dial in; zero means 30 seconds.
+	ConnectTimeout time.Duration
 }
 
 // Manager owns every session of the daemon, and knows the sessions an
@@ -46,6 +49,8 @@ type Manager struct {
 	stderr  io.Writer
 	onLive  func(int)
 	store   Store
+	// connectTimeout is Config.ConnectTimeout, defaulted.
+	connectTimeout time.Duration
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -60,6 +65,11 @@ func NewManager(ctx context.Context, cfg Config) *Manager {
 	m := &Manager{
 		ctx: ctx, drivers: make(map[string]Driver), logger: cfg.Logger, stderr: cfg.Stderr, onLive: cfg.OnLive,
 		store: cfg.Store, sessions: make(map[string]*Session), lost: make(map[string]api.SessionInfo),
+		connectTimeout: cfg.ConnectTimeout,
+	}
+
+	if m.connectTimeout <= 0 {
+		m.connectTimeout = defaultConnectTimeout
 	}
 
 	for _, d := range cfg.Drivers {
@@ -161,7 +171,7 @@ func (m *Manager) create(ctx context.Context, c api.Client, p api.StartParams, p
 // ends s and forgets it.
 func (m *Manager) run(ctx context.Context, s *Session, launch Launch, bps []api.BreakpointSpec) (*Session, error) {
 	// The adapter lives as long as the daemon, not this request.
-	if err := s.startAdapter(m.ctx, launch, m.stderr); err != nil { //nolint:contextcheck // Deliberately not the request's context.
+	if err := s.startAdapter(m.ctx, launch, m.stderr, m.connectTimeout); err != nil { //nolint:contextcheck // Deliberately not the request's context.
 		if s.mode == api.ModeTest { // shared already: end it properly
 			m.fail(ctx, s, err)
 

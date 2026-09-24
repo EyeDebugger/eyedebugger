@@ -5,9 +5,16 @@ that needs no Go code, how to launch programs with it. The decision and its trus
 [ADR 0011](adr/0011-declarative-adapter-manifests-and-their-trust-model.md); this page is the field
 reference for manifest authors.
 
-eyedbg ships two: [netcoredbg.json](../internal/adapters/manifests/netcoredbg.json) (dotnet, served by
-the Go driver in `drivers/dotnet`) and [debugpy.json](../internal/adapters/manifests/debugpy.json)
-(python, served entirely by the manifest). `eyedbg adapters ls` lists what is loaded.
+eyedbg ships six, all served entirely by their manifest except netcoredbg (a Go driver in
+`drivers/dotnet`) and delve (the connect transport below, but still no Go driver):
+[netcoredbg.json](../internal/adapters/manifests/netcoredbg.json) (dotnet),
+[debugpy.json](../internal/adapters/manifests/debugpy.json) (python),
+[lldb-dap-c.json](../internal/adapters/manifests/lldb-dap-c.json),
+[lldb-dap-cpp.json](../internal/adapters/manifests/lldb-dap-cpp.json) and
+[lldb-dap-rust.json](../internal/adapters/manifests/lldb-dap-rust.json) (c, cpp, rust: one
+executable, lldb-dap, over three manifests — one language each), and
+[delve.json](../internal/adapters/manifests/delve.json) (go). `eyedbg adapters ls` lists what is
+loaded.
 
 ## Where manifests come from
 
@@ -79,10 +86,10 @@ being half-read. Top level:
 | field | | |
 |---|---|---|
 | `id` | required | the DAP `adapterID` sent in `initialize` |
-| `transport` | | `stdio` (the default; nothing else yet) |
+| `transport` | | `stdio` (the default) or `connect` (below); native adapters only |
 | `runtime` | | `""` (a native executable) or `python` |
 | `entry` | required | native: an executable name (`.exe` is added on Windows) or an absolute path; python: a slash path relative to the package root, no `..` (debugpy: `debugpy/adapter`) |
-| `args` | | literal arguments |
+| `args` | | literal arguments; on `connect`, `${socket}` (below) |
 | `environment` | | `{NAME: value}` added to the adapter's environment |
 | `env` | native | an environment variable naming the executable, e.g. `EYEDBG_NETCOREDBG` |
 | `path` | native | also look `entry` up on PATH |
@@ -91,6 +98,24 @@ being half-read. Top level:
 
 A native adapter is found by `env`, then an absolute `entry`, then the installed copy, then PATH
 (if `path`).
+
+### Transports
+
+Most adapters speak DAP on their own stdin and stdout (`transport: "stdio"`, the default). An
+adapter that can only listen on a socket and dial back in (Delve's `dlv dap`, never stdio) uses
+`transport: "connect"`: eyedbg creates a fresh private directory (mode 0700, only you can enter
+it), listens on a Unix socket inside it, starts the adapter with `adapter.args` rendered against
+`${socket}` (the socket's path; on `stdio`, args are passed literally instead), accepts exactly
+one connection, then closes the listener and removes the directory — before, during and after the
+session, so nothing is left behind or reachable by another user. `connect` needs `${socket}` in at
+least one argument and no other reference; it is refused with `runtime` other than `""` (native
+adapters only) and for a built-in language (one with its own Go driver, e.g. dotnet: it builds its
+own launch and never reads `adapter.transport`), and `${socket}` in a `stdio` adapter's `args` is
+refused too ("needs transport connect"). Delve: `"args": ["dap", "--client-addr=unix:${socket}"]`.
+A TCP transport is not offered: a socket anyone on the machine could connect to and drive the
+debugger as you would break the manifest trust model (ADR 0011); a listen-direction transport (the
+adapter listens, eyedbg dials in) is future work for adapters that host their own debuggee (Ruby's
+`rdbg`, follow-up F1).
 
 `python` (for `runtime: python`; the adapter runs as `<interpreter> <root>/<entry>`, and the
 interpreter's path is `${runtime}` in templates):
@@ -170,10 +195,14 @@ operators and dunder methods still run code.
 | `${args}` | list | the program's arguments (after `--`) |
 | `${cwd}` | string | `--cwd`, else the directory eyedbg was run in, else the program's directory |
 | `${env}` | map | `--env` |
+| `${envList}` | list | `--env` as sorted `"NAME=VALUE"` strings (launch only); for an adapter whose launch `env` argument is an array, not an object |
 | `${stopOnEntry}` | bool | `--stop-on-entry` (always set) |
 | `${runtime}` | string | the interpreter (python runtime only) |
 | `${pid}` | int | the process to attach to (attach only) |
 | `${opt.NAME}` | the option's type | the option's value, else its default |
+
+`${socket}` (string, the connect transport's socket path) is a separate reference, for
+`adapter.args` only, not `launch`/`attach.arguments` (§ Transports above).
 
 Launch templates may use all but `${pid}`; attach templates `${pid}`, `${runtime}` and options
 (their defaults). Rules:
@@ -268,3 +297,11 @@ netcoredbg's manifest (a built-in language: adapter metadata only) has `adapter`
 "entry": "netcoredbg", "args": ["--interpreter=vscode"], "env": "EYEDBG_NETCOREDBG", "path": true,
 "versionArgs": ["--version"], ...}`, one download per platform with `"root": "netcoredbg"`, and
 `"language": {"name": "dotnet", "builtin": true, ...}`.
+
+delve.json (the connect transport, § Transports): `adapter` `{"id": "go", "transport": "connect",
+"entry": "dlv", "args": ["dap", "--client-addr=unix:${socket}"], "env": "EYEDBG_DLV", "path": true,
+"versionArgs": ["version"]}`, one download per platform (`"root": ""`: `dlv` sits at the archive's
+own root, no subdirectory), and a `launch.arguments` template using `"mode": "${opt.mode}"` (the
+`mode` option: `debug` builds `${program}` — a package directory or `.go` file — `exec` runs an
+already-built binary, `test` runs the package's tests) alongside the usual `${program}`, `${args}`,
+`${cwd}` and `${env}`.

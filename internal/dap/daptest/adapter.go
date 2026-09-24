@@ -5,13 +5,16 @@ package daptest
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"os/signal"
 	"strconv"
+	"strings"
 
 	godap "github.com/google/go-dap"
 )
@@ -24,10 +27,14 @@ const EnvFakeAdapter = "EYEDBG_TEST_FAKE_ADAPTER"
 // it only does what [MaybeRun] or [MaybeRunRunner] makes it do.
 const noTestsArg = "-test.run=^$"
 
+// connectArgPrefix starts the argument that makes [MaybeRun] dial a socket.
+const connectArgPrefix = "--eyedbg-fake-connect="
+
 // MaybeRun serves DAP on stdin and stdout until the client disconnects or
 // closes stdin, and returns true, if this process was started by [Command]
-// or [CommandWith]. Otherwise it returns false at once. Call it first in
-// TestMain and return when it returns true.
+// or [CommandWith]. With a [ConnectArg] among its arguments it serves on
+// that Unix socket instead ([ServeConnect]). Otherwise it returns false at
+// once. Call it first in TestMain and return when it returns true.
 func MaybeRun() bool {
 	if os.Getenv(EnvFakeAdapter) != "1" {
 		return false
@@ -43,11 +50,71 @@ func MaybeRun() bool {
 		}
 	}
 
-	if err := ServeWith(os.Stdin, os.Stdout, opts); err != nil {
+	var err error
+
+	// Arguments aren't flag-parsed here: the test binary's own flags are
+	// among them.
+	if path, ok := connectPath(os.Args[1:]); ok {
+		err = runConnect(path, opts)
+	} else {
+		err = ServeWith(os.Stdin, os.Stdout, opts)
+	}
+
+	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "fake adapter:", err)
 	}
 
 	return true
+}
+
+// ConnectArg is the adapter argument that makes the fake adapter dial the
+// Unix socket at path and serve DAP on it (see [MaybeRun]).
+func ConnectArg(path string) string {
+	return connectArgPrefix + path
+}
+
+// connectPath finds the [ConnectArg] in args.
+func connectPath(args []string) (string, bool) {
+	for _, a := range args {
+		if path, ok := strings.CutPrefix(a, connectArgPrefix); ok {
+			return path, true
+		}
+	}
+
+	return "", false
+}
+
+// runConnect is the fake adapter on the connect transport, with the
+// failures opts asks for.
+func runConnect(path string, opts Options) error {
+	switch {
+	case opts.ExitBeforeConnect:
+		return nil
+	case opts.HangBeforeConnect:
+		// Blocks until killed; a channel nothing sends on would be a
+		// deadlock the runtime reports.
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, os.Interrupt)
+		<-ch
+
+		return nil
+	}
+
+	return ServeConnect(path, opts)
+}
+
+// ServeConnect dials the Unix socket at path and speaks DAP on it, as
+// [ServeWith] does, until the client disconnects or closes it.
+func ServeConnect(path string, opts Options) error {
+	var d net.Dialer
+
+	conn, err := d.DialContext(context.Background(), "unix", path)
+	if err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+	defer conn.Close()
+
+	return ServeWith(conn, conn, opts)
 }
 
 // Command returns how to start the fake adapter: this test binary, with no

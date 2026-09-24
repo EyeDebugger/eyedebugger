@@ -294,6 +294,78 @@ func TestNativeAdapterNotInstalled(t *testing.T) {
 	}
 }
 
+// TestPrepareEnvList: a manifest whose launch "env" argument is
+// "${envList}" (lldb-dap <=19's shape) gets a sorted "NAME=VALUE" list, and
+// omits the key when env is empty.
+func TestPrepareEnvList(t *testing.T) {
+	t.Parallel()
+
+	m := &adapters.Manifest{
+		Name: "toydbg", Version: "1", Adapter: adapters.Adapter{ID: "toy", Entry: "toydbg", Env: "TOYDBG", Path: true},
+		Language: &adapters.Language{Name: "toy"},
+		Launch: &adapters.Template{
+			Require:   []string{"program"},
+			Arguments: map[string]any{"program": "${program}", "env": "${envList}"},
+		},
+	}
+	d := New(m)
+	d.find = func(*adapters.Manifest) (adapters.Location, error) {
+		return adapters.Location{Path: "/usr/bin/toydbg", Source: adapters.FoundPath}, nil
+	}
+
+	app := appFile(t)
+
+	launch, err := d.Prepare(t.Context(), session.LaunchSpec{Program: app, Env: map[string]string{"B": "2", "A": "1"}})
+	if err != nil || jsonOf(t, launch.Arguments["env"]) != `["A=1","B=2"]` {
+		t.Fatalf("Prepare env = %v, %v; want [A=1 B=2]", launch.Arguments["env"], err)
+	}
+
+	launch, err = d.Prepare(t.Context(), session.LaunchSpec{Program: app})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := launch.Arguments["env"]; ok {
+		t.Fatalf("empty env should omit the key: %s", jsonOf(t, launch.Arguments))
+	}
+}
+
+// TestPrepareConnectTransport: a manifest with adapter.transport "connect"
+// gets launch.SocketArgs rendering adapter.args with ${socket}, and no
+// launch.AdapterArgs (session.Launch: "AdapterArgs is then unused").
+func TestPrepareConnectTransport(t *testing.T) {
+	t.Parallel()
+
+	m := &adapters.Manifest{
+		Name: "toydbg", Version: "1", Adapter: adapters.Adapter{
+			ID: "toy", Transport: adapters.TransportConnect, Entry: "toydbg", Env: "TOYDBG", Path: true,
+			Args: []string{"dap", "--client-addr=unix:${socket}"},
+		},
+		Language: &adapters.Language{Name: "toy"},
+		Launch:   &adapters.Template{Require: []string{"program"}, Arguments: map[string]any{"program": "${program}"}},
+	}
+	d := New(m)
+	d.find = func(*adapters.Manifest) (adapters.Location, error) {
+		return adapters.Location{Path: "/usr/bin/toydbg", Source: adapters.FoundPath}, nil
+	}
+
+	launch, err := d.Prepare(t.Context(), session.LaunchSpec{Program: appFile(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if launch.Adapter != "/usr/bin/toydbg" || launch.AdapterArgs != nil || launch.SocketArgs == nil {
+		t.Fatalf("launch = %+v, want a socket adapter with no AdapterArgs", launch)
+	}
+
+	got := launch.SocketArgs("/tmp/eyedbg-dap-x/dap.sock")
+	want := []string{"dap", "--client-addr=unix:/tmp/eyedbg-dap-x/dap.sock"}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("SocketArgs = %v, want %v", got, want)
+	}
+}
+
 func TestDrivers(t *testing.T) {
 	t.Parallel()
 
@@ -302,8 +374,8 @@ func TestDrivers(t *testing.T) {
 		names = append(names, d.Name())
 	}
 
-	if !slices.Equal(names, []string{"python"}) {
-		t.Fatalf("Drivers = %v, want [python] (dotnet is built in)", names)
+	if !slices.Equal(names, []string{"python", "go", "c", "cpp", "rust"}) {
+		t.Fatalf("Drivers = %v, want [python go c cpp rust] (dotnet is built in)", names)
 	}
 
 	if _, ok := Drivers(bundled())[0].(session.Attacher); !ok {

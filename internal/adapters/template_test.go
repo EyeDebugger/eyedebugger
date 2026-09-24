@@ -5,6 +5,7 @@ package adapters
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 )
 
@@ -13,9 +14,12 @@ func TestRender(t *testing.T) {
 
 	full := Vars{
 		VarProgram: "/p/app.py", VarArgs: []string{"-x", "y"}, VarCwd: "/p", VarEnv: map[string]string{"A": "1"},
-		VarStopOnEntry: false, VarRuntime: "/usr/bin/python3", OptVar("level"): 3, OptVar("fast"): true,
+		VarEnvList: []string{"A=1", "B=2"}, VarStopOnEntry: false, VarRuntime: "/usr/bin/python3",
+		OptVar("level"): 3, OptVar("fast"): true,
 	}
-	empty := Vars{VarStopOnEntry: true, VarArgs: []string{}, VarEnv: map[string]string{}, VarProgram: ""}
+	empty := Vars{
+		VarStopOnEntry: true, VarArgs: []string{}, VarEnv: map[string]string{}, VarEnvList: []string{}, VarProgram: "",
+	}
 
 	tests := []struct {
 		name string
@@ -32,6 +36,8 @@ func TestRender(t *testing.T) {
 			`{"s":true}`,
 		},
 		{"unset array elements are omitted", `{"x":["a","${program}","${opt.module}","b"]}`, empty, `{"x":["a","b"]}`},
+		{"envList is sorted NAME=VALUE strings", `{"env":"${envList}"}`, full, `{"env":["A=1","B=2"]}`},
+		{"empty envList omits the key", `{"env":"${envList}"}`, empty, `{}`},
 		{"lists are spliced into arrays", `{"x":["--","${args}","end"]}`, full, `{"x":["--","-x","y","end"]}`},
 		{"interpolation", `{"t":"run ${program} at ${opt.level} in ${cwd}"}`, full, `{"t":"run /p/app.py at 3 in /p"}`},
 		{"interpolating unset is empty", `{"t":"[${program}]"}`, empty, `{"t":"[]"}`},
@@ -79,6 +85,21 @@ func manifestWithLaunch(t *testing.T, tmpl string) []byte {
 	}
 
 	return raw
+}
+
+// TestRenderArgs checks adapter.args rendering: ${socket} exact or
+// interpolated, other text untouched.
+func TestRenderArgs(t *testing.T) {
+	t.Parallel()
+
+	vars := Vars{VarSocket: "/tmp/eyedbg-dap-x/dap.sock"}
+
+	got := RenderArgs([]string{"dap", "--client-addr=unix:${socket}", "${socket}", "--repl-mode"}, vars)
+	want := []string{"dap", "--client-addr=unix:/tmp/eyedbg-dap-x/dap.sock", "/tmp/eyedbg-dap-x/dap.sock", "--repl-mode"}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("RenderArgs = %v, want %v", got, want)
+	}
 }
 
 func TestScan(t *testing.T) {
