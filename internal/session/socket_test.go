@@ -209,7 +209,12 @@ func TestSocketPathTooLong(t *testing.T) {
 		t.Errorf("adapter started with sockets %q, want not started", got)
 	}
 
-	if left, err := os.ReadDir(long); err != nil || len(left) != 0 {
-		t.Errorf("left in %s: %v, %v; want nothing", long, left, err)
+	parent, err := socketParentDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if left, err := os.ReadDir(parent); err != nil || len(left) != 0 {
+		t.Errorf("left in %s: %v, %v; want nothing", parent, left, err)
 	}
 }
