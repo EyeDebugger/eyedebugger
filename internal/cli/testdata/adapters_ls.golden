@@ -1,8 +1,11 @@
-ADAPTER     VERSION     LANGUAGE           SOURCE   DESCRIPTION
-debugpy     1.8.22      python             bundled  Python debugger by Microsoft (MIT); needs Python 3.10+
+ADAPTER        VERSION     LANGUAGE           SOURCE   DESCRIPTION
+debugpy        1.8.22      python             bundled  Python debugger by Microsoft (MIT); needs Python 3.10+
   options: justMyCode=bool (default true), module, python
-netcoredbg  3.2.0-1092  dotnet (built-in)  bundled  .NET debugger by Samsung (MIT)
-toydbg      1.0         toy                user     The fake test adapter
+lldb-dap-c     18+         c                  bundled  C debugger using LLVM's lldb-dap (Apache-2.0 WITH LLVM-exception); set EYEDBG_LLDB_DAP if not on PATH
+lldb-dap-cpp   18+         cpp                bundled  C++ debugger using LLVM's lldb-dap (Apache-2.0 WITH LLVM-exception); set EYEDBG_LLDB_DAP if not on PATH
+lldb-dap-rust  18+         rust               bundled  Rust debugger using LLVM's lldb-dap (Apache-2.0 WITH LLVM-exception); set EYEDBG_LLDB_DAP if not on PATH
+netcoredbg     3.2.0-1092  dotnet (built-in)  bundled  .NET debugger by Samsung (MIT)
+toydbg         1.0         toy                user     The fake test adapter
   file: <config>/adapters/toy.json
   options: lines=int (default 10)
 ignored: <config>/adapters/broken.json: description: is required
