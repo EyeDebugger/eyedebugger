@@ -62,9 +62,13 @@ func (s *Session) startSocketAdapter(ctx context.Context, launch Launch, stderr 
 
 	path := filepath.Join(dir, socketName)
 	if len(path) > maxSocketPath {
+		hint := "set TMPDIR to a shorter directory"
+		if runtime.GOOS == "windows" {
+			hint = "set LOCALAPPDATA to a shorter directory"
+		}
 		return api.NewError(api.CodeAdapterFailed,
 			"the debug adapter's socket path "+path+" is "+strconv.Itoa(len(path))+" bytes, over the limit of "+strconv.Itoa(maxSocketPath),
-			"set TMPDIR (TEMP on Windows) to a shorter directory")
+			hint)
 	}
 
 	ln, err := listenSocket(ctx, path)
