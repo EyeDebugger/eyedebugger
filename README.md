@@ -4,7 +4,9 @@
 
 [![CI](https://github.com/EyeDebugger/eyedebugger/actions/workflows/ci.yml/badge.svg)](https://github.com/EyeDebugger/eyedebugger/actions/workflows/ci.yml)
 
-> **Pre-alpha.** Only `eyedbg version` works today. There is nothing to install yet.
+> **Alpha, unreleased.** Debug .NET (netcoredbg) and Python (debugpy) programs on Linux, macOS and
+> Windows (x64 and arm64; .NET not on Intel Macs or Windows on Arm). No release yet: build from
+> source.
 
 ## Why
 
@@ -43,24 +45,47 @@ Full design: [docs/DESIGN.md](docs/DESIGN.md).
 3. ✅ Agent ergonomics: stop snapshot, `--dump`, `run-until`, `wait`, `--changed`, budgets, JSON schema, errors, `help --all`.
 4. ✅ Model for P2: client identity, breakpoint ownership merge, lease, event log + `events --since`.
 5. ✅ Breadth: hit counts, logpoints, function and exception breakpoints, eval with side effects, `set`, `attach`/`detach`, `test`, anchors.
-6. Ship: SKILL.md, CI matrix (6 os/arch), e2e tests driving sample apps.
+6. ✅ Ship: SKILL.md, CI matrix (6 os/arch), e2e tests driving sample apps.
 7. ✅ Second language via manifest only: Python through debugpy (`eyedbg start python`), adapter manifests, `adapters ls`, `--opt`.
 
-Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; more languages.
+Phase 1 (MVP) is complete. Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg
+adapter; more languages.
 
-## Build from source
+## Install
 
-Requires Go 1.26+.
+Requires Go 1.26+. No published release yet — build from a clone:
 
 ```sh
-task build            # or: go build -o bin/ ./cmd/...
-./bin/eyedbg version
+task build            # or: go build -trimpath -o bin/ ./cmd/...
 ```
+
+Keep `eyedbg` and `eyedbgd` together on `PATH`. Then, once per machine:
+
+```sh
+eyedbg adapters install netcoredbg   # or: python
+eyedbg adapters doctor
+```
+
+`task snapshot` (GoReleaser) builds release-shaped archives into `dist/` locally, for testing the
+packaging; there is no `go install …@latest` yet since the repo is private.
+
+## Quickstart for agents
+
+```sh
+eyedbg skill install                              # writes SKILL.md, once per machine
+eyedbg start dotnet --project src/App --bp 'Orders.cs@"var total ="'
+eyedbg run-until Orders.cs:42 --if 'i == 3'
+eyedbg vars --changed
+eyedbg eval 'order.Items.Count'
+eyedbg stop                                       # always, when done
+```
+
+`eyedbg help --all` prints every command's help in one read. Full guide: [skill/eyedbg/SKILL.md](skill/eyedbg/SKILL.md).
 
 ## For AI agents
 
 - [AGENTS.md](AGENTS.md): rules for contributing as, or with, an AI agent.
-- [skill/](skill/): using `eyedbg` from an agent (arrives at milestone 6).
+- [skill/eyedbg/SKILL.md](skill/eyedbg/SKILL.md): using `eyedbg` from an agent.
 
 ## Contributing
 

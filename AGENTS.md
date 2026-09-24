@@ -26,7 +26,9 @@ decisions are recorded in `docs/adr/`.
   Python runtime; bundled manifests in `internal/adapters/manifests/` (`docs/adapter-manifests.md`).
 - `drivers/dotnet/` — the .NET driver (Go); `drivers/generic/` — the manifest-only driver (Python).
 - `helpers/dotnet/` — C# side helper (phase 2).
-- `skill/` — `SKILL.md`, the agent-facing usage guide (milestone 6).
+- `skill/eyedbg/SKILL.md` — the agent-facing usage guide, embedded in `eyedbg`; a test keeps it in
+  sync with the command tree.
+- `internal/e2e/` — CLI end-to-end tests driving the real `eyedbg`/`eyedbgd` binaries.
 - `testdata/apps/` — sample debuggees for e2e tests (`dotnet/console`, `dotnet/breadth`, `dotnet/tests`,
   `python/basic`).
 - `docs/adr/` — architecture decision records (MADR 4.0).

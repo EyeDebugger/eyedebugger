@@ -1,6 +1,6 @@
 # EyeDebugger (`eyedbg`) — AI-native debugger (design)
 
-Status: draft v0.1 · 2026-09-23
+Status: v0.2 · 2026-09-24 · phase 1 (MVP) complete
 
 ## 1. What and why
 
@@ -94,6 +94,7 @@ eyedbg events [--since N] [--limit N] [--kind k,...] [--wait] [--timeout 30s]
 eyedbg lease [status|take [--force]|release|grant <client> [--force]|policy <p> [--force]]
 eyedbg daemon [status|stop|logs]
 eyedbg adapters ls | install <adapter|language> | doctor [adapter|language...]
+eyedbg skill [print|install [--dir ROOT] [--force]]
 ```
 
 Design rules:
@@ -117,6 +118,11 @@ Design rules:
 - Default: compact text (tuned for LLM reading). `--json`: stable schema, versioned (`"schema": 1`).
 - Budgeting: `--budget` (default ~2k tokens for state dumps) enforced by the daemon via depth, max children per node (default 20), string truncation (default 200 chars), collection summaries (`List<Order> Count=1532 [0..19 shown]`). Truncation is always explicit (`…+1512 more, expand: eyedbg vars --expand orders`).
 - Errors: `{code, message, hint}`; codes are stable (`NO_SESSION`, `NOT_STOPPED`, `LEASE_HELD`, `UNSUPPORTED_BY_ADAPTER`, `SIDE_EFFECTS`, `ATTACH_FAILED`, `NO_TEST_HOST`, `ANCHOR_NOT_FOUND`, `ANCHOR_AMBIGUOUS`, …). Exit codes map to classes: 1 usage (incl. `SIDE_EFFECTS`, `ANCHOR_*`), 2 state, 3 setup (incl. `ATTACH_FAILED`, `NO_TEST_HOST`), 4 adapter (incl. `UNSUPPORTED_BY_ADAPTER`).
+- With no daemon running: a daemon-lifecycle command (`eyedbg daemon status/stop/logs`) reports
+  `DAEMON_NOT_RUNNING` (exit 3). Every session-scoped command (`status`, `bp`, `continue`, …)
+  reports `NO_SESSION` (exit 2) instead — there cannot be a session without a daemon, so
+  `internal/cli/session.go`'s `call()` deliberately folds "no daemon" into "no session"; it never
+  returns `DAEMON_NOT_RUNNING`.
 - Redaction: values of names matching configurable patterns (`password|secret|token|connectionstring`) masked by default.
 
 ## 6. Daemon
@@ -165,7 +171,7 @@ As built (`internal/session/driver.go`): `Name()` and `Prepare(ctx, LaunchSpec) 
 
 | Piece | Choice | Notes |
 |---|---|---|
-| Default adapter | **netcoredbg** (Samsung, MIT) 3.2.0 | Binaries: linux-x64/arm64, osx-arm64 ("community supported"), win-x64. We build win-arm64 / osx-x64 in our CI. Pinned in `internal/adapters/manifests/netcoredbg.json`. |
+| Default adapter | **netcoredbg** (Samsung, MIT) 3.2.0 | Binaries: linux-x64/arm64, osx-arm64 ("community supported"), win-x64. No win-arm64 / osx-x64 builds yet: .NET debugging is unavailable there (the CI .NET e2e skips them); building netcoredbg ourselves is future work. Pinned in `internal/adapters/manifests/netcoredbg.json`. |
 | Alt adapter | **SharpDbg** (MIT, C#, `dotnet tool`) | Better eval & `DebuggerDisplay`/`DebuggerTypeProxy`. Young, single maintainer. Selectable: `--adapter sharpdbg`. |
 | Forbidden | **vsdbg** | License restricts it to Microsoft IDEs. Never download, detect, or drive it. |
 | Non-pausing inspection | `eyedbg-dotnet-helper` (C#): ClrMD, DiagnosticsClient/EventPipe | `eyedbg dotnet counters`, `trace`, `dump`, `heap` (stats, top types, gcroot on a dump), `threads` for a hung process. Live-heap reads without suspension are inconsistent → default to dump-then-analyze. |
@@ -193,7 +199,7 @@ Served by the manifest alone (`internal/adapters/manifests/debugpy.json`, debugp
 
 ## 10. Agent integration
 
-- `SKILL.md` shipped with the binary (`eyedbg skill print`/`install`): when to reach for the debugger (after a failed hypothesis or two, per debug-gym), the standard loop (`start → bp add → run-until --dump → vars --changed → eval`), budgets, and "always `eyedbg stop` when done".
+- `SKILL.md` shipped with the binary (`eyedbg skill print`/`install`): when to reach for the debugger (after a failed hypothesis or two, per debug-gym), the standard loop (`start → bp add → run-until --dump → vars --changed → eval`), budgets, and "always `eyedbg stop` when done". `skill print` writes it to stdout byte for byte; `skill install [--dir ROOT] [--force]` writes it to `ROOT/eyedbg/SKILL.md`, `ROOT` defaulting to Claude Code's personal skills directory (`~/.claude/skills`, `%USERPROFILE%\.claude\skills` on Windows); idempotent, and a differing existing file is left alone unless `--force`. `skill/eyedbg/SKILL.md` is embedded in the binary, so it is always in sync with the `eyedbg` that prints it; `TestSkillMatchesCommandTree` (`internal/cli`) checks its examples and exit codes against the real command tree.
 - No MCP server by default — agents use the CLI directly; its help is the documentation. A thin MCP wrapper may be added later only if a concrete agent needs it (non-goal for MVP).
 
 ## 11. Safety
@@ -224,7 +230,8 @@ internal/version/    build metadata (ldflags / debug.ReadBuildInfo)
 drivers/dotnet/      Driver impl
 drivers/generic/     manifest-only driver
 helpers/dotnet/      C# side helper (ClrMD, EventPipe)
-skill/SKILL.md
+skill/eyedbg/SKILL.md   agent-facing usage guide, embedded in the binary (`eyedbg skill print|install`)
+internal/e2e/        CLI end-to-end tests driving the real eyedbg/eyedbgd binaries against the sample apps
 testdata/apps/       sample debuggees per language (dotnet/, python/)
 ```
 
@@ -239,21 +246,28 @@ testdata/apps/       sample debuggees per language (dotnet/, python/)
    lost sessions and recordings (ADR 0009).
 5. **Breadth** (done): hit counts, logpoints, function and exception breakpoints, eval with side
    effects, `set`, `attach`/`detach`, `test`, anchors, capability degradation, sample apps (ADR 0010).
-6. **Ship:** SKILL.md, CI matrix (6 os/arch), e2e tests driving sample apps.
+6. **Ship** (done): SKILL.md (`eyedbg skill print|install`), CI matrix (6 os/arch) with real .NET
+   and Python e2e, CLI end-to-end tests driving the real binaries against the sample apps.
 7. **Second language** (done) via manifest only (debugpy) to prove the plugin boundary: manifest schema,
    loader and trust model, generic driver, `adapters ls`, `--opt` (ADR 0011).
+
+All MVP milestones are done (phase 1 complete); phase 2 is next.
 
 Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; more languages.
 
 ## 14. Risks & open questions
 
-- netcoredbg eval limits and macOS arm64 stability → SharpDbg as fallback; e2e tests on every platform in CI.
+- netcoredbg eval limits and macOS arm64 stability → SharpDbg as fallback; e2e now runs in CI on all
+  6 platforms (milestone 6): .NET on Linux (x64/arm64), macOS (arm64) and Windows (x64) — not on
+  Intel Macs or Windows on Arm, where netcoredbg has no build (D13); Python on all 6.
 - netcoredbg release cadence (~2/yr, single corporate maintainer) → pin versions, keep our own builds.
-- Test debugging flow (`VSTEST_HOST_DEBUG`): validated on Linux only; macOS and Windows unexercised, as is attach there.
+- Test debugging flow (`VSTEST_HOST_DEBUG`) and `attach`: validated on Linux, macOS (arm64) and
+  Windows (x64) by CI e2e (milestone 6); still unexercised on Intel Macs and Windows on Arm (no
+  netcoredbg there).
 - Lease policy default for P2 (`handoff` vs `human-priority`) — decide with real usage.
 - Anchor re-resolution after edits: decided (ADR 0010) — anchors resolve once, exactly; a changed file gets a note, and a future `restart` can re-resolve every anchor against the rebuilt program.
-- Windows: AF_UNIX vs named pipe as primary — prototype both in milestone 1.
-- Python: the downloaded pure-Python debugpy has no compiled speedups (tracing speed unmeasured); attach to a running Python process (gdb/lldb injection, Python 3.14's `sys.remote_exec`) and debugging child processes are future work; interpreter discovery (Windows `py`/Store aliases, conda/poetry venvs outside the project) is checked by unit tests only, the end-to-end tests run on Linux.
+- Windows: decided (§6) — AF_UNIX everywhere; no named-pipe fallback needed so far.
+- Python: the downloaded pure-Python debugpy has no compiled speedups (tracing speed unmeasured); attach to a running Python process (gdb/lldb injection, Python 3.14's `sys.remote_exec`) and debugging child processes are future work; interpreter discovery (Windows `py`/Store aliases, conda/poetry venvs outside the project) is checked by unit tests only; the end-to-end tests now run on all 6 CI platforms (milestone 6).
 
 ## 15. References
 
