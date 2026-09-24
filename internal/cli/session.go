@@ -211,7 +211,9 @@ For c, cpp and rust: --program takes an already-built native binary (compile wit
 'cc -g -O0', 'c++ -g -O0' or 'rustc -g'); nothing is built (--project and --no-build are ignored),
 and they take no --opt options. The working directory defaults to where you run eyedbg. Rust's
 String, Vec and HashMap show raw layouts unless its LLDB formatters are imported (two lines in
-~/.lldbinit, from 'rustc --print sysroot').
+~/.lldbinit, from 'rustc --print sysroot'). If the binary was built under a symlinked directory
+(e.g. macOS's /tmp or /var), lldb-dap's breakpoints won't bind: build outside a symlinked path, or
+resolve it yourself first (e.g. 'cd "$(cd -P dir && pwd)"').
 
 For go: --program takes a package directory or a .go file, built by Delve itself (nothing is built
 ahead of time); --cwd also sets where that build runs. --opt mode=debug (the default) builds and

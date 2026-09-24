@@ -143,6 +143,10 @@ template escape for PHP's own `${port}` syntax).
   `adapters doctor` reports it missing on a stock machine until `EYEDBG_LLDB_DAP` is set.
 * Bad, because C++ `--exceptions uncaught` and Rust panics have no adapter-side filter: documented
   as a known limitation, not fixed here.
+* Bad, because lldb-dap breakpoints for c/cpp/rust never bind when the build/working directory is
+  reached through a symlink (e.g. macOS's `/tmp`, `/var`): lldb-dap matches the compiler's own
+  unresolved path, while eyedbg resolves symlinks before sending a breakpoint. debugpy, netcoredbg
+  and Delve are not affected. Known limitation, not fixed here.
 * Bad, because Delve publishes binaries only for some releases (not 1.27.0 or 1.27.1): a future
   version bump may have to skip a release entirely.
 * Bad, because Delve dialing out over `AF_UNIX` on Windows (Go has supported it since Windows 10

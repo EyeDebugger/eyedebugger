@@ -328,6 +328,10 @@ follow-ups F1–F5.
 - C++ `--exceptions uncaught` and Rust panics have no lldb-dap exception filter (documented, not
   fixed); Rust's own value formatters need a manual `~/.lldbinit` step (follow-up F7) or its
   `String`/`Vec`/`HashMap` show raw layouts.
+- lldb-dap breakpoints for c/cpp/rust never bind when the build/working directory is reached
+  through a symlink (e.g. macOS's `/tmp`, `/var`): lldb-dap matches the compiler's own unresolved
+  path, while eyedbg resolves symlinks before sending a breakpoint. debugpy, netcoredbg and Delve
+  are not affected (documented, not fixed).
 
 ## 15. References
 
