@@ -5,11 +5,16 @@ package daptest_test
 
 import (
 	"encoding/json"
+	"runtime"
 	"testing"
 
 	"github.com/eyedebugger/eyedebugger/internal/adapters"
 	"github.com/eyedebugger/eyedebugger/internal/dap/daptest"
 )
+
+// testBinaryPath is an absolute path per filepath.IsAbs on the current OS:
+// a Unix-style path is not absolute on Windows (no volume name).
+var testBinaryPath = map[bool]string{true: `C:\path\to\test-binary`, false: "/path/to/test-binary"}[runtime.GOOS == "windows"]
 
 func TestUserManifest(t *testing.T) {
 	t.Parallel()
@@ -37,7 +42,7 @@ func TestUserManifest(t *testing.T) {
 func checkUserManifest(t *testing.T, attached string, wantAttach bool) {
 	t.Helper()
 
-	raw, err := json.Marshal(daptest.UserManifest("/path/to/test-binary", attached))
+	raw, err := json.Marshal(daptest.UserManifest(testBinaryPath, attached))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,8 +60,8 @@ func checkUserManifest(t *testing.T, attached string, wantAttach bool) {
 		t.Errorf("LanguageName() = %q, want fakelang", m.LanguageName())
 	}
 
-	if m.Adapter.Entry != "/path/to/test-binary" {
-		t.Errorf("Adapter.Entry = %q, want /path/to/test-binary", m.Adapter.Entry)
+	if m.Adapter.Entry != testBinaryPath {
+		t.Errorf("Adapter.Entry = %q, want %q", m.Adapter.Entry, testBinaryPath)
 	}
 
 	if m.Adapter.Environment[daptest.EnvFakeAdapter] != "1" {
