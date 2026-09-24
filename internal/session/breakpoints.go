@@ -87,6 +87,11 @@ func resolveSpec(spec api.BreakpointSpec, allowFunction bool) (api.BreakpointSpe
 			`use FILE:LINE, FILE@"TEXT" or func:NAME`)
 	}
 
+	// Adapters match breakpoints to the debug symbols' source paths, which
+	// have symlinks resolved (on macOS /tmp and /var are symlinks into
+	// /private): a breakpoint through a symlink would never bind.
+	spec.File = realPath(spec.File)
+
 	if spec.Anchor != "" && spec.Line == 0 {
 		line, err := resolveAnchor(spec.File, spec.Anchor)
 		if err != nil {
