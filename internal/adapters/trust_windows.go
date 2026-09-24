@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 )
 
-// On Windows user manifests are read from the per-user %AppData%
-// directory, whose ACL admits only the user (and administrators), and
-// there are no mode bits to check (docs/adapter-manifests.md): checkTrust
-// and checkInfo accept everything.
+// On Windows user manifests are read from the per-user profile directory
+// (~/.eyedbg by default, %USERPROFILE%\.eyedbg), whose ACL admits only the
+// user (and administrators), and there are no mode bits to check
+// (docs/adapter-manifests.md): checkTrust and checkInfo accept everything.
 
 func checkTrust(string) error { return nil }
 

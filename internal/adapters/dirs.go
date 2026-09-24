@@ -10,25 +10,47 @@ import (
 	"runtime"
 )
 
+// EnvHome overrides eyedbg's home directory (~/.eyedbg by default), which
+// holds both configuration (its adapters/ subdirectory, unless
+// EnvConfigDir overrides it) and data (its tools/ subdirectory, unless
+// EnvDataDir overrides it). It does not move the runtime directory
+// (daemon.EnvRuntimeDir), which is unrelated.
+const EnvHome = "EYEDBG_HOME"
+
 // EnvDataDir overrides where adapters are installed.
 const EnvDataDir = "EYEDBG_DATA_DIR"
 
 // goosWindows is runtime.GOOS on Windows.
 const goosWindows = "windows"
 
+// homeDir returns eyedbg's home directory: $EYEDBG_HOME, else
+// <user home dir>/.eyedbg.
+func homeDir() (string, error) {
+	if dir := os.Getenv(EnvHome); dir != "" {
+		return dir, nil
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("locate home directory (set %s): %w", EnvHome, err)
+	}
+
+	return filepath.Join(home, ".eyedbg"), nil
+}
+
 // DataDir returns where adapters are installed: $EYEDBG_DATA_DIR, else
-// <user cache dir>/eyedbg/adapters.
+// <home>/tools.
 func DataDir() (string, error) {
 	if dir := os.Getenv(EnvDataDir); dir != "" {
 		return dir, nil
 	}
 
-	cache, err := os.UserCacheDir()
+	home, err := homeDir()
 	if err != nil {
-		return "", fmt.Errorf("locate adapter directory (set %s): %w", EnvDataDir, err)
+		return "", fmt.Errorf("locate adapter directory (set %s or %s): %w", EnvDataDir, EnvHome, err)
 	}
 
-	return filepath.Join(cache, "eyedbg", "adapters"), nil
+	return filepath.Join(home, "tools"), nil
 }
 
 // InstallDir is where m's pinned version is (or will be) installed:

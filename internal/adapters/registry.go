@@ -15,8 +15,9 @@ import (
 	"strings"
 )
 
-// EnvConfigDir overrides eyedbg's configuration directory; user manifests
-// are in its adapters/ subdirectory.
+// EnvConfigDir overrides eyedbg's configuration directory (the home
+// directory, EnvHome, by default); user manifests are in its adapters/
+// subdirectory.
 const EnvConfigDir = "EYEDBG_CONFIG_DIR"
 
 // maxManifestSize is the largest manifest file read.
@@ -50,18 +51,18 @@ type Registry struct {
 }
 
 // UserDir is where user manifests live: $EYEDBG_CONFIG_DIR/adapters, else
-// <user config dir>/eyedbg/adapters.
+// <home>/adapters.
 func UserDir() (string, error) {
 	if dir := os.Getenv(EnvConfigDir); dir != "" {
 		return filepath.Join(dir, "adapters"), nil
 	}
 
-	cfg, err := os.UserConfigDir()
+	home, err := homeDir()
 	if err != nil {
-		return "", fmt.Errorf("locate the manifest directory (set %s): %w", EnvConfigDir, err)
+		return "", fmt.Errorf("locate the manifest directory (set %s or %s): %w", EnvConfigDir, EnvHome, err)
 	}
 
-	return filepath.Join(cfg, "eyedbg", "adapters"), nil
+	return filepath.Join(home, "adapters"), nil
 }
 
 // Default loads the bundled manifests and the user's, for the languages

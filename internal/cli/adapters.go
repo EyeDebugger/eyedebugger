@@ -56,10 +56,11 @@ described by an adapter manifest (docs/adapter-manifests.md): dotnet uses netcor
 MIT), python uses debugpy (Microsoft, MIT). Downloads are pinned to one release and verified by
 SHA-256 before use. Microsoft's vsdbg is never used: its license restricts it to Microsoft's IDEs.
 
-Adapters are installed per user under the cache directory (override with EYEDBG_DATA_DIR); set
-EYEDBG_NETCOREDBG to use your own netcoredbg build instead. Your own manifests go in the
-adapters/ directory of eyedbg's config directory (EYEDBG_CONFIG_DIR overrides it): they add
-languages or replace a bundled adapter, and are trusted like your shell configuration.
+Adapters are installed per user under ~/.eyedbg/tools (override with EYEDBG_DATA_DIR); set
+EYEDBG_NETCOREDBG to use your own netcoredbg build instead. Your own manifests go in
+~/.eyedbg/adapters (EYEDBG_CONFIG_DIR overrides the ~/.eyedbg part): they add languages or
+replace a bundled adapter, and are trusted like your shell configuration. EYEDBG_HOME overrides
+~/.eyedbg itself, for both.
 
 Without a subcommand, prints this help and exits 0; an unknown subcommand exits 1.`,
 		Example: `  eyedbg adapters ls
