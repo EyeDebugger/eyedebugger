@@ -98,7 +98,10 @@ jobs:
         env:
           RACE: ${{ matrix.race && '-race' || '' }}
         shell: bash
-        run: go test ${RACE} -shuffle=on ./...
+        run: |
+          flags=()
+          [ -n "$RACE" ] && flags+=("$RACE")
+          go test "${flags[@]}" -shuffle=on ./...
 
   build:
     name: build (6 targets)
@@ -136,16 +139,22 @@ jobs:
         include:
           - os: ubuntu-latest
             netcoredbg: true
+            race: true
           - os: ubuntu-24.04-arm
             netcoredbg: true
+            race: true
           - os: macos-latest
             netcoredbg: true
+            race: true
           - os: windows-latest
             netcoredbg: true
+            race: true
           - os: macos-15-intel
             netcoredbg: false # D7/F16-adjacent: netcoredbg has no osx-x64 release
+            race: true
           - os: windows-11-arm
             netcoredbg: false # D7: netcoredbg has no win-arm64 release
+            race: false # F16: the race detector doesn't support windows/arm64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     defaults:
@@ -155,7 +164,6 @@ jobs:
       EYEDBG_E2E: "1"
       EYEDBG_E2E_NETWORK: "1"
       E2E_COUNT: ${{ inputs.e2e-count || '1' }}
-      RACE: -race
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
     steps:
@@ -179,22 +187,27 @@ jobs:
           go build -o "$RUNNER_TEMP/eyedbg-bin/" ./cmd/...
           echo "EYEDBG_DATA_DIR=$RUNNER_TEMP/eyedbg-data" >> "$GITHUB_ENV"
       - name: Install debugpy
-        run: $RUNNER_TEMP/eyedbg-bin/eyedbg adapters install debugpy
+        run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters install debugpy"
       - name: Install netcoredbg
         if: matrix.netcoredbg
-        run: $RUNNER_TEMP/eyedbg-bin/eyedbg adapters install netcoredbg
+        run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters install netcoredbg"
       - name: No .NET e2e here
         if: "!matrix.netcoredbg"
         run: |
           echo "::notice title=.NET e2e skipped::netcoredbg has no $RUNNER_OS/$RUNNER_ARCH release"
           echo "netcoredbg has no $RUNNER_OS/$RUNNER_ARCH release: .NET e2e skipped" >> "$GITHUB_STEP_SUMMARY"
       - name: Doctor
-        run: $RUNNER_TEMP/eyedbg-bin/eyedbg adapters doctor python
+        run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters doctor python"
       - name: Doctor (dotnet)
         if: matrix.netcoredbg
-        run: $RUNNER_TEMP/eyedbg-bin/eyedbg adapters doctor dotnet
+        run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters doctor dotnet"
       - name: e2e
-        run: go test ${RACE} -count="$E2E_COUNT" -p 1 -timeout 50m ./drivers/... ./internal/e2e/...
+        env:
+          RACE: ${{ matrix.race && '-race' || '' }}
+        run: |
+          flags=()
+          [ -n "$RACE" ] && flags+=("$RACE")
+          go test "${flags[@]}" -count="$E2E_COUNT" -p 1 -timeout 50m ./drivers/... ./internal/e2e/...
 
   workflows:
     name: workflows
