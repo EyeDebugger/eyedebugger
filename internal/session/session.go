@@ -467,6 +467,12 @@ func (s *Session) onStoppedLocked(e *godap.StoppedEvent) {
 	}
 	s.stopGen++
 
+	// lldb-dap pauses with SIGSTOP on Linux and reports the stop as a
+	// signal (reason exception): with a pause outstanding, it is the pause.
+	if s.pauseRequested && pauseSignal(stop) {
+		stop.Reason = reasonPause
+	}
+
 	if stop.Reason == reasonBreakpoint && s.emulatingLocked() {
 		go s.filterStop(s.stopGen, stop)
 

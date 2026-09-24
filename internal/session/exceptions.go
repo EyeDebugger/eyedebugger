@@ -23,8 +23,18 @@ const (
 	maxInnerDepth       = 3
 )
 
-// reasonException is the stop reason of an exception.
-const reasonException = "exception"
+// Stop reasons the session looks at.
+const (
+	reasonException = "exception"
+	reasonPause     = "pause"
+)
+
+// pauseSignal reports whether stop is a SIGSTOP signal stop, the shape of
+// a pause lldb-dap implements with SIGSTOP (Linux): reason exception,
+// description "signal SIGSTOP".
+func pauseSignal(stop api.StopInfo) bool {
+	return stop.Reason == reasonException && stop.Description == "signal SIGSTOP"
+}
 
 // Exceptions reports the session's exception modes (p.Mode empty) or sets
 // client c's. Each client has its own mode; the adapter stops at the union

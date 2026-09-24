@@ -6,6 +6,7 @@ package session
 import (
 	"context"
 	"errors"
+	"slices"
 
 	godap "github.com/google/go-dap"
 
@@ -212,7 +213,33 @@ func (s *Session) setVariable(ctx context.Context, fid int, segs []string, p api
 		return api.SetResult{}, adapterErr(err)
 	}
 
-	return api.SetResult{Variable: p.Variable, Value: truncate(resp.Body.Value), Type: resp.Body.Type}, nil
+	return s.setVariableResult(ctx, parent, segs[len(segs)-1], p.Variable, resp.Body), nil
+}
+
+// setVariableResult is the result of setting variable (name in parent) as
+// body reports it. An answer without a value (lldb-dap 18-20 send it as
+// "result") takes the value, and a missing type, from parent's variable
+// name as the adapter now shows it; the set is done, so a failed read
+// leaves them empty.
+func (s *Session) setVariableResult(ctx context.Context, parent int, name, variable string, body godap.SetVariableResponseBody) api.SetResult {
+	res := api.SetResult{Variable: variable, Value: truncate(body.Value), Type: body.Type}
+	if res.Value != "" {
+		return res
+	}
+
+	vars, err := s.children(ctx, parent)
+	if err != nil {
+		return res
+	}
+
+	if i := slices.IndexFunc(vars, func(v godap.Variable) bool { return v.Name == name }); i >= 0 {
+		res.Value = truncate(vars[i].Value)
+		if res.Type == "" {
+			res.Type = vars[i].Type
+		}
+	}
+
+	return res
 }
 
 // markStale makes the next capture refetch the current stop's locals

@@ -153,3 +153,63 @@ func TestExceptionStop(t *testing.T) {
 		})
 	}
 }
+
+// TestPauseReason: a pause the adapter reports as a SIGSTOP signal stop
+// (reason exception, as lldb-dap does on Linux) is reported as a pause,
+// its description kept.
+func TestPauseReason(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		asSignal bool
+		desc     string
+	}{
+		{name: "pause"},
+		{name: "SIGSTOP", asSignal: true, desc: "signal SIGSTOP"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			drv := fakeDriver{opts: daptest.Options{PauseAsSignal: tt.asSignal}}
+			s := start(t, newTestManagerWith(t, nil, drv), agentC, api.StartParams{LaunchSpec: api.LaunchSpec{Args: []string{"hang"}}})
+
+			waitRunning(t, s)
+
+			snap := resume(t, s, agentC, ExecPause)
+			expectStopped(t, snap, "pause", 10)
+
+			if snap.Session.Stop.Description != tt.desc || snap.Exception != nil {
+				t.Errorf("pause stop = %+v (exception %+v), want description %q and no exception", snap.Session.Stop, snap.Exception, tt.desc)
+			}
+		})
+	}
+}
+
+// TestPauseSignal: only a SIGSTOP signal stop can be a pause.
+func TestPauseSignal(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		stop api.StopInfo
+		want bool
+	}{
+		{name: "SIGSTOP", stop: api.StopInfo{Reason: reasonException, Description: "signal SIGSTOP"}, want: true},
+		{name: "another signal", stop: api.StopInfo{Reason: reasonException, Description: "signal SIGSEGV"}},
+		{name: "an exception", stop: api.StopInfo{Reason: reasonException, Text: "System.Exception"}},
+		{name: "not an exception", stop: api.StopInfo{Reason: reasonBreakpoint, Description: "signal SIGSTOP"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := pauseSignal(tt.stop); got != tt.want {
+				t.Errorf("pauseSignal(%+v) = %v, want %v", tt.stop, got, tt.want)
+			}
+		})
+	}
+}

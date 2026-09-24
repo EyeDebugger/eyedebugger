@@ -30,7 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `adapter.transport: "connect"` (a private Unix socket the adapter dials in to) since `dlv dap`
   never speaks stdio; `eyedbg adapters install delve` downloads the pinned release. A new
   `${envList}` launch template variable lets `lldb-dap`'s pre-20 `--env` array shape work from a
-  manifest. Manifest schema, session and trust model unchanged otherwise (ADR 0013).
+  manifest. Manifest schema, session and trust model unchanged otherwise (ADR 0013). With
+  lldb-dap 18–20, `set` reports the new value (their `setVariable` answer carries it as
+  `"result"`: the session re-reads the variable), and on Linux a pause stops with reason `pause`,
+  not `exception` (`signal SIGSTOP`).
 
 ## [0.1.2] - 2026-09-24
 

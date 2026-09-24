@@ -216,6 +216,11 @@ LLDB formatters are imported (`~/.lldbinit`, from `rustc --print sysroot`; a doc
 not automated — follow-up F7); Rust panics have no exception filter. `eval`'s side-effect guard
 covers `sizeof`/`alignof` (C++ also `decltype`/`typeid`) and the usual assignment operators;
 `strlen()` and similar bare calls still run code, best-effort as for every language's guard.
+Two lldb-dap quirks the session absorbs for every adapter: lldb-dap 18–20 answer `setVariable` with
+`"result"` instead of `"value"`, so an answer without a value makes `set` re-read the variable from
+its parent; and on Linux lldb-dap pauses with SIGSTOP and reports the stop as reason `exception`
+(`signal SIGSTOP`), so a SIGSTOP signal stop while a pause is outstanding is reported as `pause`
+(its description kept).
 
 ### Go
 

@@ -105,13 +105,18 @@ func TestEvalDepth(t *testing.T) {
 func TestSet(t *testing.T) {
 	t.Parallel()
 
+	setVariableOnly := &godap.Capabilities{SupportsConfigurationDoneRequest: true, SupportsSetVariable: true}
+
 	tests := []struct {
 		name string
 		caps *godap.Capabilities
-		code api.Code
+		// result: setVariable answers "result", not "value" (lldb-dap 18-20).
+		result bool
+		code   api.Code
 	}{
 		{name: "setExpression"},
-		{name: "setVariable", caps: &godap.Capabilities{SupportsConfigurationDoneRequest: true, SupportsSetVariable: true}},
+		{name: "setVariable", caps: setVariableOnly},
+		{name: "setVariable answering result", caps: setVariableOnly, result: true},
 		{name: "neither", caps: &godap.Capabilities{SupportsConfigurationDoneRequest: true}, code: api.CodeUnsupported},
 	}
 
@@ -119,7 +124,7 @@ func TestSet(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			drv := fakeDriver{opts: daptest.Options{Caps: tt.caps}}
+			drv := fakeDriver{opts: daptest.Options{Caps: tt.caps, SetVariableResult: tt.result}}
 			s := start(t, newTestManagerWith(t, nil, drv), agentC, api.StartParams{LaunchSpec: api.LaunchSpec{StopOnEntry: true}})
 
 			// Stop twice, so a changed local diffs against a previous stop.

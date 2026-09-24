@@ -261,7 +261,7 @@ func (a *adapter) handle(req godap.RequestMessage, raw []byte) {
 		a.resume(req)
 	case *godap.PauseRequest:
 		a.respond(req, nil)
-		a.prog.pause()
+		a.prog.pause(a.opts.PauseAsSignal)
 	case *godap.DisconnectRequest:
 		a.disconnect(req, raw)
 	default:
@@ -293,10 +293,22 @@ func (a *adapter) configure(req godap.RequestMessage) {
 			err = fmt.Errorf("no variables with reference %d", r.Arguments.VariablesReference)
 		}
 
-		a.respondOr(req, godap.SetVariableResponseBody{Value: a.prog.x, Type: typeInt}, err)
+		var body any = godap.SetVariableResponseBody{Value: a.prog.x, Type: typeInt}
+		if a.opts.SetVariableResult {
+			body = resultBody{Result: a.prog.x, Type: typeInt}
+		}
+
+		a.respondOr(req, body, err)
 	default:
 		a.inspect(req)
 	}
+}
+
+// resultBody is a setVariable answer with the value under "result", as
+// lldb-dap 18-20 send it.
+type resultBody struct {
+	Result string `json:"result"`
+	Type   string `json:"type"`
 }
 
 // inspect answers the requests that only read state.
