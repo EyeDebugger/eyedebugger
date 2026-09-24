@@ -46,9 +46,49 @@ type fakeDriver struct {
 	// exiting with runnerCode.
 	runner     string
 	runnerCode int
+	// socket, when set, puts the adapter on the connect transport and
+	// records the socket paths it was given.
+	socket *socketPaths
 }
 
 func (fakeDriver) Name() string { return "fake" }
+
+// transport puts l on the connect transport when d.socket is set.
+func (d fakeDriver) transport(l Launch) Launch {
+	if d.socket == nil {
+		return l
+	}
+
+	args := l.AdapterArgs
+	l.AdapterArgs = nil
+	l.SocketArgs = func(path string) []string {
+		d.socket.add(path)
+
+		return append(slices.Clone(args), daptest.ConnectArg(path))
+	}
+
+	return l
+}
+
+// socketPaths are the socket paths a fakeDriver's adapters were given.
+type socketPaths struct {
+	mu    sync.Mutex
+	paths []string
+}
+
+func (p *socketPaths) add(path string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.paths = append(p.paths, path)
+}
+
+func (p *socketPaths) all() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return slices.Clone(p.paths)
+}
 
 func (d fakeDriver) Prepare(_ context.Context, spec LaunchSpec) (Launch, error) {
 	path, args, env, err := daptest.CommandWith(d.opts)
@@ -62,10 +102,10 @@ func (d fakeDriver) Prepare(_ context.Context, spec LaunchSpec) (Launch, error) 
 		return Launch{}, err
 	}
 
-	return Launch{
+	return d.transport(Launch{
 		Adapter: path, AdapterArgs: args, AdapterEnv: env, AdapterID: "fake", Program: spec.Program,
 		Arguments: pa.Map(), ExceptionFilters: d.excFilters, SideEffects: d.sideEffects,
-	}, nil
+	}), nil
 }
 
 func (d fakeDriver) PrepareAttach(_ context.Context, spec api.AttachSpec) (Launch, error) {
@@ -77,10 +117,10 @@ func (d fakeDriver) PrepareAttach(_ context.Context, spec api.AttachSpec) (Launc
 	pa := d.attach
 	pa.ProcessID = spec.PID
 
-	return Launch{
+	return d.transport(Launch{
 		Adapter: path, AdapterArgs: args, AdapterEnv: env, AdapterID: "fake", Request: RequestAttach, PID: spec.PID,
 		Arguments: pa.Map(), AttachHint: "fake attach hint",
-	}, nil
+	}), nil
 }
 
 func (d fakeDriver) TestCommand(_ context.Context, spec TestSpec) (TestCommand, error) {
