@@ -792,7 +792,9 @@ Without a subcommand, prints this help and exits 0; an unknown subcommand exits 
 
 // bpAddLong is the long help of BreakpointAdd.
 const bpAddLong = `Add a breakpoint. LOCATION is one of:
-  FILE:LINE     a line (FILE relative to the current directory, or absolute);
+  FILE:LINE     a line (FILE relative to the current directory, or absolute: a bare file name
+                is looked for in the current directory only, and a file that isn't there is
+                INVALID_REQUEST, exit 1);
   FILE@"TEXT"   the one line of FILE that holds TEXT (case-sensitive; runs of whitespace match
                 one space), e.g. 'Program.cs@"total += price"' (quote it for the shell). It is
                 found once, now: several matching lines is ANCHOR_AMBIGUOUS and none is
