@@ -212,6 +212,72 @@ func checkLldbDapEvalGuard(t *testing.T, m *Manifest, name string, nonCallWords,
 	}
 }
 
+// TestDelveManifest pins the bundled delve manifest's adapter and language
+// fields, and checks every download URL names the pinned version (catching
+// a half-done version bump) on the five platforms Delve publishes.
+func TestDelveManifest(t *testing.T) {
+	t.Parallel()
+
+	m := Load(LoadConfig{Bundled: Bundled(), Builtin: builtinLangs}).Adapter("delve")
+	if m == nil {
+		t.Fatal("no bundled delve manifest")
+	}
+
+	checkDelveAdapter(t, m)
+	checkDelveDownloads(t, m)
+
+	if m.Attach == nil || m.Attach.Arguments["mode"] != "local" || m.Attach.Arguments["processId"] != "${pid}" {
+		t.Fatalf("delve attach = %+v", m.Attach)
+	}
+
+	wantExceptions := []string{"unrecovered-panic", "runtime-fatal-throw"}
+	if !slices.Equal(m.Exceptions["all"], wantExceptions) || !slices.Equal(m.Exceptions["uncaught"], wantExceptions) {
+		t.Fatalf("delve exceptions = %+v", m.Exceptions)
+	}
+}
+
+// checkDelveAdapter checks the delve manifest's adapter and top-level
+// fields.
+func checkDelveAdapter(t *testing.T, m *Manifest) {
+	t.Helper()
+
+	a := m.Adapter
+	if a.ID != "go" || a.Transport != TransportConnect || a.Entry != "dlv" ||
+		!slices.Equal(a.Args, []string{"dap", "--client-addr=unix:${socket}"}) ||
+		a.Env != "EYEDBG_DLV" || !a.Path || !slices.Equal(a.VersionArgs, []string{"version"}) ||
+		a.Runtime != RuntimeNative || m.LanguageName() != "go" || m.Builtin() || m.Version != "1.27.2" ||
+		m.License != "MIT" || m.Homepage != "https://github.com/go-delve/delve" {
+		t.Fatalf("delve adapter = %+v, manifest %+v", a, m)
+	}
+}
+
+// checkDelveDownloads checks that every platform Delve publishes is
+// present, and every URL names the pinned version (catching a half-done
+// version bump).
+func checkDelveDownloads(t *testing.T, m *Manifest) {
+	t.Helper()
+
+	wantPlatforms := []string{"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "windows/amd64"}
+	if len(m.Install.Downloads) != len(wantPlatforms) {
+		t.Fatalf("downloads = %v, want exactly %v", m.Install.Downloads, wantPlatforms)
+	}
+
+	for _, key := range wantPlatforms {
+		goos, goarch, _ := strings.Cut(key, "/")
+
+		d, ok := m.DownloadFor(goos, goarch)
+		if !ok {
+			t.Errorf("no download for %s", key)
+
+			continue
+		}
+
+		if !strings.Contains(d.URL, "/v"+m.Version+"/") || !strings.Contains(d.URL, "dlv_"+m.Version+"_") || d.Root != "" {
+			t.Errorf("download %s url = %q, root %q; want /v%s/ and dlv_%s_, root \"\"", key, d.URL, d.Root, m.Version, m.Version)
+		}
+	}
+}
+
 func checkNetcoredbgFields(t *testing.T, m *Manifest) {
 	t.Helper()
 

@@ -152,12 +152,15 @@ jobs:
           # (windows-11-arm); the race detector doesn't support windows/arm64 either.
           # langs is EYEDBG_E2E_LANGS: "" runs every language (Linux and macOS install
           # lldb-18/xcrun's lldb-dap below); Windows has no lldb-dap story yet, so its
-          # entries exclude c, cpp and rust.
+          # entries exclude c, cpp and rust. Delve publishes a windows/amd64 build (so
+          # windows-latest adds go, exercising the connect transport's AF_UNIX socket on
+          # Windows for the first time) but none for windows/arm64, so windows-11-arm
+          # drops go too.
           full='[
             {"os":"ubuntu-latest","netcoredbg":true,"race":true,"langs":""},
             {"os":"ubuntu-24.04-arm","netcoredbg":true,"race":true,"langs":""},
             {"os":"macos-latest","netcoredbg":true,"race":true,"langs":""},
-            {"os":"windows-latest","netcoredbg":true,"race":true,"langs":"python,dotnet"},
+            {"os":"windows-latest","netcoredbg":true,"race":true,"langs":"python,dotnet,go"},
             {"os":"macos-15-intel","netcoredbg":false,"race":true,"langs":""},
             {"os":"windows-11-arm","netcoredbg":false,"race":false,"langs":"python,dotnet"}
           ]'
@@ -230,6 +233,9 @@ jobs:
         run: |
           echo "::notice title=.NET e2e skipped::netcoredbg has no $RUNNER_OS/$RUNNER_ARCH release"
           echo "netcoredbg has no $RUNNER_OS/$RUNNER_ARCH release: .NET e2e skipped" >> "$GITHUB_STEP_SUMMARY"
+      - name: Install delve
+        if: matrix.langs == '' || contains(matrix.langs, 'go')
+        run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters install delve"
       - name: Doctor
         run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters doctor python"
       - name: Doctor (dotnet)
@@ -238,6 +244,9 @@ jobs:
       - name: Doctor (c)
         if: runner.os != 'Windows'
         run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters doctor c"
+      - name: Doctor (go)
+        if: matrix.langs == '' || contains(matrix.langs, 'go')
+        run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters doctor go"
       - name: e2e
         env:
           RACE: ${{ matrix.race && '-race' || '' }}

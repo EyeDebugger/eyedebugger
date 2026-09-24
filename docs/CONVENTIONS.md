@@ -99,7 +99,10 @@
   downloads debugpy into a temporary data directory). `drivers/generic`'s `TestLldb*`/`TestCpp*`/
   `TestCAttach` (c, cpp, rust) need `cc`/`c++`/`rustc` on PATH and lldb-dap (`EYEDBG_LLDB_DAP` or
   PATH); unlike python and dotnet there is no bundled download, so a missing compiler or lldb-dap
-  fails the test directly, the same "never skip silently" rule below. `requireE2E`/`require`
+  fails the test directly, the same "never skip silently" rule below. `drivers/generic`'s `TestGo*`
+  (go, over schema 1's connect transport) need Go on PATH and Delve (`EYEDBG_DLV` or PATH, or
+  `adapters install delve`); `TestGoManagedInstall` also needs `EYEDBG_E2E_NETWORK=1` (it downloads
+  Delve into a temporary data directory). `requireE2E`/`require`
   closures are the only skip point: without `EYEDBG_E2E=1` the test skips; with it set and the
   adapter missing or broken, it fails, never skips silently. `EYEDBG_E2E_LANGS` (comma-separated
   language names) narrows which languages a real-adapter run exercises: unset runs every language;

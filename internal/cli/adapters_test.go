@@ -186,7 +186,7 @@ func TestDoctorAll(t *testing.T) {
 		}
 	}
 
-	want := []string{"netcoredbg", "dotnet", "debugpy", "lldb-dap-c", "lldb-dap-cpp", "lldb-dap-rust"}
+	want := []string{"netcoredbg", "dotnet", "debugpy", "delve", "lldb-dap-c", "lldb-dap-cpp", "lldb-dap-rust"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("checks = %v, want %v", names, want)
 	}

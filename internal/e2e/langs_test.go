@@ -74,7 +74,7 @@ type langCase struct {
 func langCases(t *testing.T) []langCase {
 	t.Helper()
 
-	return []langCase{fakeCase(t), pythonCase(t), dotnetCase(t), cCase(t)}
+	return []langCase{fakeCase(t), pythonCase(t), dotnetCase(t), cCase(t), goCase(t)}
 }
 
 // fakeCase is always on: the fake adapter is this test binary
@@ -271,6 +271,57 @@ func cCase(t *testing.T) langCase {
 	lc.anchor = markerLine(t, file, "loop-body")
 	lc.target = markerLine(t, file, "append")
 	lc.startArgs = func(*testing.T) []string { return []string{"--program", bin} }
+
+	return lc
+}
+
+// goCase needs EYEDBG_E2E=1 (a real go and Delve, or EYEDBG_DLV, or a
+// managed install) and connects through schema 1's connect transport
+// (Step 7): its script positions come from testdata/apps/go/basic/main.go's
+// own markers. --program is the package directory (Delve's debug mode
+// builds it), so --cwd is also given: workDir would otherwise take the
+// directory of --program, which is already the package directory here, but
+// naming it explicitly matches how a real invocation would run it. Unlike
+// python and dotnet there is no bundled download to fall back on except
+// Delve's own managed install: a missing go or dlv fails the test, it
+// doesn't skip. attachSupported is true: a real attach is exercised by
+// drivers/generic's TestGoAttach, not here.
+func goCase(t *testing.T) langCase {
+	t.Helper()
+
+	lc := langCase{
+		name: "go",
+		lang: "go",
+		require: func(t *testing.T) {
+			t.Helper()
+
+			if os.Getenv(envE2E) != "1" {
+				t.Skip("set " + envE2E + "=1 (needs go and dlv, or EYEDBG_DLV, or 'eyedbg adapters install delve')")
+			}
+
+			requireLang(t, "go")
+		},
+		okExpr: "total", okValue: "10",
+		sideEffectExpr:  "total = 5",
+		logExpr:         "total",
+		attachSupported: true,
+	}
+
+	if os.Getenv(envE2E) != "1" {
+		return lc
+	}
+
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "..", "testdata", "apps", "go", "basic"))); err != nil {
+		t.Fatal(err)
+	}
+
+	file := filepath.Join(dir, "main.go")
+
+	lc.file = file
+	lc.anchor = markerLine(t, file, "loop-body")
+	lc.target = markerLine(t, file, "append")
+	lc.startArgs = func(*testing.T) []string { return []string{"--program", dir, "--cwd", dir} }
 
 	return lc
 }
