@@ -26,20 +26,24 @@ It connects to the running daemon (it never starts one), authenticates like ever
 joins the session chosen by -s (else $EYEDBG_SESSION, else the only session) as the client --as
 (else $EYEDBG_CLIENT, else agent); an editor usually passes --as human:NAME. From then on it only
 copies bytes between stdio and the daemon, which serves DAP for that session: the client attaches
-(launch is refused: start the session with 'eyedbg start'), sees the current stop, threads, stack,
-variables and output, and gets every later stop.
+(launch is refused: start the session with 'eyedbg start'), sees the output so far, the current
+stop, threads, stack and variables, and gets every later stop.
 
 The client acts under the same rules as the CLI: continue, steps, pause, terminate, setting a
 variable and evaluating in the debug console (repl) are execution requests that need the control
 lease ('eyedbg lease --help'; refused with LEASE_HELD); watch and hover evaluation are reads that
 refuse side effects. Its breakpoints and exception filters are its own ('eyedbg bp ls' shows them
-under its client id) and are removed when it disconnects; the lease stays with whoever holds it.
+under its client id, marked (editor)); its list never removes what the same client set with 'eyedbg
+bp add'. Other clients' line breakpoints appear in the editor, marked at column 1 with whose they
+are and their condition in the hover: removing one there only hides it, editing one (a condition)
+makes a breakpoint of your own. When the client's last connection closes, its editor breakpoints
+and exception mode are removed and its lease is released (a Restart keeps them for 10 s).
 Disconnecting never ends the session; terminate does, like 'eyedbg stop'. Everything the client
-does shows in 'eyedbg events'.
+does shows in 'eyedbg events' and 'eyedbg sessions' shows it connected. Custom eyedbg/* requests
+and events carry the lease, clients and breakpoints for editor extensions (docs/adr/0014).
 
-Blocks until the DAP client disconnects or closes stdin (then the daemon removes what the client
-set and closes the connection), or the daemon goes away. stdout carries DAP only: every error,
-also with --json, goes to stderr.
+Blocks until the DAP client disconnects or closes stdin, or the daemon goes away. stdout carries
+DAP only: every error, also with --json, goes to stderr.
 
 Exit codes: 0 the DAP client ended the connection; 1 the connection to eyedbgd was lost, or a usage
 error; 2 no such session, or it has exited (NO_SESSION, SESSION_EXITED); 3 the daemon is too old

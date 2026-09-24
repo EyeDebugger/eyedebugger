@@ -15,6 +15,10 @@ func (s *Session) Touch(c api.Client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.touchLocked(c)
+}
+
+func (s *Session) touchLocked(c api.Client) {
 	now := time.Now()
 
 	for i := range s.clients {

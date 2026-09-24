@@ -287,6 +287,8 @@ func (s *Session) addBreakpointLocked(owner string, spec api.BreakpointSpec) (b 
 
 	for _, b := range s.bps[spec.File] {
 		if b.Owner == owner && b.key() == key {
+			// An editor breakpoint stays one (Editor is left alone): the
+			// editor still shows it, and its client's leaving removes it.
 			changed = b.Condition != spec.Condition || b.Temporary || b.Anchor != spec.Anchor ||
 				b.HitCondition != spec.HitCondition || b.LogMessage != spec.LogMessage
 			b.Condition, b.Temporary, b.Anchor = spec.Condition, false, spec.Anchor

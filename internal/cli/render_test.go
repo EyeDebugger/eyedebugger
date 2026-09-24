@@ -205,6 +205,39 @@ func TestSessionRendering(t *testing.T) {
 		{"events breadth", "events_breadth.golden", func(b *bytes.Buffer) error {
 			return writeEvents(b, breadthEvents(), eventsView{}, false, renderBase)
 		}},
+		{"lease request", "lease_request.golden", func(b *bytes.Buffer) error {
+			held := api.LeaseResult{SessionID: "s-k3f9", HolderConnected: true, Lease: api.LeaseInfo{
+				Policy: api.LeaseHandoff, Holder: "human:ijat", Since: &renderTime, Requests: []api.LeaseRequest{
+					{Client: "agent:b", At: renderTime},
+					{Client: "agent", Message: "I need to step into \"Total()\"\nnow", At: renderTime},
+				},
+			}}
+			if err := writeLeaseRequest(b, held, "agent"); err != nil {
+				return err
+			}
+
+			if err := writeLeaseRequest(b, api.LeaseResult{SessionID: "s-k3f9", Lease: api.LeaseInfo{Policy: api.LeaseHandoff}}, "agent"); err != nil {
+				return err
+			}
+
+			return writeLeaseRequest(b, api.LeaseResult{SessionID: "s-k3f9", Lease: api.LeaseInfo{Policy: api.LeaseFree, Holder: "agent"}}, "agent")
+		}},
+		{"lease request json", "lease_request_json.golden", func(b *bytes.Buffer) error {
+			return writeLease(b, api.LeaseResult{SessionID: "s-k3f9", HolderConnected: true, Lease: api.LeaseInfo{
+				Policy: api.LeaseHandoff, Holder: "human:ijat", Since: &renderTime,
+				Requests: []api.LeaseRequest{{Client: "agent", Message: "I need to step into Total()", At: renderTime}},
+			}}, true)
+		}},
+		{"events presence", "events_presence.golden", func(b *bytes.Buffer) error {
+			return writeEvents(b, presenceEvents(), eventsView{}, false, renderBase)
+		}},
+		{"breakpoints editor", "breakpoints_editor.golden", func(b *bytes.Buffer) error {
+			return writeBreakpoints(b, []api.Breakpoint{
+				{ID: 1, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 4, Line: 4, Verified: true},
+				{ID: 2, Owner: "human:ijat", File: "/work/app/Program.cs", RequestedLine: 9, Line: 9, Verified: true, Editor: true},
+				{ID: 3, Owner: "human:ijat", Function: "Orders.Price", Verified: true, Editor: true},
+			}, false, renderBase)
+		}},
 		{"output", "output.golden", func(b *bytes.Buffer) error {
 			return writeOutput(b, io.Discard, api.OutputResult{Lines: []api.OutputLine{{Seq: 1, Category: "stdout", Text: "i=1\n"}, {Seq: 2, Category: "stderr", Text: "warn"}}}, false, false)
 		}},
@@ -232,12 +265,18 @@ func lostSession() api.SessionInfo {
 	}
 }
 
-// sharedSnapshot is a stop in a session two clients use, under handoff.
+// sharedSnapshot is a stop in a session two clients use, under handoff:
+// the human holds the lease from a connected editor, and the agent asked
+// for it.
 func sharedSnapshot() api.Snapshot {
 	snap := stoppedSnapshot()
-	snap.Session.Lease = &api.LeaseInfo{Policy: api.LeaseHandoff, Holder: "human:ijat", Since: &renderTime}
+	snap.Session.Lease = &api.LeaseInfo{
+		Policy: api.LeaseHandoff, Holder: "human:ijat", Since: &renderTime,
+		Requests: []api.LeaseRequest{{Client: "agent", Message: "I need to step into Total()", At: renderTime.Add(2 * time.Minute)}},
+	}
 	snap.Session.Clients = append(snap.Session.Clients, api.ClientInfo{
 		Client: api.Client{ID: "human:ijat", Kind: api.KindHuman, Name: "ijat"}, FirstSeen: renderTime, LastSeen: renderTime.Add(time.Minute),
+		Connected: 1,
 	})
 	snap.Session.Recording = "/run/user/1000/eyedbg/sessions/s-k3f9.jsonl"
 
@@ -381,4 +420,30 @@ func TestParseLocation(t *testing.T) {
 			t.Errorf("parseLocation(%q) succeeded, want an error", bad)
 		}
 	}
+}
+
+// presenceEvents is a human's editor connecting, asking for the lease,
+// getting it and leaving.
+func presenceEvents() api.EventsResult {
+	handoff := func(holder string, requests ...api.LeaseRequest) *api.LeaseInfo {
+		return &api.LeaseInfo{Policy: api.LeaseHandoff, Holder: holder, Since: &renderTime, Requests: requests}
+	}
+	events := []api.Event{
+		{Kind: api.EventClient, Client: "human:ijat"},
+		{Kind: api.EventClient, Action: "connected", Client: "human:ijat"},
+		{
+			Kind: api.EventLease, Action: "request", Client: "human:ijat", Text: "let me step through parse()",
+			Lease: handoff("agent", api.LeaseRequest{Client: "human:ijat", Message: "let me step through parse()", At: renderTime}),
+		},
+		{Kind: api.EventLease, Action: "request", Client: "agent:b", Lease: handoff("agent")},
+		{Kind: api.EventLease, Action: "grant", Client: "agent", Previous: "agent", Lease: handoff("human:ijat")},
+		{Kind: api.EventClient, Action: "disconnected", Client: "human:ijat"},
+		{Kind: api.EventLease, Action: "release", Client: "human:ijat", Previous: "human:ijat", Reason: "disconnected", Lease: handoff("")},
+	}
+
+	for i := range events {
+		events[i].Seq, events[i].Time = 30+i, renderTime
+	}
+
+	return api.EventsResult{Events: events, Latest: 36}
 }

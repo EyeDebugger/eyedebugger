@@ -38,7 +38,13 @@
 // requests, [Session.Forward] for every other adapter request (one table
 // decides what is read, leased or refused), [Session.ReplaceBreakpoints]
 // and [Session.ReplaceFunctionBreakpoints] for its client's own
-// breakpoints.
+// breakpoints (editor breakpoints: a replace never removes the client's
+// CLI ones). [Session.Connect] and [Presence.Leave] count each client's
+// open editor connections (presence, ADR 0014): when a client's last one
+// closes, its editor breakpoints are removed, the exception mode an editor
+// of it set is reset, its lease request dropped and its lease released —
+// after a grace for a restart, and never once one of its connections came
+// back.
 //
 // Lock order: execMu, syncMu, captureMu, mu, then the event log's and the
 // recorder's own locks; the adapter's event goroutine takes only mu and

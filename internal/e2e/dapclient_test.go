@@ -15,6 +15,7 @@ import (
 	godap "github.com/google/go-dap"
 
 	"github.com/eyedebugger/eyedebugger/internal/dap"
+	"github.com/eyedebugger/eyedebugger/internal/facade"
 )
 
 // dapTimeout bounds each DAP request and each wait for an event: generous
@@ -59,7 +60,13 @@ func (h *harness) dap(client string, args ...string) *dapProc {
 		h.t.Fatalf("start eyedbg dap: %v", err)
 	}
 
-	p.client = dap.NewClient(stdout, stdin, dap.Handlers{Event: p.onEvent})
+	// The facade's codec decodes its eyedbg/* events and responses too.
+	codec := godap.NewCodec()
+	if err := facade.RegisterMessages(codec); err != nil {
+		h.t.Fatal(err)
+	}
+
+	p.client = dap.NewClient(stdout, stdin, dap.Handlers{Event: p.onEvent, Codec: codec})
 
 	go func() {
 		<-p.client.Done()
@@ -159,12 +166,20 @@ func (p *dapProc) fails(req godap.RequestMessage, code string) {
 func (p *dapProc) waitEvent(name string) godap.EventMessage {
 	p.t.Helper()
 
+	return p.waitEventWhere(name, nil)
+}
+
+// waitEventWhere is waitEvent for an event that also matches pred (nil:
+// any).
+func (p *dapProc) waitEventWhere(name string, pred func(godap.EventMessage) bool) godap.EventMessage {
+	p.t.Helper()
+
 	deadline := time.After(dapTimeout)
 
 	for {
 		p.mu.Lock()
 		for i := p.cursor; i < len(p.events); i++ {
-			if ev := p.events[i]; ev.GetEvent().Event == name {
+			if ev := p.events[i]; ev.GetEvent().Event == name && (pred == nil || pred(ev)) {
 				p.cursor = i + 1
 				p.mu.Unlock()
 
@@ -183,6 +198,17 @@ func (p *dapProc) waitEvent(name string) godap.EventMessage {
 			p.t.Fatalf("no %s event within %s", name, dapTimeout)
 		}
 	}
+}
+
+// received returns the events received so far and moves the cursor past
+// them.
+func (p *dapProc) received() []godap.EventMessage {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.cursor = len(p.events)
+
+	return append([]godap.EventMessage(nil), p.events...)
 }
 
 // wait returns the exit code of 'eyedbg dap', waiting up to dapTimeout.

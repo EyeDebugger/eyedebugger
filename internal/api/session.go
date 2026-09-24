@@ -300,6 +300,10 @@ type Breakpoint struct {
 	// Hits counts the stops where its condition held, for breakpoints with
 	// a hit condition or a log message.
 	Hits int `json:"hits,omitempty"`
+	// Editor marks a breakpoint set through its owner's editor (DAP)
+	// connection; it is removed when the owner's last editor connection
+	// closes (docs/adr/0014).
+	Editor bool `json:"editor,omitempty"`
 }
 
 // BreakpointAddParams are the params of [MethodBreakpointAdd].

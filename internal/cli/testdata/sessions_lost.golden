@@ -1,4 +1,4 @@
-ID      LANG    STATE                 LEASE  PROGRAM
-s-k3f9  dotnet  stopped (breakpoint)  agent  /work/app/bin/Debug/net10.0/app.dll
-s-7f3k  dotnet  lost                  -      /work/old/bin/Debug/net10.0/old.dll
+ID      LANG    STATE                 LEASE  CONNECTED  PROGRAM
+s-k3f9  dotnet  stopped (breakpoint)  agent  -          /work/app/bin/Debug/net10.0/app.dll
+s-7f3k  dotnet  lost                  -      -          /work/old/bin/Debug/net10.0/old.dll
 (lost: eyedbgd exited while it was live; 'eyedbg sessions --json' has its recording; 'eyedbg stop -s ID' forgets it)

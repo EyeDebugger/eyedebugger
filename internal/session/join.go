@@ -9,6 +9,7 @@ import (
 	godap "github.com/google/go-dap"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
+	"github.com/eyedebugger/eyedebugger/internal/present"
 )
 
 // Ready waits until the session finished starting (ctx bounds the wait) and
@@ -49,6 +50,22 @@ func (s *Session) JoinPoint() (info api.SessionInfo, seq int) {
 // counts those the log no longer holds.
 func (s *Session) Follow(ctx context.Context, since int) api.EventsResult {
 	return s.log.wait(ctx, api.EventsParams{Since: max(since, 0), Limit: api.MaxEventsLimit})
+}
+
+// OutputBefore returns the newest output chunks the log holds with seq at
+// most seq: at most maxChunks, within maxBytes of JSON (at least one, cut
+// if it alone is too big; see present.CapOutput), oldest first, and how
+// many older held chunks it left out.
+func (s *Session) OutputBefore(seq, maxChunks, maxBytes int) (lines []api.OutputLine, omitted int) {
+	held := s.log.outputUntil(seq)
+	if len(held) == 0 {
+		return nil, 0
+	}
+
+	newest := held[max(len(held)-maxChunks, 0):]
+	lines, omitted = present.CapOutput(newest, maxBytes, true)
+
+	return lines, omitted + len(held) - len(newest)
 }
 
 // SupportedExceptionModes returns the exception modes other than none

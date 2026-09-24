@@ -1,6 +1,6 @@
 # EyeDebugger (`eyedbg`) — AI-native debugger (design)
 
-Status: v0.3 · 2026-09-24 · phase 1 (MVP) complete; phase 2: DAP facade (P2-M1)
+Status: v0.3 · 2026-09-24 · phase 1 (MVP) complete; phase 2: DAP facade (P2-M1), collaboration (P2-M2)
 
 ## 1. What and why
 
@@ -53,11 +53,11 @@ DAP client (VS Code, nvim-dap) ─stdio─► eyedbg dap ─ same socket: hello,
 | Concept | Definition |
 |---|---|
 | **Session** | One debuggee + one adapter connection. ID: short, human-typable (`s-7f3k`). May have child sessions (js-debug `startDebugging`). |
-| **Client** | A controller: `{id, kind: agent\|human, name}`, id `KIND[:NAME]` (`agent`, `human:ijat`). Every request names it: CLI calls via `--as` / `EYEDBG_CLIENT`, default `agent` (never a human; not derived from the parent pid, since agent harnesses run each command in a fresh shell). Two agents sharing a session set distinct names. Persistent across calls, not per connection; the session lists each client with when it was first and last seen (ADR 0009). |
-| **Control lease** | Exactly one client holds *execution control* (continue/step/pause/run-until, terminate or detach while the program is live, `set`, and `eval --allow-side-effects`). Others can read, set their own breakpoints, and take or be granted the lease. The starter holds it first. Policies (set at start or by the holder): `free` (anyone takes it, executing takes it automatically; the default), `handoff` (only the holder releases or grants it), `human-priority` (handoff, except that a human may take it from an agent; agents never take it from one another). `--force` overrides the policy; a refusal is `LEASE_HELD`. Lease changes are events. |
-| **Breakpoint ownership** | Every breakpoint records `owner` and `createdAt`. The daemon merges all owners' breakpoints per file into the single `setBreakpoints` DAP call — one source breakpoint per line (adapters keep one per line): any unconditional breakpoint makes the line unconditional, equal conditions are kept, different ones make it unconditional with a note — and maps the adapter's answer back to every breakpoint of the line. Clients can filter by owner (`bp ls --mine`); removing only touches your own unless `--force` (`NOT_OWNER` otherwise). |
+| **Client** | A controller: `{id, kind: agent\|human, name}`, id `KIND[:NAME]` (`agent`, `human:ijat`). Every request names it: CLI calls via `--as` / `EYEDBG_CLIENT`, default `agent` (never a human; not derived from the parent pid, since agent harnesses run each command in a fresh shell). Two agents sharing a session set distinct names. Persistent across calls, not per connection; the session lists each client with when it was first and last seen (ADR 0009), and how many editor (`eyedbg dap`) connections it has open — its presence (ADR 0014; CLI clients are never connected). |
+| **Control lease** | Exactly one client holds *execution control* (continue/step/pause/run-until, terminate or detach while the program is live, `set`, and `eval --allow-side-effects`). Others can read, set their own breakpoints, and take or be granted the lease. The starter holds it first. Policies (set at start or by the holder): `free` (anyone takes it, executing takes it automatically; the default), `handoff` (only the holder releases or grants it), `human-priority` (handoff, except that a human may take it from an agent; agents never take it from one another). `--force` overrides the policy; a refusal is `LEASE_HELD`. Lease changes are events. `lease request` asks the holder for it without moving it: a pending request (one per client, with a message) shows in every stop until the lease changes hands. A client's lease is released when its last editor connection closes (a Restart waits 10 s; ADR 0014). |
+| **Breakpoint ownership** | Every breakpoint records `owner` and `createdAt`. The daemon merges all owners' breakpoints per file into the single `setBreakpoints` DAP call — one source breakpoint per line (adapters keep one per line): any unconditional breakpoint makes the line unconditional, equal conditions are kept, different ones make it unconditional with a note — and maps the adapter's answer back to every breakpoint of the line. Clients can filter by owner (`bp ls --mine`); removing only touches your own unless `--force` (`NOT_OWNER` otherwise). Breakpoints set through an editor are *editor* breakpoints: an editor's list replaces only those (never its client's CLI ones), and they're removed when the client's last editor connection closes (ADR 0014). |
 | **Exception stops** | Per client, like breakpoints: each client picks `none`, `uncaught` or `all` (`bp exceptions`), the adapter gets the union of their filters, and no lease is needed; `--force` sets one mode for every client. Changes are `exceptions` events (ADR 0010). |
-| **Event log** | Per-session in-memory log with a monotonic `seq` from 1, bounded (10000 events, 8 MiB; the oldest are dropped and readers are told): DAP events (stopped, continued, output, breakpoint, thread, exited) plus daemon events (started, client joined, lease, exec by X — including `set` and side-effecting `eval` —, bp added/removed by X, exceptions set by X, ended). `output` and a snapshot's output are views of it (their `seq` is the event's). `eyedbg events --since N` / `--wait` (long-poll) makes stateless CLIs and late joiners consistent. Its control events are also written to disk as the session recording (§11). |
+| **Event log** | Per-session in-memory log with a monotonic `seq` from 1, bounded (10000 events, 8 MiB; the oldest are dropped and readers are told): DAP events (stopped, continued, output, breakpoint, thread, exited) plus daemon events (started, client joined, editor connected/disconnected, lease — including requests —, exec by X — including `set` and side-effecting `eval` —, bp added/removed by X, exceptions set by X, ended). `output` and a snapshot's output are views of it (their `seq` is the event's). `eyedbg events --since N` / `--wait` (long-poll) makes stateless CLIs and late joiners consistent. Its control events are also written to disk as the session recording (§11). |
 | **Stop snapshot** | Built on demand, not eagerly: a read after a stop fetches the stopped thread's top frames from the adapter, and frame 0's locals once per stop, cached until the next resume (a `set` or side-effecting `eval` marks them stale; `--changed` diffs against the previous stop's). Every execution command returns one, so the agent needs no follow-up call. Variable references are never exposed across resumes by the CLI; an editor gets the adapter's, and drops them on `continued`. |
 
 ### Concurrency rules
@@ -99,7 +99,7 @@ eyedbg source [--frame F] [--context 5]
 eyedbg output [--since N] [--tail 50]
 eyedbg events [--since N] [--limit N] [--kind k,...] [--wait] [--timeout 30s]
 
-eyedbg lease [status|take [--force]|release|grant <client> [--force]|policy <p> [--force]]
+eyedbg lease [status|take [--force]|release|grant <client> [--force]|policy <p> [--force]|request [--message TEXT]]
 eyedbg dap [-s ID] [--as CLIENT]           # DAP on stdio for an editor, joined to a running session (ADR 0012)
 eyedbg daemon [status|stop|logs]
 eyedbg adapters ls | install <adapter|language> | doctor [adapter|language...]
@@ -265,22 +265,38 @@ Built (P2-M1, ADR 0012):
   hover (with a frame) behind the side-effect check, reads the adapter didn't declare refused as
   unsupported; everything else is refused. One table in
   `internal/session/forward.go` is the whole policy.
-- **Breakpoints:** `setBreakpoints(file)` replaces the connection client's own breakpoints for that
-  file (ids are session breakpoint ids, stable across re-sends); others' are untouched and keep
-  merging per line. `setExceptionBreakpoints` sets the client's own exception mode. When the
-  connection ends, its breakpoints and exception mode are removed; the lease stays.
+- **Breakpoints:** `setBreakpoints(file)` replaces the connection client's editor breakpoints for
+  that file (ids are session breakpoint ids, stable across re-sends), except the ones the editor
+  set under another path of the same file (a symlink); others' are untouched and keep merging per
+  line. At most 1000 entries per request. `setExceptionBreakpoints` sets the client's own exception mode.
 - **Events** come from the event log, not the adapter: stops, other clients' resumes (`continued`)
-  and state changes (`invalidated`), output (logpoints as console), threads, the end, and the
-  adapter's changes to the connection's own breakpoints. A response always precedes the events its
-  request causes.
+  and state changes (`invalidated`), output (logpoints as console), threads, the end, and changes
+  to the breakpoints the editor knows. A response always precedes the events its request causes.
 - Errors are DAP error responses whose `message` is the stable code; `body.error.variables.code`
   carries it for clients, with the holder for `LEASE_HELD`.
 
-Next: presence (who is connected) and releasing the lease when a human's last connection ends;
-the extension's lease UI ("Agent has control — Request / Take over"), session picker, agent
-activity feed and `eyedbg/*` custom requests and events (P2-M2/M3); other owners' breakpoints
-shown to editors as DAP `breakpoint` events (decided 2026-09-24), without letting an editor
-re-send them as its own; replaying output from before the join.
+Built (P2-M2, ADR 0014):
+
+- **Presence:** each `eyedbg dap` connection counts as its client's presence (`sessions` shows who
+  is connected; `client connected`/`disconnected` events). When a client's last connection closes,
+  its editor breakpoints are removed, the exception mode its editor set is reset and its lease is
+  released — after 10 s for a Restart (`disconnect {restart: true}`), and not if it came back.
+- **`eyedbg lease request [--message TEXT]`** (and DAP `eyedbg/lease {action: request}`) asks the
+  holder: a pending request shown in every stop's sharing line until the lease changes hands.
+- **Custom DAP messages** for the editor extension: requests `eyedbg/lease` (the lease commands),
+  `eyedbg/clients`, `eyedbg/breakpoints` (list, remove as `bp rm`); events `eyedbg/lease`,
+  `eyedbg/clients`, `eyedbg/breakpoints`, `eyedbg/activity` (other clients' actions).
+- **Shared breakpoints:** other clients' line breakpoints (and the client's own CLI ones) are
+  announced as DAP `breakpoint` events at column 1 — the mark by which the facade recognises
+  VS Code's adopted copies when the editor re-sends them, so a copy is answered with the owner's
+  breakpoint (its condition kept) and never becomes the human's. A copy of a breakpoint that's gone
+  is retracted; removing a copy only hides it for that editor; editing one makes a breakpoint of
+  the human's own. Copies are retracted when the editor leaves or the session ends.
+- **Output replay:** the output from before the join (the newest 200 chunks, 64 KiB) is replayed
+  once, before the program's state.
+
+Next: the VS Code extension (P2-M3) — lease UI ("Agent has control — Request / Take over"),
+session picker, agent activity feed and the agent's breakpoints, over the `eyedbg/*` messages.
 
 ## 10. Agent integration
 
@@ -341,6 +357,9 @@ All MVP milestones are done (phase 1 complete); phase 2 is in progress.
 Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; more languages.
 - **P2-M1 facade core** (done): `eyedbg dap`, the connection switch, the DAP facade with the CLI's
   rules, per-connection breakpoints and cleanup, event-log-driven events (ADR 0012).
+- **P2-M2 facade collaboration** (done): presence and releasing the lease on the last editor
+  disconnect, `lease request`, `eyedbg/*` custom messages, other clients' breakpoints in editors
+  (column-1 mark, echoes, retracts, hiding), output replay (ADR 0014).
 
 **More languages** (ADR 0013, run independently of phase 2's own sequencing): C, C++, Rust
 (lldb-dap, manifest-only, no schema change) and Go (Delve, manifest-only through a new
@@ -358,7 +377,8 @@ follow-ups F1–F5.
 - Test debugging flow (`VSTEST_HOST_DEBUG`) and `attach`: validated on Linux, macOS (arm64) and
   Windows (x64) by CI e2e's weekly/dispatch full matrix (milestone 6); still unexercised on Intel
   Macs and Windows on Arm (no netcoredbg there).
-- Lease policy default for P2 (`handoff` vs `human-priority`) — decide with real usage.
+- Lease policy default for P2: decided (ADR 0014) — stays `free`; the editor extension offers
+  `human-priority` after a human takes over.
 - Anchor re-resolution after edits: decided (ADR 0010) — anchors resolve once, exactly; a changed file gets a note, and a future `restart` can re-resolve every anchor against the rebuilt program.
 - Windows: decided (§6) — AF_UNIX everywhere; no named-pipe fallback needed so far.
 - Python: the downloaded pure-Python debugpy has no compiled speedups (tracing speed unmeasured); attach to a running Python process (gdb/lldb injection, Python 3.14's `sys.remote_exec`) and debugging child processes are future work; interpreter discovery (Windows `py`/Store aliases, conda/poetry venvs outside the project) is checked by unit tests only; the end-to-end tests now run on all 6 CI platforms (milestone 6).

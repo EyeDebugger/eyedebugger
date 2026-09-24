@@ -11,8 +11,10 @@ package api
 const MethodFacadeOpen = "facade.open"
 
 // FacadeVersion is the version of the DAP facade's rules (what it handles,
-// forwards and refuses); [FacadeOpenResult] reports it.
-const FacadeVersion = 1
+// forwards and refuses); [FacadeOpenResult] reports it. Version 2 adds
+// presence, the eyedbg/* custom messages and shared breakpoints
+// (docs/adr/0014).
+const FacadeVersion = 2
 
 // FacadeOpenParams are the params of [MethodFacadeOpen]: the session to
 // join and the client every DAP request of the connection acts as.

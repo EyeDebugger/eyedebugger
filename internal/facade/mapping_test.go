@@ -112,7 +112,6 @@ func TestTranslate(t *testing.T) {
 
 	code := 3
 	own := &api.Breakpoint{ID: 4, Owner: "human:t", Verified: true, Line: 7, Message: "moved", Note: "shared"}
-	stranger := &api.Breakpoint{ID: 5, Owner: "human:t", Line: 8}
 	agents := &api.Breakpoint{ID: 6, Owner: "agent", Line: 9}
 
 	tests := []struct {
@@ -163,18 +162,10 @@ func TestTranslate(t *testing.T) {
 		},
 		{name: "exited", ev: api.Event{Kind: api.EventExited, ExitCode: &code}, want: `{"seq":0,"type":"","event":"exited","body":{"exitCode":3}}`},
 		{name: "ended", ev: api.Event{Kind: api.EventEnded, Reason: "stopped by agent"}, want: `{"seq":0,"type":"","event":"terminated","body":{}}`},
-		{
-			name: "adapter changed own", ev: api.Event{Kind: api.EventBreakpoint, Action: "changed", Breakpoint: own},
-			want: `{"seq":0,"type":"","event":"breakpoint","body":{"reason":"changed","breakpoint":{"id":4,"verified":true,"message":"moved; shared","line":7}}}`,
-		},
-		{name: "own change", ev: api.Event{Kind: api.EventBreakpoint, Action: "changed", Client: "human:t", Breakpoint: own}, want: ""},
-		{name: "adapter changed a stranger", ev: api.Event{Kind: api.EventBreakpoint, Action: "changed", Breakpoint: stranger}, want: ""},
-		{name: "adapter changed the agent's", ev: api.Event{Kind: api.EventBreakpoint, Action: "changed", Breakpoint: agents}, want: ""},
-		{
-			name: "forced removal of own", ev: api.Event{Kind: api.EventBreakpoint, Action: "removed", Client: "agent", Breakpoint: own},
-			want: `{"seq":0,"type":"","event":"breakpoint","body":{"reason":"removed","breakpoint":{"id":4,"verified":false}}}`,
-		},
-		{name: "own removal", ev: api.Event{Kind: api.EventBreakpoint, Action: "removed", Client: "human:t", Breakpoint: own}, want: ""},
+		// Breakpoint events reconcile the connection's view instead
+		// (mirrors_test.go).
+		{name: "adapter changed own", ev: api.Event{Kind: api.EventBreakpoint, Action: "changed", Breakpoint: own}, want: ""},
+		{name: "forced removal of own", ev: api.Event{Kind: api.EventBreakpoint, Action: "removed", Client: "agent", Breakpoint: own}, want: ""},
 		{name: "added", ev: api.Event{Kind: api.EventBreakpoint, Action: "added", Client: "agent", Breakpoint: agents}, want: ""},
 		{name: "started", ev: api.Event{Kind: api.EventStarted}, want: ""},
 		{name: "client", ev: api.Event{Kind: api.EventClient, Client: "agent"}, want: ""},
@@ -186,7 +177,7 @@ func TestTranslate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			st := &followState{self: "human:t", invalidated: tt.invalidated, owns: func(id int) bool { return id == 4 }, lastThread: 1}
+			st := &followState{self: "human:t", invalidated: tt.invalidated, lastThread: 1}
 			if got := encode(t, translate(&tt.ev, st)); got != tt.want {
 				t.Errorf("translate =\n%s\nwant\n%s", got, tt.want)
 			}
@@ -230,7 +221,7 @@ func TestResync(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			st := &followState{self: "human:t", owns: func(int) bool { return false }, lastThread: 1}
+			st := &followState{self: "human:t", lastThread: 1}
 			if got := encode(t, resync(7, tt.info, st)); got != tt.want {
 				t.Errorf("resync =\n%s\nwant\n%s", got, tt.want)
 			}

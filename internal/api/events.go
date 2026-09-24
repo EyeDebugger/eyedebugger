@@ -20,10 +20,14 @@ const (
 	// EventStarted: Client (who started it), Program, Lease; Action is
 	// attach or test for sessions that did not launch their program.
 	EventStarted EventKind = "started"
-	// EventClient: Client, on its first request to the session.
+	// EventClient: Client; no Action on its first request to the session,
+	// Action connected or disconnected when one of its editor (DAP)
+	// connections opens or closes.
 	EventClient EventKind = "client"
 	// EventLease: Client (who acted), Action (take, auto, force, grant,
-	// release, policy), Lease (after), Previous (the holder before).
+	// release, policy, request), Lease (after), Previous (the holder
+	// before); Text is a request's message; Reason is disconnected on a
+	// release because the holder's last editor connection closed.
 	EventLease EventKind = "lease"
 	// EventExec: Client, Action (continue, next, stepIn, stepOut, pause,
 	// runUntil, eval, set), ThreadID when one was given; Text is the

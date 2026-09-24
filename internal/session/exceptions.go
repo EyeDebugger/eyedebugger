@@ -56,6 +56,15 @@ func (s *Session) Exceptions(ctx context.Context, c api.Client, p api.Exceptions
 		return api.ExceptionsResult{}, err
 	}
 
+	return s.setExceptionMode(ctx, c, mode, p.Force, nil)
+}
+
+// setExceptionMode sets client c's exception mode (every client's with
+// force). A non-nil guard is checked under mu before anything changes: when
+// it returns false nothing is done and the current modes are returned.
+func (s *Session) setExceptionMode(
+	ctx context.Context, c api.Client, mode api.ExceptionMode, force bool, guard func() bool,
+) (api.ExceptionsResult, error) {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 
@@ -66,7 +75,13 @@ func (s *Session) Exceptions(ctx context.Context, c api.Client, p api.Exceptions
 		return api.ExceptionsResult{}, stateError(s.ID, s.state, "setting exception stops needs a live session")
 	}
 
-	modes := withMode(s.excModes, c.ID, mode, p.Force)
+	if guard != nil && !guard() {
+		defer s.mu.Unlock()
+
+		return s.exceptionsResultLocked(), nil
+	}
+
+	modes := withMode(s.excModes, c.ID, mode, force)
 	filters := s.filtersFor(modes)
 
 	if err := s.checkFiltersLocked(filters); err != nil {
@@ -86,7 +101,7 @@ func (s *Session) Exceptions(ctx context.Context, c api.Client, p api.Exceptions
 	s.excModes = modes
 
 	e := api.Event{Kind: api.EventExceptions, Client: c.ID, Action: string(mode)}
-	if p.Force {
+	if force {
 		e.Reason = "force"
 	}
 

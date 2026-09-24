@@ -211,6 +211,28 @@ func (l *eventLog) outputSince(since int) []api.OutputLine {
 	return out
 }
 
+// outputUntil returns the held output events with seq at most seq as output
+// lines, oldest first.
+func (l *eventLog) outputUntil(seq int) []api.OutputLine {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	var out []api.OutputLine
+
+	for i := range l.events {
+		e := &l.events[i]
+		if e.Seq > seq {
+			break
+		}
+
+		if e.Kind == api.EventOutput {
+			out = append(out, api.OutputLine{Seq: e.Seq, Category: e.Category, Text: e.Text})
+		}
+	}
+
+	return out
+}
+
 // eventLimit applies the default and the maximum to a requested limit.
 func eventLimit(n int) int {
 	if n <= 0 {

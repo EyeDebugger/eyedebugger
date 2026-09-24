@@ -5,6 +5,7 @@ package facade
 
 import (
 	"context"
+	"slices"
 	"strconv"
 
 	godap "github.com/google/go-dap"
@@ -17,11 +18,19 @@ import (
 const (
 	actionChanged = "changed"
 	actionRemoved = "removed"
+	actionNew     = "new"
 )
 
 // logpointCategory is the output category of the session's emulated
 // logpoints; DAP has no such category.
 const logpointCategory = "logpoint"
+
+// Output replayed at the join (docs/adr/0014): the newest chunks, within
+// both bounds.
+const (
+	replayChunks = 200
+	replayBytes  = 64 << 10
+)
 
 // followState is what translating the event log needs besides the events.
 type followState struct {
@@ -29,19 +38,18 @@ type followState struct {
 	self string
 	// invalidated: the client declared supportsInvalidatedEvent.
 	invalidated bool
-	// owns reports whether a breakpoint id is one of the connection's.
-	owns func(id int) bool
 	// lastThread is the thread of the last stop seen.
 	lastThread int
 }
 
 func event(name string) godap.Event { return godap.Event{Event: name} }
 
-// translate turns one session event into the DAP events the connection's
-// client gets (docs/adr/0012): stops, resumes (another client's execution
-// request, or the adapter's), output, threads, the end, and changes to the
-// connection's own breakpoints made by the adapter or forced by another
-// client. Its own execution requests are covered by their responses.
+// translate turns one session event into the standard DAP events the
+// connection's client gets for it alone (docs/adr/0012): stops, resumes
+// (another client's execution request, or the adapter's), output, threads
+// and the end. Its own execution requests are covered by their responses.
+// Breakpoints, the lease and clients need the connection's view (see
+// [connection.translate]).
 func translate(ev *api.Event, st *followState) []godap.EventMessage {
 	switch ev.Kind {
 	case api.EventStopped:
@@ -51,12 +59,7 @@ func translate(ev *api.Event, st *followState) []godap.EventMessage {
 	case api.EventContinued:
 		return []godap.EventMessage{continuedEvent(ev.ThreadID, st)}
 	case api.EventOutput:
-		category := ev.Category
-		if category == logpointCategory {
-			category = "console"
-		}
-
-		return []godap.EventMessage{&godap.OutputEvent{Event: event("output"), Body: godap.OutputEventBody{Category: category, Output: ev.Text}}}
+		return []godap.EventMessage{outputEvent(ev.Category, ev.Text)}
 	case api.EventThread:
 		return []godap.EventMessage{&godap.ThreadEvent{Event: event("thread"), Body: godap.ThreadEventBody{Reason: ev.Reason, ThreadId: ev.ThreadID}}}
 	case api.EventExited:
@@ -67,13 +70,26 @@ func translate(ev *api.Event, st *followState) []godap.EventMessage {
 		return []godap.EventMessage{&godap.ExitedEvent{Event: event("exited"), Body: godap.ExitedEventBody{ExitCode: *ev.ExitCode}}}
 	case api.EventEnded:
 		return []godap.EventMessage{&godap.TerminatedEvent{Event: event("terminated")}}
-	case api.EventBreakpoint:
-		return breakpointEvent(ev, st)
-	case api.EventStarted, api.EventClient, api.EventLease, api.EventExceptions:
+	case api.EventStarted, api.EventClient, api.EventLease, api.EventExceptions, api.EventBreakpoint:
 		return nil
 	default:
 		return nil
 	}
+}
+
+// outputEvent is program output; the session's logpoints are console
+// output (DAP has no logpoint category).
+func outputEvent(category, text string) *godap.OutputEvent {
+	if category == logpointCategory {
+		category = "console"
+	}
+
+	return &godap.OutputEvent{Event: event("output"), Body: godap.OutputEventBody{Category: category, Output: text}}
+}
+
+// consoleLine is a line of eyedbg's own on the editor's console.
+func consoleLine(text string) *godap.OutputEvent {
+	return outputEvent("console", "eyedbg: "+text+"\n")
 }
 
 func stoppedEvent(stop *api.StopInfo, st *followState) []godap.EventMessage {
@@ -123,35 +139,10 @@ func continuedEvent(thread int, st *followState) godap.EventMessage {
 	return &godap.ContinuedEvent{Event: event("continued"), Body: godap.ContinuedEventBody{ThreadId: thread, AllThreadsContinued: true}}
 }
 
-// breakpointEvent reports what the adapter changed about one of the
-// connection's breakpoints (e.g. verified once its module loaded), and
-// another client's forced removal of one.
-func breakpointEvent(ev *api.Event, st *followState) []godap.EventMessage {
-	b := ev.Breakpoint
-	if b == nil || b.Owner != st.self || !st.owns(b.ID) {
-		return nil
-	}
-
-	switch {
-	case ev.Action == actionChanged && ev.Client == "":
-		return []godap.EventMessage{&godap.BreakpointEvent{
-			Event: event("breakpoint"), Body: godap.BreakpointEventBody{Reason: actionChanged, Breakpoint: dapBreakpoint(b)},
-		}}
-	case ev.Action == actionRemoved && ev.Client != st.self:
-		return []godap.EventMessage{&godap.BreakpointEvent{
-			Event: event("breakpoint"), Body: godap.BreakpointEventBody{Reason: actionRemoved, Breakpoint: godap.Breakpoint{Id: b.ID}},
-		}}
-	default:
-		return nil
-	}
-}
-
 // resync is what a client that missed events gets: a console notice, then
 // the program's state now.
 func resync(dropped int, info api.SessionInfo, st *followState) []godap.EventMessage {
-	out := []godap.EventMessage{&godap.OutputEvent{Event: event("output"), Body: godap.OutputEventBody{
-		Category: "console", Output: "eyedbg: " + strconv.Itoa(dropped) + " session events were missed\n",
-	}}}
+	out := []godap.EventMessage{consoleLine(strconv.Itoa(dropped) + " session events were missed")}
 
 	switch info.State {
 	case api.StateStopped:
@@ -164,8 +155,8 @@ func resync(dropped int, info api.SessionInfo, st *followState) []godap.EventMes
 	return out
 }
 
-// dapBreakpoint is b as DAP shows it: its message joins the adapter's and
-// eyedbg's notes.
+// dapBreakpoint is b as DAP shows it to its client's editor: its message
+// joins the adapter's and eyedbg's notes.
 func dapBreakpoint(b *api.Breakpoint) godap.Breakpoint {
 	msg := b.Message
 	if b.Note != "" {
@@ -187,8 +178,9 @@ func dapBreakpoint(b *api.Breakpoint) godap.Breakpoint {
 // follow sends the session's events after seq since, translated with st
 // (as the join left it), until the session ends or ctx does. Each event is
 // translated and written under the event gate, so it never overtakes the
-// response of the request that caused it, and a breakpoint's owner is
-// decided once that request recorded it.
+// response of the request that caused it, and the connection's view of the
+// breakpoints is only touched there. A batch that changed breakpoints ends
+// with one eyedbg/breakpoints event.
 func (c *connection) follow(ctx context.Context, since int, st *followState) {
 	for {
 		res := c.sess.Follow(ctx, since)
@@ -196,38 +188,116 @@ func (c *connection) follow(ctx context.Context, since int, st *followState) {
 			return
 		}
 
-		if res.Dropped > 0 && !c.relay(func() []godap.EventMessage { return resync(res.Dropped, c.sess.Info(), st) }) {
+		if res.Dropped > 0 && !c.relay(func() []godap.EventMessage {
+			return append(resync(res.Dropped, c.sess.Info(), st), c.reconcile()...)
+		}) {
 			return
 		}
+
+		breakpoints := false
 
 		for i := range res.Events {
 			ev := &res.Events[i]
 			if !c.relay(func() []godap.EventMessage { return c.translate(ev, st) }) || ev.Kind == api.EventEnded {
 				return
 			}
+
+			breakpoints = breakpoints || ev.Kind == api.EventBreakpoint
+		}
+
+		if breakpoints && !c.relay(func() []godap.EventMessage { return []godap.EventMessage{c.breakpointsEvent()} }) {
+			return
 		}
 
 		since = res.Events[len(res.Events)-1].Seq
 	}
 }
 
-// translate is [translate] for the connection: another client's removal of
-// one of its breakpoints also drops it from the connection's.
+// translate is [translate] for the connection (under the event gate): a
+// breakpoint change reconciles the editor's view (docs/adr/0014), a lease
+// or client change is also an eyedbg/lease or eyedbg/clients event, the end
+// retracts the mirrors first, and another client's action is also an
+// eyedbg/activity event.
 func (c *connection) translate(ev *api.Event, st *followState) []godap.EventMessage {
-	out := translate(ev, st)
+	var out []godap.EventMessage
 
-	if ev.Kind == api.EventBreakpoint && ev.Action == actionRemoved && ev.Client != c.client.ID && ev.Breakpoint != nil {
-		c.forget(ev.Breakpoint.ID)
+	if ev.Kind == api.EventEnded {
+		out = retractMirrors(c.view)
+	}
+
+	out = append(out, translate(ev, st)...)
+
+	switch ev.Kind {
+	case api.EventBreakpoint:
+		out = append(out, c.breakpointChanged(ev)...)
+	case api.EventLease:
+		if ev.Lease != nil {
+			out = append(out, leaseEvent(*ev.Lease))
+		}
+	case api.EventClient:
+		out = append(out, clientsEvent(c.sess.Info().Clients))
+	case api.EventStarted, api.EventExec, api.EventContinued, api.EventStopped, api.EventOutput, api.EventThread,
+		api.EventExited, api.EventEnded, api.EventExceptions:
+	}
+
+	if activity(ev, c.client.ID) {
+		out = append(out, activityEvent(ev))
 	}
 
 	return out
 }
 
+// breakpointChanged is what a breakpoint event of the log sends: the
+// reconcile, and, as M1 did, a changed event for an adapter's change to a
+// breakpoint the connection reported even when its response already told
+// the change (the adapter verified it while the request was in flight).
+func (c *connection) breakpointChanged(ev *api.Event) []godap.EventMessage {
+	out := c.reconcile()
+
+	if ev.Action != actionChanged || ev.Client != "" || ev.Breakpoint == nil || !c.view.configured {
+		return out
+	}
+
+	id := ev.Breakpoint.ID
+
+	told, reported := c.view.reported[id]
+	if !reported || slices.ContainsFunc(out, func(e godap.EventMessage) bool {
+		b, ok := e.(*godap.BreakpointEvent)
+
+		return ok && b.Body.Breakpoint.Id == id
+	}) {
+		return out
+	}
+
+	return append(out, breakpointEvent(actionChanged, told))
+}
+
+// reconcile is [reconcile] of the connection's view with the session's
+// breakpoints now; nothing before configurationDone. Under the event gate.
+func (c *connection) reconcile() []godap.EventMessage {
+	if !c.view.configured {
+		return nil
+	}
+
+	return reconcile(c.view, c.client.ID, c.sess.Breakpoints(""))
+}
+
+// breakpointsEvent is an eyedbg/breakpoints event listing every client's
+// breakpoints now.
+func (c *connection) breakpointsEvent() *BreakpointsEvent {
+	return &BreakpointsEvent{Event: event(CommandBreakpoints), Body: breakpointsBody(c.sess.Breakpoints(""))}
+}
+
 // relay runs events and writes what it returns, all under the event gate;
-// false means the connection is broken (and now closed).
+// false means the connection is broken (and now closed). Once the
+// connection is leaving it sends nothing.
 func (c *connection) relay(events func() []godap.EventMessage) bool {
 	c.gate.Lock()
 	defer c.gate.Unlock()
+
+	if c.view.leaving {
+		return true
+	}
 
 	for _, ev := range events() {
 		if err := c.srv.Send(ev); err != nil {

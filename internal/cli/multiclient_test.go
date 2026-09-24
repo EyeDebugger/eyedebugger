@@ -130,6 +130,9 @@ func TestMultiClientCLI(t *testing.T) {
 
 	expectOutput(t, run(t, 0, "--as", "human:t", "bp", "add", prog+":5"), "2  human:t  ")
 	expectOutput(t, run(t, exitState, "--as", "human:t", "continue"), "[LEASE_HELD]", "eyedbg lease grant human:t")
+	expectOutput(t, run(t, 0, "--as", "human:t", "lease", "request", "--message", "let me"),
+		"lease held by agent (policy handoff)", `requested by human:t: "let me"`)
+	expectOutput(t, run(t, 0, "status"), `lease: agent (handoff); requested by human:t: "let me"; clients: agent, human:t`)
 	expectOutput(t, run(t, 0, "lease", "grant", "human:t"), "lease held by human:t (policy handoff)")
 	expectOutput(t, run(t, 0, "--as", "human:t", "continue", "--timeout", "20s"), "stopped: breakpoint", "lease: human:t (handoff); clients: agent, human:t")
 	expectOutput(t, run(t, exitState, "bp", "rm", "2"), "[NOT_OWNER]", "belongs to human:t")

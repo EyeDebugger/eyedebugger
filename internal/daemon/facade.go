@@ -44,7 +44,7 @@ func (s *server) facadeOpen(raw json.RawMessage) (api.FacadeOpenResult, handover
 	sess.Touch(c)
 
 	serve := func(ctx context.Context, r *bufio.Reader, conn net.Conn) {
-		facade.Serve(ctx, facade.Config{Session: sess, Client: c, Logger: s.cfg.Logger}, r, conn)
+		facade.Serve(ctx, facade.Config{Session: sess, Client: c, Logger: s.cfg.Logger, RestartGrace: facade.DefaultRestartGrace}, r, conn)
 	}
 
 	return api.FacadeOpenResult{SessionID: sess.ID, FacadeVersion: api.FacadeVersion}, serve, nil

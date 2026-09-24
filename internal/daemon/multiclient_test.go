@@ -140,6 +140,54 @@ func TestMultiClientSession(t *testing.T) {
 	assertListed(t, p, id)
 }
 
+// TestLeaseRequest asks for the lease over the socket: the request is
+// logged, shows in lease.status, and a grant clears it.
+func TestLeaseRequest(t *testing.T) {
+	t.Parallel()
+
+	ts := startServer(t)
+	p := ts.paths
+	snap := startFake(t, p, "", api.LeaseHandoff)
+	agent, human := api.SessionRef{SessionID: snap.Session.ID}, api.SessionRef{SessionID: snap.Session.ID, Client: humanID}
+
+	var lease api.LeaseResult
+
+	mustCall(t, p, api.MethodLeaseRequest, api.LeaseRequestParams{SessionRef: human, Message: "let me step"}, &lease)
+
+	if r := lease.Lease.Requests; lease.Lease.Holder != api.DefaultClientID || len(r) != 1 || r[0].Client != humanID || r[0].Message != "let me step" {
+		t.Errorf("request = %+v, want the agent holding and the human's request", lease)
+	}
+
+	var status api.LeaseResult
+
+	mustCall(t, p, api.MethodLeaseStatus, api.LeaseParams{SessionRef: agent}, &status)
+
+	if len(status.Lease.Requests) != 1 || status.HolderConnected {
+		t.Errorf("status = %+v, want the pending request, holder not connected", status)
+	}
+
+	var res api.EventsResult
+
+	mustCall(t, p, api.MethodEvents, api.EventsParams{SessionRef: agent, Since: 0, Kinds: []api.EventKind{api.EventLease}}, &res)
+
+	if n := len(res.Events); n != 1 || res.Events[0].Action != "request" || res.Events[0].Text != "let me step" {
+		t.Errorf("lease events = %+v, want one request with its message", res.Events)
+	}
+
+	var granted api.LeaseResult
+
+	mustCall(t, p, api.MethodLeaseGrant, api.LeaseGrantParams{SessionRef: agent, To: humanID}, &granted)
+
+	if granted.Lease.Holder != humanID || len(granted.Lease.Requests) != 0 {
+		t.Errorf("after grant = %+v, want the human holding and no requests", granted)
+	}
+
+	err := callAs(t, p, api.MethodLeaseRequest, api.LeaseRequestParams{SessionRef: agent, Message: strings.Repeat("x", api.MaxLeaseRequestMessage+1)}, &lease)
+	if api.CodeOf(err) != api.CodeInvalidRequest {
+		t.Errorf("request with a long message: %v, want INVALID_REQUEST", err)
+	}
+}
+
 // waitForBreakpointEvent long-polls for a breakpoint event on one
 // connection while another adds one.
 func waitForBreakpointEvent(t *testing.T, p Paths, ref api.SessionRef, since int, file string) {

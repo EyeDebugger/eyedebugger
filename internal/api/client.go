@@ -76,4 +76,7 @@ type ClientInfo struct {
 
 	FirstSeen time.Time `json:"firstSeen"`
 	LastSeen  time.Time `json:"lastSeen"`
+	// Connected counts the client's open editor (DAP) connections to the
+	// session (docs/adr/0014); CLI clients are never connected.
+	Connected int `json:"connected,omitempty"`
 }

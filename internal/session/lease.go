@@ -6,7 +6,9 @@ package session
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
 )
@@ -23,12 +25,19 @@ const (
 	opAdmin
 )
 
+// maxLeaseRequests bounds a session's pending lease requests; the oldest
+// is dropped for a new one.
+const maxLeaseRequests = 16
+
 // lease is a session's control lease (docs/DESIGN.md §3): who may change
-// the program's execution. The zero holder means nobody holds it.
+// the program's execution. The zero holder means nobody holds it. Requests
+// are the pending lease requests, oldest first, at most one per client;
+// they are cleared whenever the lease changes hands.
 type lease struct {
-	policy api.LeasePolicy
-	holder api.Client
-	since  time.Time
+	policy   api.LeasePolicy
+	holder   api.Client
+	since    time.Time
+	requests []api.LeaseRequest
 }
 
 // allows reports whether c may do op. Nobody holding, c holding, or force
@@ -58,7 +67,7 @@ func (l *lease) allows(op leaseOp, c api.Client, force bool) bool {
 
 // info returns the lease as the API shows it.
 func (l *lease) info() api.LeaseInfo {
-	info := api.LeaseInfo{Policy: l.policy, Holder: l.holder.ID}
+	info := api.LeaseInfo{Policy: l.policy, Holder: l.holder.ID, Requests: slices.Clone(l.requests)}
 
 	if l.holder.ID != "" {
 		since := l.since
@@ -95,7 +104,7 @@ func (s *Session) TakeLease(c api.Client, force bool) (api.LeaseInfo, error) {
 		action = "force"
 	}
 
-	s.setHolderLocked(c, c.ID, action)
+	s.setHolderLocked(c, c.ID, action, "")
 
 	return s.lease.info(), nil
 }
@@ -107,7 +116,7 @@ func (s *Session) ReleaseLease(c api.Client) api.LeaseInfo {
 	defer s.mu.Unlock()
 
 	if s.lease.holder.ID == c.ID {
-		s.setHolderLocked(api.Client{}, c.ID, "release")
+		s.setHolderLocked(api.Client{}, c.ID, "release", "")
 	}
 
 	return s.lease.info()
@@ -141,7 +150,7 @@ func (s *Session) GrantLease(c api.Client, to string, force bool) (api.LeaseInfo
 	}
 
 	if s.lease.holder.ID != target.ID {
-		s.setHolderLocked(target, c.ID, "grant")
+		s.setHolderLocked(target, c.ID, "grant", "")
 	}
 
 	return s.lease.info(), nil
@@ -182,18 +191,63 @@ func (s *Session) acquireLocked(c api.Client) error {
 		return s.leaseHeldLocked(c)
 	}
 
-	s.setHolderLocked(c, c.ID, "auto")
+	s.setHolderLocked(c, c.ID, "auto", "")
 
 	return nil
 }
 
-// setHolderLocked moves the lease to holder (zero: nobody) and logs it.
-func (s *Session) setHolderLocked(holder api.Client, actor, action string) {
+// setHolderLocked moves the lease to holder (zero: nobody), clears the
+// pending requests and logs it; reason says why when the session, not a
+// client's request, moved it.
+func (s *Session) setHolderLocked(holder api.Client, actor, action, reason string) {
 	previous := s.lease.holder.ID
 	s.lease.holder, s.lease.since = holder, time.Now()
+	s.lease.requests = nil
 
 	info := s.lease.info()
-	s.log.append(api.Event{Kind: api.EventLease, Client: actor, Action: action, Lease: &info, Previous: previous})
+	s.log.append(api.Event{
+		Kind: api.EventLease, Client: actor, Action: action, Lease: &info, Previous: previous, Reason: reason,
+	})
+}
+
+// RequestLease asks the lease's holder for it on behalf of c: it records
+// c's pending request (replacing an earlier one of c) and logs it, with
+// message as the event's text. It changes nothing else, under every
+// policy. Nothing is recorded when c holds the lease or nobody does.
+func (s *Session) RequestLease(c api.Client, message string) (api.LeaseInfo, error) {
+	if n := utf8.RuneCountInString(message); n > api.MaxLeaseRequestMessage {
+		return api.LeaseInfo{}, api.NewError(api.CodeInvalidRequest,
+			fmt.Sprintf("the lease request's message has %d characters, more than %d", n, api.MaxLeaseRequestMessage),
+			"shorten --message")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.state == api.StateExited {
+		return api.LeaseInfo{}, stateError(s.ID, s.state, "requesting the lease needs a live session")
+	}
+
+	if s.lease.holder.ID == "" || s.lease.holder.ID == c.ID {
+		return s.lease.info(), nil
+	}
+
+	s.lease.requests = slices.DeleteFunc(s.lease.requests, func(r api.LeaseRequest) bool { return r.Client == c.ID })
+	if len(s.lease.requests) >= maxLeaseRequests {
+		s.lease.requests = slices.Delete(s.lease.requests, 0, len(s.lease.requests)-maxLeaseRequests+1)
+	}
+
+	s.lease.requests = append(s.lease.requests, api.LeaseRequest{Client: c.ID, Message: message, At: time.Now()})
+
+	info := s.lease.info()
+	s.log.append(api.Event{Kind: api.EventLease, Client: c.ID, Action: "request", Lease: &info, Text: message})
+
+	return info, nil
+}
+
+// dropRequestLocked forgets c's pending lease request, without an event.
+func (s *Session) dropRequestLocked(clientID string) {
+	s.lease.requests = slices.DeleteFunc(s.lease.requests, func(r api.LeaseRequest) bool { return r.Client == clientID })
 }
 
 // leaseHeldLocked is the error for c when another client holds the lease.

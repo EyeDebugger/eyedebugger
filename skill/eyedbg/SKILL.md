@@ -49,12 +49,14 @@ eyedbg stop                                       # always, when done
 
 ## Sharing a session
 
-- Humans may be in the same session, from VS Code or any DAP client (`eyedbg dap -s ID --as
-  human:NAME`); their steps and breakpoints show in `eyedbg events`. `-s ID` picks a session.
+- Humans may join from VS Code or any DAP client (`eyedbg dap -s ID --as human:NAME`); `eyedbg
+  sessions` shows who is connected, `eyedbg events --since N` what they did. `-s ID` picks a session.
 - Several agents: give each a name, `--as agent:NAME` or `EYEDBG_CLIENT=agent:NAME`.
 - Running, stepping and `set` need the control lease; under the default policy you take it by
-  acting. `LEASE_HELD` (exit 2) means someone else holds it: don't `eyedbg lease take --force` over
-  a human — ask. `eyedbg events --since N` shows what others did.
+  acting. `LEASE_HELD` (exit 2): `eyedbg lease request --message WHY`, then `eyedbg events --wait
+  --kind lease`; never `eyedbg lease take --force` over a human.
+- A stop saying `requested by human:NAME` (the human's note follows) means a human wants control:
+  finish the step, then `eyedbg lease grant human:NAME`. Their lease is released when they disconnect.
 - Breakpoints are yours: `eyedbg bp ls --mine`; `eyedbg bp rm all` removes only yours.
 
 ## .NET
