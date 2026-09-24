@@ -24,3 +24,10 @@ CLAUDE.local.md
 /testdata/apps/**/bin/
 /testdata/apps/**/obj/
 /testdata/apps/**/__pycache__/
+
+# The VS Code extension's dependencies, builds and test downloads
+/extensions/vscode/node_modules/
+/extensions/vscode/dist/
+/extensions/vscode/out/
+/extensions/vscode/.vscode-test/
+*.vsix

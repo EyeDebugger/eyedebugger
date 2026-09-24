@@ -17,3 +17,4 @@
 *.dll binary
 *.pdb binary
 *.nupkg binary
+*.vsix binary

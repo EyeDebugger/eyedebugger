@@ -295,8 +295,30 @@ Built (P2-M2, ADR 0014):
 - **Output replay:** the output from before the join (the newest 200 chunks, 64 KiB) is replayed
   once, before the program's state.
 
-Next: the VS Code extension (P2-M3) — lease UI ("Agent has control — Request / Take over"),
-session picker, agent activity feed and the agent's breakpoints, over the `eyedbg/*` messages.
+Built (P2-M3, ADR 0015):
+
+- **The VS Code extension** (`extensions/vscode/`; TypeScript bundled by esbuild, no runtime
+  dependencies, VS Code ≥ 1.100): debug type `eyedbg` — `attach` joins a running session (picked
+  when not named; Run and Debug lists one configuration per session), `launch` runs `eyedbg start`
+  as the human and joins it, and stops it when that debug session ends (a Restart re-joins).
+- **Which binary:** the machine-scoped `eyedbg.path`, else the extension's own PATH scan (absolute
+  entries, never the current directory; `eyedbg.exe` on Windows), checked with `version --json`;
+  every call is `execFile` without a shell, values bound as `--flag=value`.
+- **The lease:** a status bar item (who has control, the policy, pending requests) with the actions
+  the session allows; on `LEASE_HELD` a notice with Request Control / Take Over; other clients'
+  requests shown to the holder; after taking control from an agent under `free`, an offer to
+  switch to `human-priority` (`eyedbg.lease.afterTakeOver`).
+- **Other clients' breakpoints:** VS Code draws each mirror as a red dot; the extension adds whose
+  it is and what it does at the end of the line, a plain-text hover, and *Copy as My Breakpoint* /
+  *Remove Breakpoint for Everyone…* on the line-number menu — never a gutter icon (it would stop
+  gutter clicks on that line). It tracks the mirrors from the DAP traffic, as VS Code applies it,
+  since VS Code hides its copies from extensions.
+- **Activity:** an "EyeDebugger Activity" output channel with other clients' actions, phrased as
+  `eyedbg events` phrases them. Every string from a session is rendered as plain text; nothing in a
+  notification can become a link.
+
+Next: packaging and publishing the extension (VSIX in releases, Marketplace and Open VSX gated on
+secrets) (P2-M4), then views of the activity and the clients (P2-M5).
 
 ## 10. Agent integration
 
@@ -334,6 +356,7 @@ helpers/dotnet/      C# side helper (ClrMD, EventPipe)
 skill/eyedbg/SKILL.md   agent-facing usage guide, embedded in the binary (`eyedbg skill print|install`)
 internal/e2e/        CLI end-to-end tests driving the real eyedbg/eyedbgd binaries against the sample apps
 testdata/apps/       sample debuggees per language (dotnet/, python/, c/, cpp/, rust/, go/)
+extensions/vscode/   VS Code extension (TypeScript, pnpm, esbuild; ADR 0015)
 ```
 
 ## 13. MVP milestones
@@ -378,7 +401,7 @@ follow-ups F1–F5.
   Windows (x64) by CI e2e's weekly/dispatch full matrix (milestone 6); still unexercised on Intel
   Macs and Windows on Arm (no netcoredbg there).
 - Lease policy default for P2: decided (ADR 0014) — stays `free`; the editor extension offers
-  `human-priority` after a human takes over.
+  `human-priority` after a human takes over from an agent under `free`.
 - Anchor re-resolution after edits: decided (ADR 0010) — anchors resolve once, exactly; a changed file gets a note, and a future `restart` can re-resolve every anchor against the rebuilt program.
 - Windows: decided (§6) — AF_UNIX everywhere; no named-pipe fallback needed so far.
 - Python: the downloaded pure-Python debugpy has no compiled speedups (tracing speed unmeasured); attach to a running Python process (gdb/lldb injection, Python 3.14's `sys.remote_exec`) and debugging child processes are future work; interpreter discovery (Windows `py`/Store aliases, conda/poetry venvs outside the project) is checked by unit tests only; the end-to-end tests now run on all 6 CI platforms (milestone 6).

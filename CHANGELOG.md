@@ -39,6 +39,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retracts them on leaving; and replays the output from before the join (newest 200 chunks,
   64 KiB). `facade.open` reports `facadeVersion` 2. `eyedbg bp ls` marks breakpoints set through
   an editor `(editor)` (`editor` in `--json`).
+- The VS Code extension (`extensions/vscode`, phase 2, ADR 0015; not published yet): debug type
+  `eyedbg` joins a running session (`attach`, picked when not named; Run and Debug lists one
+  configuration per session) or starts one as the human with F5 (`launch`: `eyedbg start`, then
+  join; ending that debug session stops it); a status bar item shows who has control, the policy
+  and pending requests, with take, take by force, request, release, give and policy actions; a
+  refused step offers Request Control / Take Over; other clients' requests reach the holder; after
+  taking control from an agent under `free` it offers `human-priority` (`eyedbg.lease.afterTakeOver`). Other
+  clients' breakpoints, which VS Code shows as red dots, get an end-of-line note (owner, condition,
+  hit count, log message), a hover, and *Copy as My Breakpoint* / *Remove Breakpoint for
+  Everyone…* on the line-number menu. "EyeDebugger Activity" lists other clients' actions. The
+  binary is the machine-scoped `eyedbg.path` or `eyedbg` on PATH; the extension doesn't run in
+  Restricted Mode and shows session text as plain text only.
 - Stops carry `allThreadsStopped` when the adapter says so (`--json` snapshots and events).
 - C, C++ and Rust debugging through LLVM's lldb-dap (`eyedbg start c|cpp|rust --program FILE`),
   manifest only (`lldb-dap-c.json`, `lldb-dap-cpp.json`, `lldb-dap-rust.json`; `EYEDBG_LLDB_DAP` or
@@ -54,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `task ci` now also runs the extension's checks (Node 24 and pnpm; `task ci:go` for Go alone),
+  with `ext:*` tasks for each; CI has an `extension` job (Linux, macOS, Windows) running them and
+  the extension's integration suite in VS Code 1.100.0 and 1.139.0.
 - An editor's breakpoint list (DAP `setBreakpoints`) no longer removes breakpoints its client set
   with the CLI; only the ones set through an editor — and not the ones it set under another path
   of the same file (a symlink). A `setBreakpoints` or `setFunctionBreakpoints` of more than 1000

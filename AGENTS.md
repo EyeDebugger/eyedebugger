@@ -31,14 +31,16 @@ decisions are recorded in `docs/adr/`.
 - `skill/eyedbg/SKILL.md` — the agent-facing usage guide, embedded in `eyedbg`; a test keeps it in
   sync with the command tree.
 - `internal/e2e/` — CLI end-to-end tests driving the real `eyedbg`/`eyedbgd` binaries.
+- `extensions/vscode/` — the VS Code extension (TypeScript, pnpm, esbuild; ADR 0015): `src/core/`
+  pure and unit-tested, `src/vscode/` the glue, `test/integration/` the suite in real VS Code.
 - `testdata/apps/` — sample debuggees for e2e tests (`dotnet/console`, `dotnet/breadth`, `dotnet/tests`,
   `python/basic`).
 - `docs/adr/` — architecture decision records (MADR 4.0).
 
 ## Commands
 
-Run `task ci` before finishing. Individual tasks and their raw equivalents are in
-`CONTRIBUTING.md`. golangci-lint must be **v2.13.2**; older versions report different issues.
+Run `task ci` before finishing: it covers Go and the extension (Node 24 + pnpm); `task ci:go` runs
+the Go checks alone. Individual tasks and their raw equivalents are in `CONTRIBUTING.md`. golangci-lint must be **v2.13.2**; older versions report different issues.
 
 ## Rules
 
@@ -49,7 +51,7 @@ Run `task ci` before finishing. Individual tasks and their raw equivalents are i
    JSON change bumps `schema`.
 4. Follow `docs/CONVENTIONS.md`: wrap errors with `%w`; use `log/slog` with injected loggers; `ctx`
    first, never stored in structs; no `fmt.Print*`; no globals or `init()`.
-5. Every `.go` file has the two-line SPDX header.
+5. Every `.go`, `.ts` and `.mjs` file has the two-line SPDX header.
 6. Never weaken `.golangci.yml`. Use `//nolint:<linter> // <reason>` only when justified.
 7. Windows is first-class: no bash-only scripts, `filepath` for OS paths.
 8. Tests: stdlib `testing`, table-driven, `t.Parallel()`, no sleeps.
@@ -57,6 +59,10 @@ Run `task ci` before finishing. Individual tasks and their raw equivalents are i
 10. Help is the interface (`docs/CONVENTIONS.md` § Help text): every command and subcommand needs
     `Short`, `Long` and `Example`, reachable as both `<path> --help` and `help <path>` at every
     level. `internal/cli`'s tree-walk test enforces this — a new command without help fails CI.
+11. Node tooling (`extensions/vscode/`): pnpm only — never npm, npx or yarn (`pnpm dlx` for a
+    one-off tool); `pnpm install --frozen-lockfile`; dependency install scripts stay denied
+    (`allowBuilds` in `pnpm-workspace.yaml`); devDependencies pinned exactly; no runtime
+    dependencies (ADR 0015).
 
 ## Commits
 

@@ -21,6 +21,13 @@
   or `EYEDBG_LLDB_DAP`) for c, cpp and rust; Go and `eyedbg adapters install delve` (or dlv on
   PATH, or `EYEDBG_DLV`) for go. Narrow which languages run with `EYEDBG_E2E_LANGS`
   (comma-separated).
+- For the VS Code extension (`extensions/vscode`, ADR 0015): Node 24 LTS (≥ 22.13) and pnpm — run
+  `corepack enable` (checks the pinned sha512), or use any pnpm ≥ 11, which switches itself to
+  the version `package.json` pins without checking its hash. pnpm only: never npm, npx or yarn. `task ext:test:integration` downloads VS Code 1.100.0
+  and 1.139.0 into `extensions/vscode/.vscode-test`, needs debugpy (`eyedbg adapters install
+  debugpy`, or `EYEDBG_DATA_DIR`/`EYEDBG_PYTHON` as for `task e2e`) and, on Linux, xvfb
+  (`xvfb-run`); it builds `eyedbg` with Go unless `EYEDBG_TEST_BIN_DIR` names a directory holding
+  `eyedbg` and `eyedbgd`. `task ci:go` skips the extension.
 - Without Task, use the raw commands below.
 
 ## Everyday commands
@@ -38,11 +45,22 @@
 | `task vuln` | `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...` |
 | `task tidy:check` | `go mod tidy -diff` |
 | `task build:cross` | cross-compile all 6 os/arch targets, `CGO_ENABLED=0` |
-| `task ci` | runs the checks CI runs |
+| `task ext:install` | `pnpm --dir extensions/vscode install --frozen-lockfile` |
+| `task ext:typecheck` | `pnpm --dir extensions/vscode run typecheck` |
+| `task ext:lint` | `pnpm --dir extensions/vscode run lint` |
+| `task ext:fmt` | `pnpm --dir extensions/vscode run fmt` |
+| `task ext:test` | `pnpm --dir extensions/vscode test` |
+| `task ext:build` | `pnpm --dir extensions/vscode run build` |
+| `task ext:package` | `pnpm --dir extensions/vscode run package` (VSIX in `extensions/vscode/out/`) |
+| `task ext:test:integration` | `EYEDBG_TEST_COUNT=1 pnpm --dir extensions/vscode run test:integration` |
+| `task ext:ci` | the extension checks CI runs, without the integration tests |
+| `task ci:go` | the Go checks CI runs |
+| `task ci` | runs the checks CI runs (`ci:go` and `ext:ci`) |
 
 A change to `drivers/...` or `internal/e2e` needs a clean `task e2e COUNT=5` run before it merges —
 these tests spawn real processes and daemons, so run them repeatedly to catch flakes a single pass
-would miss.
+would miss. For the same reason a change to `extensions/vscode` needs a clean
+`task ext:test:integration COUNT=5` before it merges.
 
 ## Commits and PR titles
 

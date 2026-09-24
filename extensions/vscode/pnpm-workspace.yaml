@@ -1,0 +1,14 @@
+# pnpm settings for the extension (pnpm 11 reads none from package.json).
+# Supply-chain policy: docs/adr/0015-the-vs-code-extension.md.
+
+# No dependency runs an install script. esbuild's postinstall only optimises
+# or downloads a binary its platform package already has; @vscode/vsce-sign's
+# copies or downloads a signing binary 'vsce package' doesn't need.
+# strictDepBuilds (default true) fails any install that meets a new one.
+allowBuilds:
+  esbuild: false
+  '@vscode/vsce-sign': false
+
+# A release must be 7 days old before it can be installed (minutes), as the
+# repository's Dependabot cooldown.
+minimumReleaseAge: 10080

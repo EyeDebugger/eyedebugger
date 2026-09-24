@@ -9,3 +9,6 @@ require (
 )
 
 require github.com/inconshreveable/mousetrap v1.1.0 // indirect
+
+// The VS Code extension's npm dependencies are not Go code.
+ignore ./extensions/vscode/node_modules
