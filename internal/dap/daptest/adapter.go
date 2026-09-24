@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -248,6 +249,10 @@ func (a *adapter) respondOr(req godap.RequestMessage, body any, err error) {
 }
 
 func (a *adapter) handle(req godap.RequestMessage, raw []byte) {
+	if slices.Contains(a.opts.Unanswered, req.GetRequest().Command) {
+		return
+	}
+
 	switch r := req.(type) {
 	case *godap.InitializeRequest:
 		a.respond(req, a.opts.caps())

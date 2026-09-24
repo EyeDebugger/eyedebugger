@@ -4,8 +4,10 @@
 package facade
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -294,5 +296,41 @@ func TestErrorResponse(t *testing.T) {
 		if id < 7001 || id > 7010 {
 			t.Errorf("error id %d out of the fixed range", id)
 		}
+	}
+}
+
+// TestAbandoned: only an error that is the connection context's own end
+// goes unanswered; everything else, a context error while the connection
+// lives included, is still answered (INTERNAL when it has no code).
+func TestAbandoned(t *testing.T) {
+	t.Parallel()
+
+	ended, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	canceled := fmt.Errorf("threads: %w", context.Canceled)
+
+	tests := []struct {
+		name string
+		ctx  context.Context //nolint:containedctx // test input
+		err  error
+		want bool
+	}{
+		{name: "canceled by the connection's end", ctx: ended, err: canceled, want: true},
+		{name: "wrapped twice", ctx: ended, err: fmt.Errorf("forward: %w", canceled), want: true},
+		{name: "connection live", ctx: context.Background(), err: canceled, want: false},
+		{name: "own timeout", ctx: ended, err: fmt.Errorf("threads: %w", context.DeadlineExceeded), want: false},
+		{name: "other error", ctx: ended, err: errors.New("unexpected response type"), want: false},
+		{name: "coded", ctx: ended, err: errors.Join(canceled, api.NewError(api.CodeSessionExited, "exited", "")), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := abandoned(tt.ctx, tt.err); got != tt.want {
+				t.Errorf("abandoned = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

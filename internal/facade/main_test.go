@@ -154,7 +154,8 @@ func join(t *testing.T, s *session.Session, c api.Client) *testClient {
 	return joinWith(t, Config{Session: s, Client: c})
 }
 
-// joinWith opens a facade connection with cfg (its logger is set here).
+// joinWith opens a facade connection with cfg (logging nowhere unless it
+// has a logger).
 func joinWith(t *testing.T, cfg Config) *testClient {
 	t.Helper()
 
@@ -167,7 +168,10 @@ func joinWith(t *testing.T, cfg Config) *testClient {
 	ctx, cancel := context.WithCancel(t.Context())
 
 	go func() {
-		cfg.Logger = slog.New(slog.DiscardHandler)
+		if cfg.Logger == nil {
+			cfg.Logger = slog.New(slog.DiscardHandler)
+		}
+
 		Serve(ctx, cfg, bufio.NewReader(ours), ours)
 		_ = ours.Close()
 		close(tc.done)
@@ -430,8 +434,11 @@ func (tc *testClient) waitClosed() {
 				return
 			}
 
-			if ev, isEvent := msg.(godap.EventMessage); isEvent {
-				tc.events = append(tc.events, ev)
+			switch m := msg.(type) {
+			case godap.EventMessage:
+				tc.events = append(tc.events, m)
+			case godap.ResponseMessage:
+				tc.responses[m.GetResponse().RequestSeq] = m
 			}
 		case <-deadline:
 			tc.t.Fatal("the facade did not close the connection")

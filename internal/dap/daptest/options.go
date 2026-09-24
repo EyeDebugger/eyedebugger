@@ -57,6 +57,9 @@ type Options struct {
 	// PauseAsSignal reports a pause as a stop with reason exception and
 	// description "signal SIGSTOP", as lldb-dap does on Linux.
 	PauseAsSignal bool `json:"pauseAsSignal,omitempty"`
+	// Unanswered lists commands whose requests it never answers: a request
+	// held in flight at the adapter until the client gives up on it.
+	Unanswered []string `json:"unanswered,omitempty"`
 }
 
 // DefaultCaps are the capabilities the fake adapter declares by default:
