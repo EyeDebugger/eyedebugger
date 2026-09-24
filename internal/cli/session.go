@@ -1157,5 +1157,11 @@ func workDir() string {
 		return ""
 	}
 
+	// The daemon resolves symlinks in the paths it is given (as adapters
+	// report them), so paths are shown relative to the resolved directory.
+	if resolved, err := filepath.EvalSymlinks(wd); err == nil {
+		return resolved
+	}
+
 	return wd
 }

@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -215,6 +216,8 @@ func checkStart(p api.StartParams) (api.StartParams, error) {
 		return p, err
 	}
 
+	p.Project, p.Program, p.Cwd = realPath(p.Project), realPath(p.Program), realPath(p.Cwd)
+
 	bps := make([]api.BreakpointSpec, len(p.Breakpoints))
 
 	for i, spec := range p.Breakpoints {
@@ -227,6 +230,22 @@ func checkStart(p api.StartParams) (api.StartParams, error) {
 	p.Breakpoints = bps
 
 	return p, nil
+}
+
+// realPath resolves the symlinks in p when it exists: adapters report
+// and match source paths with symlinks resolved (on macOS /tmp and /var
+// are symlinks into /private), so the program, its directory and its
+// breakpoints are all given that way.
+func realPath(p string) string {
+	if p == "" {
+		return p
+	}
+
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+
+	return p
 }
 
 // record attaches a recording to s; failing to is not fatal.
