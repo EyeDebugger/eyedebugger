@@ -21,6 +21,10 @@ const (
 	VarCwd = "cwd"
 	// VarEnv is the program's extra environment (map).
 	VarEnv = "env"
+	// VarEnvList is the program's extra environment as a sorted "NAME=VALUE"
+	// list (list; launch only). For adapters (like lldb-dap <=19) whose
+	// launch "env" argument is an array, not an object.
+	VarEnvList = "envList"
 	// VarStopOnEntry is --stop-on-entry (bool, always set).
 	VarStopOnEntry = "stopOnEntry"
 	// VarRuntime is the interpreter of a Python adapter (string).
@@ -64,6 +68,7 @@ func (m *Manifest) varKinds(attach bool) map[string]varKind {
 	} else {
 		kinds[VarProgram], kinds[VarArgs], kinds[VarCwd] = kindString, kindList, kindString
 		kinds[VarEnv], kinds[VarStopOnEntry] = kindMap, kindBool
+		kinds[VarEnvList] = kindList
 	}
 
 	if m.Adapter.Runtime == RuntimePython {

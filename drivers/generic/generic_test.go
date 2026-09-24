@@ -294,6 +294,42 @@ func TestNativeAdapterNotInstalled(t *testing.T) {
 	}
 }
 
+// TestPrepareEnvList: a manifest whose launch "env" argument is
+// "${envList}" (lldb-dap <=19's shape) gets a sorted "NAME=VALUE" list, and
+// omits the key when env is empty.
+func TestPrepareEnvList(t *testing.T) {
+	t.Parallel()
+
+	m := &adapters.Manifest{
+		Name: "toydbg", Version: "1", Adapter: adapters.Adapter{ID: "toy", Entry: "toydbg", Env: "TOYDBG", Path: true},
+		Language: &adapters.Language{Name: "toy"},
+		Launch: &adapters.Template{
+			Require:   []string{"program"},
+			Arguments: map[string]any{"program": "${program}", "env": "${envList}"},
+		},
+	}
+	d := New(m)
+	d.find = func(*adapters.Manifest) (adapters.Location, error) {
+		return adapters.Location{Path: "/usr/bin/toydbg", Source: adapters.FoundPath}, nil
+	}
+
+	app := appFile(t)
+
+	launch, err := d.Prepare(t.Context(), session.LaunchSpec{Program: app, Env: map[string]string{"B": "2", "A": "1"}})
+	if err != nil || jsonOf(t, launch.Arguments["env"]) != `["A=1","B=2"]` {
+		t.Fatalf("Prepare env = %v, %v; want [A=1 B=2]", launch.Arguments["env"], err)
+	}
+
+	launch, err = d.Prepare(t.Context(), session.LaunchSpec{Program: app})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := launch.Arguments["env"]; ok {
+		t.Fatalf("empty env should omit the key: %s", jsonOf(t, launch.Arguments))
+	}
+}
+
 func TestDrivers(t *testing.T) {
 	t.Parallel()
 
