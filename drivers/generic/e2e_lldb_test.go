@@ -83,10 +83,22 @@ func (a lldbApp) line(t *testing.T, marker string) int {
 // compileApp copies testdata/apps/<lang>/basic to a temporary directory and
 // compiles srcName with compiler and flags into "app". A missing compiler
 // fails the test (EYEDBG_E2E=1 never skips silently).
+//
+// The directory is resolved with filepath.EvalSymlinks (as fakeProgram in
+// internal/session/fake_test.go and TestResolveSpecResolvesSymlinks in
+// internal/session/symlink_test.go already do): on macOS t.TempDir() is
+// under /var/folders, a symlink to /private/var, and the compiler would
+// record that unresolved path in debug info while the session sends the
+// resolved path when it sets breakpoints, so lldb-dap's full-path match
+// would never bind.
 func compileApp(t *testing.T, lang, srcName, compiler string, flags ...string) lldbApp {
 	t.Helper()
 
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "..", "testdata", "apps", lang, "basic"))); err != nil {
 		t.Fatal(err)
 	}
@@ -223,17 +235,25 @@ func TestLldbEnvList(t *testing.T) {
 }
 
 // TestCppExceptions: --exceptions all maps to cpp_throw and stops at an
-// uncaught (indeed, any) throw.
+// uncaught (indeed, any) throw. lldb-dap's stop sits at frame 0 in
+// __cxa_throw (libc++abi/libstdc++'s own throw entry point), not at the
+// user's throw line, so this checks State/Reason/Exception (as TestGoPanic
+// does for Delve's panic stop) and then requires some frame in snap.Stack at
+// the throw line, rather than requiring frame 0 to be it.
 func TestCppExceptions(t *testing.T) {
 	requireLldb(t, "cpp")
 
 	app := compileCpp(t)
 
 	_, snap := startNative(t, pyManager(t), "cpp", app, "throw", api.StartParams{Exceptions: api.ExceptionsAll})
-	expectStop(t, snap, "exception", app.line(t, "throw"))
 
-	if snap.Exception == nil {
-		t.Errorf("exception = %+v, want it set", snap.Exception)
+	if snap.Session.State != api.StateStopped || snap.Session.Stop == nil || snap.Session.Stop.Reason != "exception" || snap.Exception == nil {
+		t.Fatalf("throw stop = %+v (exception %+v), want stopped (exception)", snap.Session, snap.Exception)
+	}
+
+	line := app.line(t, "throw")
+	if !slices.ContainsFunc(snap.Stack, func(f api.Frame) bool { return f.Line == line }) {
+		t.Errorf("stack = %+v, want a frame at line %d (the throw)", snap.Stack, line)
 	}
 }
 
