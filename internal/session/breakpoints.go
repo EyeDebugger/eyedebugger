@@ -442,7 +442,7 @@ func (s *Session) RunUntil(ctx context.Context, c api.Client, spec api.Breakpoin
 		return api.Snapshot{}, err
 	}
 
-	x, err := s.execute(ctx, execRequest{client: c, kind: execRunUntil, thread: threadID, target: &spec})
+	x, err := s.execute(ctx, execRequest{client: c, kind: ExecRunUntil, thread: threadID, target: &spec})
 	if err != nil {
 		return api.Snapshot{}, err
 	}

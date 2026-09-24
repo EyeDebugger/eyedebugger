@@ -5,9 +5,12 @@ package dap
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -224,4 +227,72 @@ func TestDebugpyTraffic(t *testing.T) {
 	}
 
 	_ = c
+}
+
+// TestDoSkipsTooLargeMessages: a message over MaxAdapterMessage is
+// skipped, a response (its waiter then times out) or an event; the
+// connection stays up and in sync.
+func TestDoSkipsTooLargeMessages(t *testing.T) {
+	t.Parallel()
+
+	c, fa := pipeClient(t, Handlers{})
+
+	evalCtx, cancelEval := context.WithCancel(t.Context())
+	evalDone, threadsDone := make(chan error, 1), make(chan error, 1)
+
+	go func() {
+		_, err := c.Do(evalCtx, &godap.Request{Command: "evaluate"})
+		evalDone <- err
+	}()
+
+	go func() {
+		_, err := c.Do(t.Context(), &godap.Request{Command: "threads"})
+		threadsDone <- err
+	}()
+
+	// The adapter, once it has both requests: evaluate's response and an
+	// event, both too large, then threads' response. Writes stop at the
+	// first error: a client that stopped reading must fail the test, not
+	// hang it.
+	go func() {
+		seqs := map[string]int{}
+
+		for range 2 {
+			msg, err := godap.ReadProtocolMessage(fa.in)
+			if err != nil {
+				return
+			}
+
+			if r, ok := msg.(godap.RequestMessage); ok {
+				seqs[r.GetRequest().Command] = r.GetRequest().Seq
+			}
+		}
+
+		big := `"` + strings.Repeat("x", MaxAdapterMessage) + `"`
+		for _, m := range []string{
+			`{"seq":1,"type":"response","request_seq":` + strconv.Itoa(seqs["evaluate"]) + `,"command":"evaluate","success":true,"body":{"result":` + big + `}}`,
+			`{"seq":2,"type":"event","event":"output","body":{"output":` + big + `}}`,
+			`{"seq":3,"type":"response","request_seq":` + strconv.Itoa(seqs["threads"]) + `,"command":"threads","success":true,"body":{"threads":[]}}`,
+		} {
+			if _, err := io.WriteString(fa.out, "Content-Length: "+strconv.Itoa(len(m))+"\r\n\r\n"+m); err != nil {
+				return
+			}
+		}
+	}()
+
+	if err := <-threadsDone; err != nil {
+		t.Errorf("threads after too-large messages: %v", err)
+	}
+
+	cancelEval()
+
+	if err := <-evalDone; !errors.Is(err, context.Canceled) {
+		t.Errorf("evaluate whose response was skipped: err = %v, want its context's", err)
+	}
+
+	select {
+	case <-c.Done():
+		t.Errorf("the connection ended: %v", c.Err())
+	default:
+	}
 }

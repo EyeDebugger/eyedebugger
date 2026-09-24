@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `eyedbg dap [-s ID] [--as CLIENT]` (phase 2, ADR 0012): any DAP client — VS Code through the
+  coming extension, nvim-dap, a script — joins a running session over stdio. It authenticates like
+  every command and switches its daemon connection to DAP (`facade.open`); stdout carries DAP only
+  and errors go to stderr. The editor attaches (launch is refused), sees the current stop, threads,
+  stack, variables and output, and every later stop; it acts under the CLI's rules: continue,
+  steps, pause, terminate, `setVariable`/`setExpression` and debug-console (repl) evaluation need
+  the control lease (`LEASE_HELD`, with the code in `variables.code`), watch and hover evaluation
+  refuse side effects, its breakpoints (hit counts and logpoints included) and exception filters
+  are its own and are removed when it disconnects; the session keeps running. Other clients'
+  resumes and state changes arrive as `continued`/`invalidated`. Frames are bounded (1 MiB, one
+  `Content-Length` header) and malformed ones close the connection.
+- `version --json` (both binaries) reports `"protocol"` (the native API version, 2) and
+  `"features": ["dap"]`.
+- Stops carry `allThreadsStopped` when the adapter says so (`--json` snapshots and events).
+
 ## [0.1.2] - 2026-09-24
 
 ### Fixed

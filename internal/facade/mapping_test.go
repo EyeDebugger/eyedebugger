@@ -1,0 +1,307 @@
+// Copyright The EyeDebugger Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package facade
+
+import (
+	"encoding/json"
+	"errors"
+	"reflect"
+	"strings"
+	"testing"
+
+	godap "github.com/google/go-dap"
+
+	"github.com/eyedebugger/eyedebugger/internal/api"
+)
+
+func TestCapabilities(t *testing.T) {
+	t.Parallel()
+
+	adapter := godap.Capabilities{
+		SupportsConditionalBreakpoints: true, SupportsFunctionBreakpoints: true, SupportsEvaluateForHovers: true,
+		SupportsSetVariable: true, SupportsCompletionsRequest: true, CompletionTriggerCharacters: []string{"."},
+		SupportsRestartRequest: true, SupportsStepBack: true, SupportTerminateDebuggee: true, SupportSuspendDebuggee: true,
+		SupportsDataBreakpoints: true, SupportsCancelRequest: true, SupportsSteppingGranularity: true,
+		SupportsExceptionOptions: true, SupportsExceptionInfoRequest: true, SupportsClipboardContext: true,
+		ExceptionBreakpointFilters: []godap.ExceptionBreakpointsFilter{{Filter: "raised"}},
+	}
+
+	tests := []struct {
+		name    string
+		modes   []api.ExceptionMode
+		filters []string
+	}{
+		{name: "no modes", modes: nil, filters: nil},
+		{name: "all", modes: []api.ExceptionMode{api.ExceptionsAll}, filters: []string{"all"}},
+		{name: "both", modes: []api.ExceptionMode{api.ExceptionsAll, api.ExceptionsUncaught}, filters: []string{"all", "uncaught"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := capabilities(adapter, tt.modes)
+
+			want := godap.Capabilities{
+				SupportsConfigurationDoneRequest: true, SupportsHitConditionalBreakpoints: true, SupportsLogPoints: true,
+				SupportsTerminateRequest: true,
+				// Passed through.
+				SupportsConditionalBreakpoints: true, SupportsFunctionBreakpoints: true, SupportsEvaluateForHovers: true,
+				SupportsSetVariable: true, SupportsCompletionsRequest: true, CompletionTriggerCharacters: []string{"."},
+				SupportsExceptionInfoRequest: true,
+			}
+
+			for _, f := range tt.filters {
+				label := map[string]string{"all": "All exceptions", "uncaught": "Uncaught exceptions"}[f]
+				want.ExceptionBreakpointFilters = append(want.ExceptionBreakpointFilters, godap.ExceptionBreakpointsFilter{Filter: f, Label: label})
+			}
+
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("capabilities =\n%+v\nwant\n%+v", got, want)
+			}
+		})
+	}
+
+	if adapter.ExceptionBreakpointFilters[0].Filter != "raised" {
+		t.Error("capabilities changed the adapter's filters")
+	}
+}
+
+func TestExceptionMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		filters []string
+		want    api.ExceptionMode
+	}{
+		{filters: nil, want: api.ExceptionsNone},
+		{filters: []string{"bogus"}, want: api.ExceptionsNone},
+		{filters: []string{"uncaught"}, want: api.ExceptionsUncaught},
+		{filters: []string{"uncaught", "all"}, want: api.ExceptionsAll},
+		{filters: []string{"all", "uncaught"}, want: api.ExceptionsAll},
+	}
+
+	for _, tt := range tests {
+		if got := exceptionMode(tt.filters); got != tt.want {
+			t.Errorf("exceptionMode(%v) = %s, want %s", tt.filters, got, tt.want)
+		}
+	}
+}
+
+// encode renders DAP events as JSON for comparing.
+func encode(t *testing.T, events []godap.EventMessage) string {
+	t.Helper()
+
+	parts := make([]string, 0, len(events))
+
+	for _, ev := range events {
+		raw, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		parts = append(parts, string(raw))
+	}
+
+	return strings.Join(parts, "\n")
+}
+
+func TestTranslate(t *testing.T) {
+	t.Parallel()
+
+	code := 3
+	own := &api.Breakpoint{ID: 4, Owner: "human:t", Verified: true, Line: 7, Message: "moved", Note: "shared"}
+	stranger := &api.Breakpoint{ID: 5, Owner: "human:t", Line: 8}
+	agents := &api.Breakpoint{ID: 6, Owner: "agent", Line: 9}
+
+	tests := []struct {
+		name        string
+		ev          api.Event
+		invalidated bool
+		want        string
+	}{
+		{
+			name: "stopped",
+			ev:   api.Event{Kind: api.EventStopped, Stop: &api.StopInfo{Reason: "breakpoint", ThreadID: 2, Description: "d", Text: "x", AllThreadsStopped: true}},
+			want: `{"seq":0,"type":"","event":"stopped","body":{"reason":"breakpoint","description":"d","threadId":2,"text":"x","allThreadsStopped":true}}`,
+		},
+		{name: "own exec", ev: api.Event{Kind: api.EventExec, Client: "human:t", Action: "continue"}, want: ""},
+		{
+			name: "other's continue", ev: api.Event{Kind: api.EventExec, Client: "agent", Action: "continue"},
+			want: `{"seq":0,"type":"","event":"continued","body":{"threadId":1,"allThreadsContinued":true}}`,
+		},
+		{
+			name: "other's step on a thread", ev: api.Event{Kind: api.EventExec, Client: "agent", Action: "next", ThreadID: 9},
+			want: `{"seq":0,"type":"","event":"continued","body":{"threadId":9,"allThreadsContinued":true}}`,
+		},
+		{
+			name: "other's run-until", ev: api.Event{Kind: api.EventExec, Client: "agent", Action: "runUntil"},
+			want: `{"seq":0,"type":"","event":"continued","body":{"threadId":1,"allThreadsContinued":true}}`,
+		},
+		{name: "other's pause", ev: api.Event{Kind: api.EventExec, Client: "agent", Action: "pause"}, want: ""},
+		{name: "other's set, no invalidated", ev: api.Event{Kind: api.EventExec, Client: "agent", Action: "set"}, want: ""},
+		{
+			name: "other's eval, invalidated", ev: api.Event{Kind: api.EventExec, Client: "agent", Action: "eval"}, invalidated: true,
+			want: `{"seq":0,"type":"","event":"invalidated","body":{"areas":["variables"]}}`,
+		},
+		{
+			name: "adapter continued", ev: api.Event{Kind: api.EventContinued, ThreadID: 3},
+			want: `{"seq":0,"type":"","event":"continued","body":{"threadId":3,"allThreadsContinued":true}}`,
+		},
+		{
+			name: "logpoint output", ev: api.Event{Kind: api.EventOutput, Category: "logpoint", Text: "hit {x}\n"},
+			want: `{"seq":0,"type":"","event":"output","body":{"category":"console","output":"hit {x}\n"}}`,
+		},
+		{
+			name: "stdout", ev: api.Event{Kind: api.EventOutput, Category: "stdout", Text: "a"},
+			want: `{"seq":0,"type":"","event":"output","body":{"category":"stdout","output":"a"}}`,
+		},
+		{
+			name: "thread", ev: api.Event{Kind: api.EventThread, Reason: "started", ThreadID: 4},
+			want: `{"seq":0,"type":"","event":"thread","body":{"reason":"started","threadId":4}}`,
+		},
+		{name: "exited", ev: api.Event{Kind: api.EventExited, ExitCode: &code}, want: `{"seq":0,"type":"","event":"exited","body":{"exitCode":3}}`},
+		{name: "ended", ev: api.Event{Kind: api.EventEnded, Reason: "stopped by agent"}, want: `{"seq":0,"type":"","event":"terminated","body":{}}`},
+		{
+			name: "adapter changed own", ev: api.Event{Kind: api.EventBreakpoint, Action: "changed", Breakpoint: own},
+			want: `{"seq":0,"type":"","event":"breakpoint","body":{"reason":"changed","breakpoint":{"id":4,"verified":true,"message":"moved; shared","line":7}}}`,
+		},
+		{name: "own change", ev: api.Event{Kind: api.EventBreakpoint, Action: "changed", Client: "human:t", Breakpoint: own}, want: ""},
+		{name: "adapter changed a stranger", ev: api.Event{Kind: api.EventBreakpoint, Action: "changed", Breakpoint: stranger}, want: ""},
+		{name: "adapter changed the agent's", ev: api.Event{Kind: api.EventBreakpoint, Action: "changed", Breakpoint: agents}, want: ""},
+		{
+			name: "forced removal of own", ev: api.Event{Kind: api.EventBreakpoint, Action: "removed", Client: "agent", Breakpoint: own},
+			want: `{"seq":0,"type":"","event":"breakpoint","body":{"reason":"removed","breakpoint":{"id":4,"verified":false}}}`,
+		},
+		{name: "own removal", ev: api.Event{Kind: api.EventBreakpoint, Action: "removed", Client: "human:t", Breakpoint: own}, want: ""},
+		{name: "added", ev: api.Event{Kind: api.EventBreakpoint, Action: "added", Client: "agent", Breakpoint: agents}, want: ""},
+		{name: "started", ev: api.Event{Kind: api.EventStarted}, want: ""},
+		{name: "client", ev: api.Event{Kind: api.EventClient, Client: "agent"}, want: ""},
+		{name: "lease", ev: api.Event{Kind: api.EventLease, Action: "grant"}, want: ""},
+		{name: "exceptions", ev: api.Event{Kind: api.EventExceptions, Action: "all"}, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			st := &followState{self: "human:t", invalidated: tt.invalidated, owns: func(id int) bool { return id == 4 }, lastThread: 1}
+			if got := encode(t, translate(&tt.ev, st)); got != tt.want {
+				t.Errorf("translate =\n%s\nwant\n%s", got, tt.want)
+			}
+		})
+	}
+
+	covered := map[api.EventKind]bool{}
+	for i := range tests {
+		covered[tests[i].ev.Kind] = true
+	}
+
+	for _, k := range api.EventKinds() {
+		if !covered[k] {
+			t.Errorf("no translate case for event kind %s", k)
+		}
+	}
+}
+
+func TestResync(t *testing.T) {
+	t.Parallel()
+
+	notice := `{"seq":0,"type":"","event":"output","body":{"category":"console","output":"eyedbg: 7 session events were missed\n"}}`
+
+	tests := []struct {
+		name string
+		info api.SessionInfo
+		want string
+	}{
+		{
+			name: "stopped", info: api.SessionInfo{State: api.StateStopped, Stop: &api.StopInfo{Reason: "step", ThreadID: 2}},
+			want: notice + "\n" + `{"seq":0,"type":"","event":"stopped","body":{"reason":"step","threadId":2}}`,
+		},
+		{
+			name: "running", info: api.SessionInfo{State: api.StateRunning},
+			want: notice + "\n" + `{"seq":0,"type":"","event":"continued","body":{"threadId":1,"allThreadsContinued":true}}`,
+		},
+		{name: "exited", info: api.SessionInfo{State: api.StateExited}, want: notice},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			st := &followState{self: "human:t", owns: func(int) bool { return false }, lastThread: 1}
+			if got := encode(t, resync(7, tt.info, st)); got != tt.want {
+				t.Errorf("resync =\n%s\nwant\n%s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		err      error
+		holder   string
+		showUser bool
+		message  string
+		want     godap.ErrorMessage
+	}{
+		{
+			name: "lease held", err: api.NewError(api.CodeLeaseHeld, "held by agent", "ask agent"), holder: "agent", showUser: true,
+			message: "LEASE_HELD",
+			want:    godap.ErrorMessage{Id: 7006, Format: "held by agent — ask agent", ShowUser: true, Variables: map[string]string{"code": "LEASE_HELD", "holder": "agent"}},
+		},
+		{
+			name: "no hint", err: api.NewError(api.CodeNotStopped, "running", ""), holder: "agent",
+			message: "NOT_STOPPED",
+			want:    godap.ErrorMessage{Id: 7003, Format: "running", Variables: map[string]string{"code": "NOT_STOPPED"}},
+		},
+		{
+			name: "placeholder kept", err: api.NewError(api.CodeInvalidRequest, "invalid log message {x", ""),
+			message: "INVALID_REQUEST",
+			want:    godap.ErrorMessage{Id: 7001, Format: "invalid log message {x", Variables: map[string]string{"code": "INVALID_REQUEST"}},
+		},
+		{
+			name: "wrapped", err: errors.Join(errors.New("ctx"), api.NewError(api.CodeAdapterFailed, "rejected", "")),
+			message: "ADAPTER_ERROR",
+			want:    godap.ErrorMessage{Id: 7010, Format: "rejected", Variables: map[string]string{"code": "ADAPTER_ERROR"}},
+		},
+		{
+			name: "other code", err: api.NewError(api.CodeAnchorNotFound, "no anchor", ""),
+			message: "ANCHOR_NOT_FOUND",
+			want:    godap.ErrorMessage{Id: 7000, Format: "no anchor", Variables: map[string]string{"code": "ANCHOR_NOT_FOUND"}},
+		},
+		{
+			name: "internal", err: errors.New("secret value 42"),
+			message: "INTERNAL",
+			want: godap.ErrorMessage{
+				Id: 7099, Format: "eyedbg failed to handle evaluate — see 'eyedbg daemon logs'",
+				Variables: map[string]string{"code": "INTERNAL"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			message, body := errorResponse("evaluate", tt.err, tt.holder, tt.showUser)
+			if message != tt.message || !reflect.DeepEqual(*body, tt.want) {
+				t.Errorf("errorResponse = %q, %+v; want %q, %+v", message, *body, tt.message, tt.want)
+			}
+		})
+	}
+
+	for _, id := range []int{
+		errorID(api.CodeInvalidRequest), errorID(api.CodeNoSession), errorID(api.CodeNotStopped), errorID(api.CodeNotRunning),
+		errorID(api.CodeSessionExited), errorID(api.CodeLeaseHeld), errorID(api.CodeNotOwner), errorID(api.CodeUnsupported),
+		errorID(api.CodeSideEffects), errorID(api.CodeAdapterFailed),
+	} {
+		if id < 7001 || id > 7010 {
+			t.Errorf("error id %d out of the fixed range", id)
+		}
+	}
+}

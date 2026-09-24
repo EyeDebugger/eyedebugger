@@ -17,8 +17,8 @@ import (
 // Execution kinds of eval with side effects and set: both change the
 // program, so they are serialized and leased like execution requests.
 const (
-	execEval = "eval"
-	execSet  = "set"
+	ExecEval = "eval"
+	ExecSet  = "set"
 )
 
 // Evaluation contexts: watch for reads, repl for what may change the
@@ -48,7 +48,7 @@ func (s *Session) Eval(ctx context.Context, c api.Client, p api.EvalParams) (api
 	s.execMu.Lock()
 	defer s.execMu.Unlock()
 
-	if _, _, err := s.admit(execRequest{client: c, kind: execEval, text: p.Expression}); err != nil {
+	if _, _, err := s.admit(execRequest{client: c, kind: ExecEval, text: p.Expression}); err != nil {
 		return api.EvalResult{}, err
 	}
 
@@ -125,7 +125,7 @@ func (s *Session) Set(ctx context.Context, c api.Client, p api.SetParams) (api.S
 	s.execMu.Lock()
 	defer s.execMu.Unlock()
 
-	if _, _, err := s.admit(execRequest{client: c, kind: execSet, text: p.Variable}); err != nil {
+	if _, _, err := s.admit(execRequest{client: c, kind: ExecSet, text: p.Variable}); err != nil {
 		return api.SetResult{}, err
 	}
 

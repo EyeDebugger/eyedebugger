@@ -31,6 +31,15 @@
 //     and, on request, locals (with changes since the previous stop) and the
 //     stack.
 //
+// Editors join through the DAP facade (internal/facade, ADR 0012), which
+// holds no policy of its own: it waits with [Session.Ready], joins at
+// [Session.JoinPoint] and follows the event log with [Session.Follow], and
+// acts through the rules the CLI gets — [Session.Exec] for execution
+// requests, [Session.Forward] for every other adapter request (one table
+// decides what is read, leased or refused), [Session.ReplaceBreakpoints]
+// and [Session.ReplaceFunctionBreakpoints] for its client's own
+// breakpoints.
+//
 // Lock order: execMu, syncMu, captureMu, mu, then the event log's and the
 // recorder's own locks; the adapter's event goroutine takes only mu and
 // below.

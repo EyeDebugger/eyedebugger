@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"time"
@@ -88,6 +89,17 @@ func (cl *Client) Call(ctx context.Context, method string, params, result any) e
 	}
 
 	return resp.Decode(result)
+}
+
+// Detach hands the connection over to the caller, to speak another
+// protocol on it (after api.MethodFacadeOpen): it returns the connection's
+// reader, which yields first what the daemon sent past the last response,
+// and the connection, with no deadline. Don't use the Client afterwards;
+// closing the connection is the caller's.
+func (cl *Client) Detach() (io.Reader, net.Conn) {
+	_ = cl.conn.SetDeadline(time.Time{})
+
+	return cl.c.Reader(), cl.conn
 }
 
 // Close closes the connection.

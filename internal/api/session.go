@@ -109,6 +109,9 @@ type StopInfo struct {
 	ThreadID    int    `json:"threadId"`
 	Description string `json:"description,omitempty"`
 	Text        string `json:"text,omitempty"`
+	// AllThreadsStopped is the adapter's word that every thread stopped,
+	// not only ThreadID.
+	AllThreadsStopped bool `json:"allThreadsStopped,omitempty"`
 }
 
 // SessionInfo summarizes a session.

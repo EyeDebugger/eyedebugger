@@ -448,7 +448,10 @@ func (s *Session) onEvent(ev godap.EventMessage) {
 // one to count or log and pass to the stop filter (off this goroutine: it
 // waits for the adapter's answers).
 func (s *Session) onStoppedLocked(e *godap.StoppedEvent) {
-	stop := api.StopInfo{Reason: e.Body.Reason, ThreadID: e.Body.ThreadId, Description: e.Body.Description, Text: e.Body.Text}
+	stop := api.StopInfo{
+		Reason: e.Body.Reason, ThreadID: e.Body.ThreadId, Description: e.Body.Description, Text: e.Body.Text,
+		AllThreadsStopped: e.Body.AllThreadsStopped,
+	}
 	s.stopGen++
 
 	if stop.Reason == reasonBreakpoint && s.emulatingLocked() {
@@ -682,6 +685,10 @@ func (s *Session) Info() api.SessionInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.infoLocked()
+}
+
+func (s *Session) infoLocked() api.SessionInfo {
 	leaseInfo := s.lease.info()
 
 	info := api.SessionInfo{
@@ -891,28 +898,41 @@ const (
 // Only the sending is serialized with other clients' execution requests:
 // while this one waits, another client may pause the program.
 func (s *Session) Resume(ctx context.Context, c api.Client, kind string, threadID int, wait time.Duration, dump api.DumpSpec) (api.Snapshot, error) {
+	before, err := s.Exec(ctx, c, kind, threadID)
+	if err != nil {
+		return api.Snapshot{}, err
+	}
+
+	return s.Wait(ctx, before, wait, dump), nil
+}
+
+// Exec sends an execution request (continue, a step, or pause) for client
+// c and returns once the adapter answered it, without waiting for the
+// program to stop: the stop arrives as an event. It returns how many times
+// the program had stopped when the request was accepted (for [Session.Wait]).
+func (s *Session) Exec(ctx context.Context, c api.Client, kind string, threadID int) (int, error) {
 	switch kind {
 	case ExecContinue, ExecNext, ExecStepIn, ExecStepOut, ExecPause:
 	default:
-		return api.Snapshot{}, api.NewError(api.CodeInvalidRequest, "unknown execution kind "+kind,
+		return 0, api.NewError(api.CodeInvalidRequest, "unknown execution kind "+kind,
 			"use continue, next, stepIn, stepOut or pause")
 	}
 
 	x, err := s.execute(ctx, execRequest{client: c, kind: kind, thread: threadID})
 	if err != nil {
-		return api.Snapshot{}, err
+		return 0, err
 	}
 
-	return s.Wait(ctx, x.before, wait, dump), nil
+	return x.before, nil
 }
 
-// execRunUntil is run-until's kind in exec events: a continue to a target.
-const execRunUntil = "runUntil"
+// ExecRunUntil is run-until's kind in exec events: a continue to a target.
+const ExecRunUntil = "runUntil"
 
 // execRequest is one execution-changing request.
 type execRequest struct {
 	client api.Client
-	kind   string // an Exec* kind, execRunUntil, execEval or execSet
+	kind   string // an Exec* kind, ExecRunUntil, ExecEval or ExecSet
 	thread int
 	target *api.BreakpointSpec // run-until's location
 	text   string              // eval's expression, set's variable
@@ -975,7 +995,7 @@ func (s *Session) admit(r execRequest) (execution, int, error) {
 	switch {
 	case r.kind == ExecPause && s.state != api.StateRunning:
 		return execution{}, 0, stateError(s.ID, s.state, "pause needs a running program")
-	case r.kind == execRunUntil && s.state != api.StateStopped:
+	case r.kind == ExecRunUntil && s.state != api.StateStopped:
 		return execution{}, 0, stateError(s.ID, s.state, "run-until needs a stopped program")
 	case r.kind != ExecPause && s.state != api.StateStopped:
 		return execution{}, 0, stateError(s.ID, s.state, r.kind+" needs a stopped program")
@@ -1016,7 +1036,7 @@ func (s *Session) send(ctx context.Context, kind string, thread, before int) err
 	defer cancel()
 
 	dapKind := kind
-	if kind == execRunUntil {
+	if kind == ExecRunUntil {
 		dapKind = ExecContinue
 	}
 

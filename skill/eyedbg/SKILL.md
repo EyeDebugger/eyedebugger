@@ -49,7 +49,8 @@ eyedbg stop                                       # always, when done
 
 ## Sharing a session
 
-- Humans may be in the same session. `eyedbg sessions` lists sessions; `-s ID` picks one.
+- Humans may be in the same session, from VS Code or any DAP client (`eyedbg dap -s ID --as
+  human:NAME`); their steps and breakpoints show in `eyedbg events`. `-s ID` picks a session.
 - Several agents: give each a name, `--as agent:NAME` or `EYEDBG_CLIENT=agent:NAME`.
 - Running, stepping and `set` need the control lease; under the default policy you take it by
   acting. `LEASE_HELD` (exit 2) means someone else holds it: don't `eyedbg lease take --force` over

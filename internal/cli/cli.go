@@ -194,7 +194,8 @@ Output is budgeted: variables are cut to --budget tokens (default 2000) and ever
 Several clients can share a session (docs/DESIGN.md §3): each request says who sends it (--as
 agent[:NAME] or human[:NAME], else $EYEDBG_CLIENT, else agent). Breakpoints belong to the client
 that added them; the control lease decides who may run, step or pause the program ('eyedbg lease
---help'); 'eyedbg events' shows what every client did.
+--help'); 'eyedbg events' shows what every client did. A human joins from an editor (VS Code, nvim-dap,
+any DAP client) through 'eyedbg dap'.
 
 Exit codes: 0 success (a wait that times out is a success that says so); 1 usage or internal
 error (INVALID_REQUEST, SIDE_EFFECTS, ANCHOR_NOT_FOUND, ANCHOR_AMBIGUOUS); 2 no such session, it is
@@ -242,6 +243,7 @@ func NewEyedbgCommand(info version.Info) *cobra.Command {
 		newTestCommand(info, g),
 		newLeaseCommand(info, g),
 		newEventsCommand(info, g),
+		newDapCommand(info, g),
 		newStopCommand(info, g),
 		newAdaptersCommand(g),
 		newDaemonCommand(info, g),

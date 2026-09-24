@@ -91,32 +91,46 @@ var errNoDaemon = errors.New("the daemon is not running")
 // (also matching errNoDaemon). A daemon of another protocol version is
 // VERSION_MISMATCH: it would misread the request.
 func call(cmd *cobra.Command, info version.Info, timeout time.Duration, method string, params, result any) error {
-	p, err := daemon.DefaultPaths()
-	if err != nil {
-		return err
-	}
-
 	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
 
-	cl, err := daemon.Dial(ctx, p, info)
-	if api.CodeOf(err) == api.CodeDaemonNotRunning {
-		return errors.Join(api.NewError(api.CodeNoSession, "there are no debug sessions (the daemon is not running)",
-			"start one with 'eyedbg start'"), errNoDaemon)
-	}
-
+	cl, err := dialRunning(ctx, info)
 	if err != nil {
 		return err
 	}
 	defer cl.Close()
 
+	return cl.Call(ctx, method, params, result)
+}
+
+// dialRunning connects to the running daemon (never starting one), as
+// call does: no daemon is NO_SESSION (also matching errNoDaemon), another
+// protocol version is VERSION_MISMATCH.
+func dialRunning(ctx context.Context, info version.Info) (*daemon.Client, error) {
+	p, err := daemon.DefaultPaths()
+	if err != nil {
+		return nil, err
+	}
+
+	cl, err := daemon.Dial(ctx, p, info)
+	if api.CodeOf(err) == api.CodeDaemonNotRunning {
+		return nil, errors.Join(api.NewError(api.CodeNoSession, "there are no debug sessions (the daemon is not running)",
+			"start one with 'eyedbg start'"), errNoDaemon)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
 	if cl.Hello.ProtocolVersion != api.ProtocolVersion {
-		return api.NewError(api.CodeVersionMismatch,
+		_ = cl.Close()
+
+		return nil, api.NewError(api.CodeVersionMismatch,
 			fmt.Sprintf("eyedbgd %s speaks protocol %d but this eyedbg speaks %d", cl.Hello.Version, cl.Hello.ProtocolVersion, api.ProtocolVersion),
 			"stop it with 'eyedbg daemon stop' (--force ends its sessions); 'eyedbg start' then starts a matching one")
 	}
 
-	return cl.Call(ctx, method, params, result)
+	return cl, nil
 }
 
 // envNoRecord, when "1", turns recording off for new sessions.

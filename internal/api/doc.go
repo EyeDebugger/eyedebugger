@@ -10,4 +10,7 @@
 // token; the daemon rejects anything else. The hello exchange is frozen across
 // protocol versions so that any client can talk to any daemon well enough to
 // detect a mismatch and restart it.
+//
+// [MethodFacadeOpen] turns an authenticated connection into a Debug Adapter
+// Protocol connection to one session, for editors (docs/adr/0012).
 package api
