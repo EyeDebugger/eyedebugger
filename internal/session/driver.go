@@ -25,9 +25,16 @@ type LaunchSpec = api.LaunchSpec
 
 // Launch is a driver's answer: the adapter process and the launch request.
 type Launch struct {
-	// Adapter is the adapter executable; it speaks DAP on stdio.
+	// Adapter is the adapter executable; it speaks DAP on stdio, or over a
+	// socket with SocketArgs.
 	Adapter     string
 	AdapterArgs []string
+	// SocketArgs, when set, selects the connect transport: the session
+	// listens on a Unix socket in a fresh private directory, starts the
+	// adapter with SocketArgs(its path) as its arguments (AdapterArgs is
+	// then unused), and speaks DAP on the one connection the adapter dials
+	// in. The adapter's stdout goes where its stderr does.
+	SocketArgs func(socket string) []string
 	// AdapterEnv is added to the daemon's environment for the adapter.
 	AdapterEnv []string
 	// AdapterID is sent in the DAP initialize request.
