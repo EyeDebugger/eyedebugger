@@ -6,6 +6,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"time"
@@ -92,6 +93,10 @@ func resolveSpec(spec api.BreakpointSpec, allowFunction bool) (api.BreakpointSpe
 	// /private): a breakpoint through a symlink would never bind.
 	spec.File = realPath(spec.File)
 
+	if err := checkSourceFile(spec.File); err != nil {
+		return spec, err
+	}
+
 	if spec.Anchor != "" && spec.Line == 0 {
 		line, err := resolveAnchor(spec.File, spec.Anchor)
 		if err != nil {
@@ -111,6 +116,17 @@ func resolveSpec(spec api.BreakpointSpec, allowFunction bool) (api.BreakpointSpe
 	}
 
 	return spec, nil
+}
+
+// checkSourceFile refuses a breakpoint file that isn't there: the adapter
+// would leave its breakpoint pending for good.
+func checkSourceFile(path string) error {
+	if info, err := os.Stat(path); err != nil || info.IsDir() {
+		return api.NewError(api.CodeInvalidRequest, "no source file "+path,
+			"FILE is a path from the working directory, e.g. src/App/Program.cs:20, not just the file name")
+	}
+
+	return nil
 }
 
 // parseEmulated parses spec's hit condition and log message (nil when

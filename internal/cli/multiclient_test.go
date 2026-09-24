@@ -121,6 +121,9 @@ func TestMultiClientCLI(t *testing.T) {
 	serveInProcess(t, isolate(t))
 
 	prog := filepath.Join(t.TempDir(), "prog.txt")
+	if err := os.WriteFile(prog, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	out := run(t, 0, "start", "fake", "--program", prog, "--stop-on-entry", "--lease-policy", "handoff", "--bp", prog+":3", "--timeout", "20s")
 	expectOutput(t, out, "stopped: entry")

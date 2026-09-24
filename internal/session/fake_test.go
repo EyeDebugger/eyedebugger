@@ -261,11 +261,23 @@ func newTestManagerWith(t *testing.T, store Store, drv Driver) *Manager {
 	return m
 }
 
-// fakeProgram is the path of a fake program (it need not exist).
+// fakeProgram is the path of an empty fake program: it exists because
+// breakpoints need their file to, and has symlinks resolved as their file
+// does.
 func fakeProgram(t *testing.T) string {
 	t.Helper()
 
-	return filepath.Join(t.TempDir(), "prog.txt")
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(dir, "prog.txt")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return path
 }
 
 // start starts a fake session for c; with stop on entry it waits for that

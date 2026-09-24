@@ -48,11 +48,17 @@ func mustCall(t *testing.T, p Paths, method string, params, result any) {
 func startFake(t *testing.T, p Paths, client string, policy api.LeasePolicy, args ...string) api.Snapshot {
 	t.Helper()
 
+	// The program exists because breakpoints need their file to.
+	prog := filepath.Join(t.TempDir(), "prog.txt")
+	if err := os.WriteFile(prog, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	var snap api.Snapshot
 
 	mustCall(t, p, api.MethodSessionStart, api.StartParams{
 		Lang: "fake", Client: client, LeasePolicy: policy, Wait: api.Duration(20 * time.Second),
-		LaunchSpec: api.LaunchSpec{Program: filepath.Join(t.TempDir(), "prog.txt"), StopOnEntry: true, Args: args},
+		LaunchSpec: api.LaunchSpec{Program: prog, StopOnEntry: true, Args: args},
 	}, &snap)
 
 	if snap.Session.State != api.StateStopped {

@@ -43,7 +43,6 @@ func TestResolveSpecResolvesSymlinks(t *testing.T) {
 	}{
 		{"through a symlink", filepath.Join(link, "Program.cs"), src},
 		{"real path", src, src},
-		{"missing file stays", filepath.Join(link, "Gone.cs"), filepath.Join(link, "Gone.cs")},
 	}
 
 	for _, tt := range tests {
@@ -57,6 +56,34 @@ func TestResolveSpecResolvesSymlinks(t *testing.T) {
 
 			if got.File != tt.want {
 				t.Errorf("File = %q, want %q", got.File, tt.want)
+			}
+		})
+	}
+}
+
+// A breakpoint in a file that isn't there is refused: the adapter would
+// leave it pending for good.
+func TestResolveSpecRefusesMissingFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	tests := []struct {
+		name string
+		spec api.BreakpointSpec
+	}{
+		{"line", api.BreakpointSpec{File: filepath.Join(dir, "Gone.cs"), Line: 1}},
+		{"anchor", api.BreakpointSpec{File: filepath.Join(dir, "Gone.cs"), Anchor: "x"}},
+		{"directory", api.BreakpointSpec{File: dir, Line: 1}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := resolveSpec(tt.spec, true)
+			if code := api.CodeOf(err); code != api.CodeInvalidRequest {
+				t.Errorf("resolveSpec(%+v) = %v (code %q), want %s", tt.spec, err, code, api.CodeInvalidRequest)
 			}
 		})
 	}
