@@ -35,7 +35,8 @@ Breakpoints, exceptions, the lease policy and recording work as for 'eyedbg star
 --exceptions, --lease-policy, --no-record); with --bp, attach waits (up to --timeout) for the
 first stop. When the adapter can't attach it is ATTACH_FAILED with the likely causes: for .NET
 the process must be yours, not already under a debugger, not started with
-DOTNET_EnableDiagnostics=0, and see the same TMPDIR as eyedbgd.
+DOTNET_EnableDiagnostics=0, and see the same TMPDIR as eyedbgd; for a native (non-.NET) adapter,
+also the OS's own attach restrictions (Linux ptrace_scope, macOS task_for_pid).
 
 The program is never killed by eyedbg: 'eyedbg detach' (or 'eyedbg stop') ends the session and
 leaves it running. Starts the daemon if needed.
