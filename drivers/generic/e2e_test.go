@@ -27,9 +27,28 @@ import (
 const (
 	envE2E        = "EYEDBG_E2E"
 	envE2ENetwork = "EYEDBG_E2E_NETWORK"
+	// envE2ELangs narrows which languages the end-to-end tests exercise:
+	// unset runs every language; set (comma-separated) skips a language not
+	// listed, naming the variable (never silently: docs/CONVENTIONS.md §
+	// Testing) — duplicated per package, like markerLine.
+	envE2ELangs = "EYEDBG_E2E_LANGS"
 	// e2eWait bounds every wait for the real program.
 	e2eWait = 60 * time.Second
 )
+
+// requireLang skips t unless EYEDBG_E2E_LANGS is unset or names lang.
+func requireLang(t *testing.T, lang string) {
+	t.Helper()
+
+	list := os.Getenv(envE2ELangs)
+	if list == "" {
+		return
+	}
+
+	if !slices.Contains(strings.Split(list, ","), lang) {
+		t.Skipf("%s=%s excludes %s", envE2ELangs, list, lang)
+	}
+}
 
 // appsDir holds the Python sample apps.
 var appsDir = filepath.Join("..", "..", "testdata", "apps", "python")
@@ -47,6 +66,8 @@ func requirePython(t *testing.T) pyApp {
 	if os.Getenv(envE2E) != "1" {
 		t.Skip("set " + envE2E + "=1 (needs Python 3.10+ with debugpy, or 'eyedbg adapters install debugpy')")
 	}
+
+	requireLang(t, "python")
 
 	dir := t.TempDir()
 	if err := os.CopyFS(dir, os.DirFS(filepath.Join(appsDir, "basic"))); err != nil {

@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "name": "lldb-dap-rust",
+  "description": "Rust debugger using LLVM's lldb-dap (Apache-2.0 WITH LLVM-exception); set EYEDBG_LLDB_DAP if not on PATH",
+  "homepage": "https://lldb.llvm.org/use/lldbdap.html",
+  "license": "Apache-2.0 WITH LLVM-exception",
+  "version": "18+",
+  "adapter": {
+    "id": "lldb-dap",
+    "transport": "stdio",
+    "entry": "lldb-dap",
+    "args": ["--repl-mode", "variable"],
+    "env": "EYEDBG_LLDB_DAP",
+    "path": true,
+    "versionArgs": ["--help"],
+    "notRunningHint": "check that lldb-dap runs on its own; reinstall your LLVM/Clang toolchain if not"
+  },
+  "language": {
+    "name": "rust",
+    "extensions": [".rs"],
+    "markers": ["Cargo.toml"]
+  },
+  "launch": {
+    "require": ["program"],
+    "arguments": {
+      "name": "eyedbg", "type": "lldb-dap", "request": "launch",
+      "program": "${program}", "args": "${args}", "cwd": "${cwd}",
+      "env": "${envList}", "stopOnEntry": "${stopOnEntry}"
+    }
+  },
+  "attach": {
+    "arguments": {"name": "eyedbg", "type": "lldb-dap", "request": "attach", "pid": "${pid}"}
+  },
+  "evalGuard": {
+    "quotes": ["\"", "'"],
+    "nonCallWords": ["sizeof", "alignof", "_Alignof"],
+    "assignOps": ["=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="]
+  }
+}
