@@ -23,6 +23,18 @@ const (
 	RuntimePython = "python"
 )
 
+// Adapter transports (Adapter.Transport).
+const (
+	// TransportStdio speaks DAP on the adapter's stdin and stdout (the
+	// default).
+	TransportStdio = "stdio"
+	// TransportConnect speaks DAP on a Unix socket the adapter dials in
+	// to: the session listens in a fresh private directory and starts the
+	// adapter with adapter.args rendered with ${socket} (its path)
+	// (docs/adapter-manifests.md § Templates, § Transports).
+	TransportConnect = "connect"
+)
+
 // Option types (Option.Type).
 const (
 	OptionString = "string"

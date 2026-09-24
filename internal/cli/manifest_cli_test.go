@@ -183,8 +183,8 @@ func TestDaemonDrivers(t *testing.T) {
 	slices.Sort(names)
 
 	// shadow may not take dotnet from its Go driver: it is ignored.
-	if !slices.Equal(names, []string{"dotnet", "fakelang", "python"}) {
-		t.Fatalf("drivers = %v, want dotnet, fakelang and python", names)
+	if !slices.Equal(names, []string{"c", "cpp", "dotnet", "fakelang", "go", "python", "rust"}) {
+		t.Fatalf("drivers = %v, want c, cpp, dotnet, fakelang, go, python and rust", names)
 	}
 }
 
@@ -215,6 +215,50 @@ func TestManifestLanguageCLI(t *testing.T) {
 	expectOutput(t, run(t, exitError, "start", "fakelang", "--program", filepath.Join(t.TempDir(), "gone.fake")), "[INVALID_REQUEST]", "not found")
 	expectOutput(t, run(t, exitError, "start", "fakelang", "--program", prog, "--opt", "speed=9"), "[INVALID_REQUEST]", `no option "speed"`, "lines (int)")
 	expectOutput(t, run(t, exitError, "start", "dotnet", "--program", prog, "--opt", "x=1"), "dotnet takes no --opt options")
+}
+
+// fakeManifestConnect is a user manifest of language "fakeconn", served by
+// the fake adapter over the connect transport ([daptest.UserManifestConnect]):
+// [TestManifestLanguageCLI]'s twin, proving out schema 1's socket transport
+// end to end through the real commands.
+func fakeManifestConnect(t *testing.T) map[string]any {
+	t.Helper()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := daptest.UserManifestConnect(exe)
+	m["name"], m["language"] = "fakedbg-connect", map[string]any{"name": "fakeconn", "extensions": []any{".fake"}}
+
+	return m
+}
+
+// TestManifestLanguageConnectCLI is [TestManifestLanguageCLI] over the
+// connect transport (adapter.transport "connect", ${socket} in
+// adapter.args): the session listens on a Unix socket instead of speaking
+// DAP on the adapter's stdio. Not parallel: it sets environment variables.
+func TestManifestLanguageConnectCLI(t *testing.T) {
+	p := isolate(t)
+	cfg := userManifests(t, map[string]any{"fake.json": fakeManifestConnect(t)})
+	t.Setenv(adapters.EnvConfigDir, cfg)
+
+	serveWith(t, p, loadRegistry())
+
+	prog := filepath.Join(t.TempDir(), "p.fake")
+	if err := os.WriteFile(prog, []byte(strings.Repeat("line\n", 5)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	expectOutput(t, run(t, 0, "adapters", "ls"), "fakedbg-connect", "fakeconn", "user")
+
+	out := run(t, 0, "start", "fakeconn", "--program", prog, "--opt", "lines=5", "--bp", prog+":3", "--timeout", "20s")
+	expectOutput(t, out, "stopped: breakpoint")
+	expectOutput(t, run(t, 0, "vars"), "Locals", "line", "x")
+	expectOutput(t, run(t, 0, "eval", "line"), "3")
+	expectOutput(t, run(t, 0, "continue", "--timeout", "20s"), "exited")
+	run(t, 0, "stop")
 }
 
 // serveWith runs an in-process daemon with the drivers eyedbgd would

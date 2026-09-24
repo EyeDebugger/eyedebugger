@@ -6,6 +6,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/eyedebugger/eyedebugger/internal/adapters"
@@ -185,8 +186,9 @@ func TestDoctorAll(t *testing.T) {
 		}
 	}
 
-	if got := len(names); got != 3 || names[0] != "netcoredbg" || names[1] != "dotnet" || names[2] != "debugpy" {
-		t.Fatalf("checks = %v, want netcoredbg, dotnet, debugpy", names)
+	want := []string{"netcoredbg", "dotnet", "debugpy", "delve", "lldb-dap-c", "lldb-dap-cpp", "lldb-dap-rust"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("checks = %v, want %v", names, want)
 	}
 
 	if _, err := d.run(t.Context(), bundledRegistry(), []string{"cobol"}); err == nil {

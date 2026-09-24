@@ -22,6 +22,7 @@ security model, major dependencies, licensing and the contribution process.
 | [0010](0010-breakpoint-kinds-exceptions-attach-and-test-runs.md) | Hit counts and logpoints, exception stops, eval side effects, test runs and anchors | accepted |
 | [0011](0011-declarative-adapter-manifests-and-their-trust-model.md) | Declarative adapter manifests and their trust model | accepted |
 | [0012](0012-serve-dap-to-editors-through-eyedbg-dap.md) | Serve DAP to editors through `eyedbg dap` | proposed |
+| [0013](0013-socket-transport-and-native-manifest-languages.md) | A socket transport and three more manifest-only native languages | accepted |
 
 ## Process
 

@@ -38,6 +38,34 @@ func TestBundledManifestsValid(t *testing.T) {
 			t.Errorf("manifest %s: source %q, file names %v (want NAME.json)", m.Name, m.Source, names)
 		}
 	}
+
+	checkNoBundledConflicts(t, reg)
+}
+
+// checkNoBundledConflicts fails if two bundled manifests share a name or a
+// language: the registry only conflict-checks user manifests
+// (dropConflicts), so a collision between bundled ones would otherwise load
+// silently, first by name winning.
+func checkNoBundledConflicts(t *testing.T, reg *Registry) {
+	t.Helper()
+
+	names, langs := map[string]string{}, map[string]string{}
+
+	for _, m := range reg.Adapters() {
+		if other, ok := names[m.Name]; ok {
+			t.Errorf("bundled manifests %s and %s share name %q", other, m.Name, m.Name)
+		}
+
+		names[m.Name] = m.Name
+
+		if l := m.LanguageName(); l != "" {
+			if other, ok := langs[l]; ok {
+				t.Errorf("bundled manifests %s and %s share language %q", other, m.Name, l)
+			}
+
+			langs[l] = m.Name
+		}
+	}
 }
 
 func findName(names []string, name string) string {
@@ -82,6 +110,171 @@ func TestNetcoredbgManifestUnchanged(t *testing.T) {
 
 	if _, ok := m.DownloadFor("darwin", "amd64"); ok {
 		t.Error("darwin/amd64 has a download; netcoredbg publishes none")
+	}
+}
+
+// TestLldbDapManifests pins the three lldb-dap manifests' adapter fields:
+// one executable (lldb-dap), one language each.
+func TestLldbDapManifests(t *testing.T) {
+	t.Parallel()
+
+	reg := Load(LoadConfig{Bundled: Bundled(), Builtin: builtinLangs})
+
+	tests := []struct {
+		name, lang       string
+		extensions       []string
+		hasExceptions    bool
+		wantNonCallWords []string
+		wantAssignOps    []string
+	}{
+		{
+			"lldb-dap-c", "c",
+			[]string{".c", ".h"},
+			false,
+			[]string{"sizeof", "alignof", "_Alignof"},
+			[]string{"=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", "++", "--"},
+		},
+		{
+			"lldb-dap-cpp", "cpp",
+			[]string{".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx"},
+			true,
+			[]string{"sizeof", "alignof", "_Alignof", "decltype", "typeid"},
+			[]string{"=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", "++", "--"},
+		},
+		{
+			"lldb-dap-rust", "rust",
+			[]string{".rs"},
+			false,
+			[]string{"sizeof", "alignof", "_Alignof"},
+			[]string{"=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := reg.Adapter(tt.name)
+			if m == nil {
+				t.Fatalf("no bundled %s manifest", tt.name)
+			}
+
+			checkLldbDapAdapter(t, m, tt.name, tt.lang)
+			checkLldbDapLanguageAndTemplates(t, m, tt.name, tt.extensions, tt.hasExceptions)
+			checkLldbDapEvalGuard(t, m, tt.name, tt.wantNonCallWords, tt.wantAssignOps)
+		})
+	}
+
+	if m := reg.Adapter("lldb-dap-cpp"); m == nil || !slices.Equal(m.Exceptions["all"], []string{"cpp_throw"}) || m.Exceptions["uncaught"] != nil {
+		t.Fatalf("lldb-dap-cpp exceptions = %+v, want only all: [cpp_throw]", m.Exceptions)
+	}
+}
+
+// checkLldbDapAdapter checks the fields the three lldb-dap manifests share.
+func checkLldbDapAdapter(t *testing.T, m *Manifest, name, lang string) {
+	t.Helper()
+
+	a := m.Adapter
+	if a.ID != "lldb-dap" || a.Entry != "lldb-dap" || !slices.Equal(a.Args, []string{"--repl-mode", "variable"}) ||
+		a.Env != "EYEDBG_LLDB_DAP" || !a.Path || !slices.Equal(a.VersionArgs, []string{"--help"}) ||
+		a.Runtime != RuntimeNative || m.LanguageName() != lang || m.Builtin() ||
+		m.License != "Apache-2.0 WITH LLVM-exception" || m.Homepage != "https://lldb.llvm.org/use/lldbdap.html" {
+		t.Fatalf("%s adapter = %+v, manifest %+v", name, a, m)
+	}
+}
+
+// checkLldbDapLanguageAndTemplates checks language detection and the
+// launch/attach templates.
+func checkLldbDapLanguageAndTemplates(t *testing.T, m *Manifest, name string, extensions []string, hasExceptions bool) {
+	t.Helper()
+
+	if !slices.Equal(m.Language.Extensions, extensions) {
+		t.Errorf("%s extensions = %v, want %v", name, m.Language.Extensions, extensions)
+	}
+
+	if (m.Exceptions != nil) != hasExceptions {
+		t.Errorf("%s exceptions = %v, want set: %v", name, m.Exceptions, hasExceptions)
+	}
+
+	if m.Attach == nil || m.Attach.Arguments["pid"] != "${pid}" || m.Launch == nil ||
+		!slices.Equal(m.Launch.Require, []string{"program"}) || m.Launch.Arguments["env"] != "${envList}" {
+		t.Fatalf("%s launch/attach = %+v / %+v", name, m.Launch, m.Attach)
+	}
+}
+
+// checkLldbDapEvalGuard checks the manifest's evalGuard word lists.
+func checkLldbDapEvalGuard(t *testing.T, m *Manifest, name string, nonCallWords, assignOps []string) {
+	t.Helper()
+
+	if m.EvalGuard == nil || !slices.Equal(m.EvalGuard.NonCallWords, nonCallWords) ||
+		!slices.Equal(m.EvalGuard.AssignOps, assignOps) || len(m.EvalGuard.SafeCalls) != 0 {
+		t.Fatalf("%s evalGuard = %+v", name, m.EvalGuard)
+	}
+}
+
+// TestDelveManifest pins the bundled delve manifest's adapter and language
+// fields, and checks every download URL names the pinned version (catching
+// a half-done version bump) on the five platforms Delve publishes.
+func TestDelveManifest(t *testing.T) {
+	t.Parallel()
+
+	m := Load(LoadConfig{Bundled: Bundled(), Builtin: builtinLangs}).Adapter("delve")
+	if m == nil {
+		t.Fatal("no bundled delve manifest")
+	}
+
+	checkDelveAdapter(t, m)
+	checkDelveDownloads(t, m)
+
+	if m.Attach == nil || m.Attach.Arguments["mode"] != "local" || m.Attach.Arguments["processId"] != "${pid}" {
+		t.Fatalf("delve attach = %+v", m.Attach)
+	}
+
+	wantExceptions := []string{"unrecovered-panic", "runtime-fatal-throw"}
+	if !slices.Equal(m.Exceptions["all"], wantExceptions) || !slices.Equal(m.Exceptions["uncaught"], wantExceptions) {
+		t.Fatalf("delve exceptions = %+v", m.Exceptions)
+	}
+}
+
+// checkDelveAdapter checks the delve manifest's adapter and top-level
+// fields.
+func checkDelveAdapter(t *testing.T, m *Manifest) {
+	t.Helper()
+
+	a := m.Adapter
+	if a.ID != "go" || a.Transport != TransportConnect || a.Entry != "dlv" ||
+		!slices.Equal(a.Args, []string{"dap", "--client-addr=unix:${socket}"}) ||
+		a.Env != "EYEDBG_DLV" || !a.Path || !slices.Equal(a.VersionArgs, []string{"version"}) ||
+		a.Runtime != RuntimeNative || m.LanguageName() != "go" || m.Builtin() || m.Version != "1.27.2" ||
+		m.License != "MIT" || m.Homepage != "https://github.com/go-delve/delve" {
+		t.Fatalf("delve adapter = %+v, manifest %+v", a, m)
+	}
+}
+
+// checkDelveDownloads checks that every platform Delve publishes is
+// present, and every URL names the pinned version (catching a half-done
+// version bump).
+func checkDelveDownloads(t *testing.T, m *Manifest) {
+	t.Helper()
+
+	wantPlatforms := []string{"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "windows/amd64"}
+	if len(m.Install.Downloads) != len(wantPlatforms) {
+		t.Fatalf("downloads = %v, want exactly %v", m.Install.Downloads, wantPlatforms)
+	}
+
+	for _, key := range wantPlatforms {
+		goos, goarch, _ := strings.Cut(key, "/")
+
+		d, ok := m.DownloadFor(goos, goarch)
+		if !ok {
+			t.Errorf("no download for %s", key)
+
+			continue
+		}
+
+		if !strings.Contains(d.URL, "/v"+m.Version+"/") || !strings.Contains(d.URL, "dlv_"+m.Version+"_") || d.Root != "" {
+			t.Errorf("download %s url = %q, root %q; want /v%s/ and dlv_%s_, root \"\"", key, d.URL, d.Root, m.Version, m.Version)
+		}
 	}
 }
 

@@ -207,7 +207,15 @@ func (d *Driver) adapter(ctx context.Context, opts map[string]any, in adapters.P
 	}
 
 	launch.Adapter = loc.Path
-	launch.AdapterArgs = slices.Clone(m.Adapter.Args)
+
+	if m.Adapter.Transport == adapters.TransportConnect {
+		args := m.Adapter.Args
+		launch.SocketArgs = func(socket string) []string {
+			return adapters.RenderArgs(args, adapters.Vars{adapters.VarSocket: socket})
+		}
+	} else {
+		launch.AdapterArgs = slices.Clone(m.Adapter.Args)
+	}
 
 	return launch, vars, nil
 }

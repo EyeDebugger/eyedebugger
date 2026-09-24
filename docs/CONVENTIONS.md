@@ -99,9 +99,18 @@
   not by number. `drivers/dotnet` needs the .NET SDK and netcoredbg; `drivers/generic`
   (`TestPython*`) needs Python 3.10+ with debugpy (`EYEDBG_PYTHON=/path/to/venv/bin/python`) or
   `adapters install debugpy`, and `TestPythonManagedInstall` also `EYEDBG_E2E_NETWORK=1` (it
-  downloads debugpy into a temporary data directory). `requireE2E`/`require` closures are the only
-  skip point: without `EYEDBG_E2E=1` the test skips; with it set and the adapter missing or broken,
-  it fails, never skips silently. `task e2e` runs all real-adapter tests (`drivers/...` and
+  downloads debugpy into a temporary data directory). `drivers/generic`'s `TestLldb*`/`TestCpp*`/
+  `TestCAttach` (c, cpp, rust) need `cc`/`c++`/`rustc` on PATH and lldb-dap (`EYEDBG_LLDB_DAP` or
+  PATH); unlike python and dotnet there is no bundled download, so a missing compiler or lldb-dap
+  fails the test directly, the same "never skip silently" rule below. `drivers/generic`'s `TestGo*`
+  (go, over schema 1's connect transport) need Go on PATH and Delve (`EYEDBG_DLV` or PATH, or
+  `adapters install delve`); `TestGoManagedInstall` also needs `EYEDBG_E2E_NETWORK=1` (it downloads
+  Delve into a temporary data directory). `requireE2E`/`require`
+  closures are the only skip point: without `EYEDBG_E2E=1` the test skips; with it set and the
+  adapter missing or broken, it fails, never skips silently. `EYEDBG_E2E_LANGS` (comma-separated
+  language names) narrows which languages a real-adapter run exercises: unset runs every language;
+  set, a language left out skips with a message naming the variable — everything named still
+  follows the never-skip-silently rule. `task e2e` runs all real-adapter tests (`drivers/...` and
   `internal/e2e`) in one command; run it with `COUNT=5` before merging a change under `drivers/...`
   or `internal/e2e` to catch flakes a single pass would miss. Never add retries, sleeps or
   `-run`-scoped workarounds to make a flaky e2e test pass — fix the race or report it.

@@ -21,12 +21,19 @@ const (
 	VarCwd = "cwd"
 	// VarEnv is the program's extra environment (map).
 	VarEnv = "env"
+	// VarEnvList is the program's extra environment as a sorted "NAME=VALUE"
+	// list (list; launch only). For adapters (like lldb-dap <=19) whose
+	// launch "env" argument is an array, not an object.
+	VarEnvList = "envList"
 	// VarStopOnEntry is --stop-on-entry (bool, always set).
 	VarStopOnEntry = "stopOnEntry"
 	// VarRuntime is the interpreter of a Python adapter (string).
 	VarRuntime = "runtime"
 	// VarPID is the process to attach to (int; attach only).
 	VarPID = "pid"
+	// VarSocket is the connect transport's socket path (string;
+	// adapter.args only, not a launch/attach template variable).
+	VarSocket = "socket"
 
 	varProgram = VarProgram
 	optPrefix  = "opt."
@@ -64,6 +71,7 @@ func (m *Manifest) varKinds(attach bool) map[string]varKind {
 	} else {
 		kinds[VarProgram], kinds[VarArgs], kinds[VarCwd] = kindString, kindList, kindString
 		kinds[VarEnv], kinds[VarStopOnEntry] = kindMap, kindBool
+		kinds[VarEnvList] = kindList
 	}
 
 	if m.Adapter.Runtime == RuntimePython {
@@ -133,6 +141,23 @@ func exactRef(s string) (string, bool) {
 	}
 
 	return parts[0].text, true
+}
+
+// hasVarRef reports whether s references name, exactly or interpolated.
+// An s that fails to scan (a malformed "${"; caught elsewhere) has none.
+func hasVarRef(s, name string) bool {
+	parts, err := scan(s)
+	if err != nil {
+		return false
+	}
+
+	for _, p := range parts {
+		if p.ref && p.text == name {
+			return true
+		}
+	}
+
+	return false
 }
 
 // checkTemplate checks every reference in v against kinds.
@@ -213,6 +238,20 @@ func Render(tmpl map[string]any, vars Vars) map[string]any {
 		if r, ok := renderValue(v, vars); ok {
 			out[k] = r
 		}
+	}
+
+	return out
+}
+
+// RenderArgs renders adapter.args (a flat list of strings, unlike a launch
+// or attach template) against vars: every ${name} reference, exact or
+// inside other text, becomes name's string value. Used for the connect
+// transport, where the only reference is ${socket}. args must have passed
+// validation.
+func RenderArgs(args []string, vars Vars) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = interpolate(a, vars)
 	}
 
 	return out

@@ -4,8 +4,10 @@
 
 [![CI](https://github.com/EyeDebugger/eyedebugger/actions/workflows/ci.yml/badge.svg)](https://github.com/EyeDebugger/eyedebugger/actions/workflows/ci.yml)
 
-> **Alpha (v0.1).** Debug .NET (netcoredbg) and Python (debugpy) programs on Linux, macOS and
-> Windows (x64 and arm64; .NET not on Intel Macs or Windows on Arm). Install below.
+> **Alpha (v0.1).** Debug .NET (netcoredbg), Python (debugpy), C, C++, Rust (lldb-dap) and Go
+> (Delve) programs on Linux, macOS and Windows (x64 and arm64; .NET not on Intel Macs or Windows
+> on Arm; C/C++/Rust need lldb-dap on PATH or `EYEDBG_LLDB_DAP`, no managed download). Install
+> below.
 
 ## Why
 
@@ -22,7 +24,7 @@ eyedbg CLI (stateless) ──┐
                          ├── local IPC (JSON-RPC 2.0) ──► eyedbgd (daemon, per user)
 VS Code extension (P2) ──┘     + per-session DAP facade (P2)       │
                                                                    ├── Session ── DAP ──► adapter process
-                                                                   │   (netcoredbg | sharpdbg | debugpy | dlv | lldb-dap | js-debug)
+                                                                   │   (netcoredbg | debugpy | lldb-dap | delve; sharpdbg, js-debug planned)
                                                                    └── Side helpers (JSON-RPC over stdio)
                                                                        └── eyedbg-dotnet-helper (C#): ClrMD, EventPipe, dumps
 ```
@@ -32,8 +34,10 @@ VS Code extension (P2) ──┘     + per-session DAP facade (P2)       │
   and stop snapshots.
 - Languages plug in via Debug Adapter Protocol (DAP) adapters, each described by a JSON adapter
   manifest ([docs/adapter-manifests.md](docs/adapter-manifests.md)). .NET is first, via netcoredbg —
-  never vsdbg (see [ADR 0005](docs/adr/0005-never-use-vsdbg.md)); Python works through debugpy with a
-  manifest alone, no language-specific Go ([ADR 0011](docs/adr/0011-declarative-adapter-manifests-and-their-trust-model.md)).
+  never vsdbg (see [ADR 0005](docs/adr/0005-never-use-vsdbg.md)); Python, C, C++, Rust and Go work
+  through a manifest alone, no language-specific Go code
+  ([ADR 0011](docs/adr/0011-declarative-adapter-manifests-and-their-trust-model.md),
+  [ADR 0013](docs/adr/0013-socket-transport-and-native-manifest-languages.md)).
 
 Full design: [docs/DESIGN.md](docs/DESIGN.md).
 
@@ -50,6 +54,12 @@ Full design: [docs/DESIGN.md](docs/DESIGN.md).
 Phase 1 (MVP) is complete. Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg
 adapter; more languages.
 
+More languages, done independently of phase 2's own sequencing: C, C++ and Rust via lldb-dap, and
+Go via Delve over a new socket transport (`adapter.transport: "connect"`) — manifest only, no new
+Go driver ([ADR 0013](docs/adr/0013-socket-transport-and-native-manifest-languages.md)). Ruby,
+Java, Kotlin, JS/TS and PHP were scoped and descoped in the same pass; each needs more than a
+manifest.
+
 ## Install
 
 Download an archive for your platform from
@@ -64,7 +74,7 @@ Keep `eyedbg` and `eyedbgd` together on `PATH` (`go install` puts both in `$(go 
 Then, once per machine:
 
 ```sh
-eyedbg adapters install netcoredbg   # or: python
+eyedbg adapters install netcoredbg   # or: python, delve (c, cpp and rust use lldb-dap on PATH)
 eyedbg adapters doctor
 ```
 
