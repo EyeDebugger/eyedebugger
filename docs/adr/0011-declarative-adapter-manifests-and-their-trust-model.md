@@ -87,7 +87,8 @@ schema is a clear error, not a silent partial read. docs/adapter-manifests.md is
 
 **Two sources, replacement not merging.** Bundled manifests are embedded
 (`internal/adapters/manifests/`). User manifests are the `*.json` files directly in
-`$EYEDBG_CONFIG_DIR/adapters`, else `<user config dir>/eyedbg/adapters`. A user manifest replaces,
+`$EYEDBG_CONFIG_DIR/adapters`, else `<home>/adapters` (`~/.eyedbg` by default, `$EYEDBG_HOME`
+overrides it — the same on every OS). A user manifest replaces,
 whole, the bundled one with its name or language. Loading never fails: an invalid or untrusted user
 manifest is left out and reported (`adapters ls`, `adapters doctor`, the daemon's log), and the
 bundled one stays; two user manifests with one name or language are both left out; only a
@@ -99,13 +100,14 @@ Unix the manifest directory, its parent and each file (symlinks at their target)
 the user and writable by neither group nor others, whatever the group (OpenSSH's `StrictModes`
 rule, `st_mode & 022`: a primary group need not be private, e.g. macOS's shared `staff`); the file
 is checked through the handle that is then read, so a symlink target can't be swapped between
-check and read. On Windows the per-user `%AppData%` ACL is relied on. Nothing
+check and read. On Windows the per-user profile directory's ACL is relied on. Nothing
 in a manifest runs when it is loaded; argv never goes through a shell; downloads are https only,
 capped at `size` (else 1 GiB) and verified by SHA-256 before extraction, into a staging directory
 renamed into place.
 
 **Two adapter runtimes, one download mechanism.** A native adapter is found by its env variable,
-then an absolute `entry`, then the installed copy (`<data dir>/<name>/<version>/`), then PATH
+then an absolute `entry`, then the installed copy (`<data dir>/<name>/<version>/`, `~/.eyedbg/tools`
+by default, `$EYEDBG_DATA_DIR` overrides it), then PATH
 (netcoredbg's order and messages, unchanged). A Python adapter runs as `<interpreter>
 <root>/<entry>` on one interpreter chosen by `--opt python`, then the manifest's env variable
 (`EYEDBG_PYTHON`; a relative `--opt python` path is taken from the caller's directory), then the

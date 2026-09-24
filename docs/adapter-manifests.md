@@ -13,10 +13,8 @@ the Go driver in `drivers/dotnet`) and [debugpy.json](../internal/adapters/manif
 
 * **Bundled**: `internal/adapters/manifests/*.json`, built into eyedbg. A unit test checks each one.
 * **Yours**: the `*.json` files directly in `$EYEDBG_CONFIG_DIR/adapters`, else
-  `<config dir>/eyedbg/adapters`: `~/.config/eyedbg/adapters` on Linux (or
-  `$XDG_CONFIG_HOME/eyedbg/adapters`), `~/Library/Application Support/eyedbg/adapters` on macOS,
-  `%AppData%\eyedbg\adapters` on Windows. Subdirectories and other files are ignored; a manifest
-  is at most 1 MiB.
+  `~/.eyedbg/adapters` (`$EYEDBG_HOME/adapters` if `EYEDBG_HOME` is set), the same on every OS.
+  Subdirectories and other files are ignored; a manifest is at most 1 MiB.
 
 A manifest of yours **replaces** the bundled one with the same `name` or the same language, whole
 (no field merging); `adapters ls` shows what it replaces. Never from a project: a cloned
@@ -44,7 +42,7 @@ your shell configuration: whoever can write it can run code as you. eyedbg there
   symlink, its target) are owned by you and writable by neither your group nor others, whatever
   the group (OpenSSH's rule; `chmod go-w FILE` fixes the usual problem), checking the file it
   actually opened; on Windows it relies on
-  the per-user `%AppData%` permissions;
+  the per-user profile directory's permissions;
 * runs nothing when loading, and never runs a command through a shell;
 * downloads over https only, stops at `size` bytes (1 GiB without it), checks the SHA-256 before
   extracting, extracts into a staging directory and renames it into place, refusing archive
