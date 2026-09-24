@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/proc"
@@ -107,6 +108,7 @@ func (m *Manager) startTest(ctx context.Context, c api.Client, drv Driver, p api
 	s.mu.Unlock()
 
 	if finished {
+		s.awaitAdapter()
 		s.finishRun()
 	}
 
@@ -251,8 +253,30 @@ func (s *Session) watchRunner(pumps *sync.WaitGroup) {
 	// Before its start finished, the start's failure ends the session
 	// (and the recording closes itself after the ended event).
 	if started {
+		s.awaitAdapter()
 		s.finishRun()
 		s.closeRecording()
+	}
+}
+
+// awaitAdapter waits (at most shutdownTimeout) for the test host's adapter
+// to go away: its host terminated with the run, so it is shutting down,
+// and its last output belongs before the session's ended event.
+func (s *Session) awaitAdapter() {
+	s.mu.Lock()
+	client := s.client
+	s.mu.Unlock()
+
+	if client == nil {
+		return
+	}
+
+	t := time.NewTimer(shutdownTimeout)
+	defer t.Stop()
+
+	select {
+	case <-client.Done():
+	case <-t.C:
 	}
 }
 
