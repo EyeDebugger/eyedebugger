@@ -104,16 +104,18 @@ A native adapter is found by `env`, then an absolute `entry`, then the installed
 Most adapters speak DAP on their own stdin and stdout (`transport: "stdio"`, the default). An
 adapter that can only listen on a socket and dial back in (Delve's `dlv dap`, never stdio) uses
 `transport: "connect"`: eyedbg creates a fresh private directory (mode 0700, only you can enter
-it), listens on a Unix socket inside it, starts the adapter with `adapter.args` rendered with
-`${socket}` (the socket's path) in place of `AdapterArgs`' usual literal arguments, accepts exactly
+it), listens on a Unix socket inside it, starts the adapter with `adapter.args` rendered against
+`${socket}` (the socket's path; on `stdio`, args are passed literally instead), accepts exactly
 one connection, then closes the listener and removes the directory — before, during and after the
 session, so nothing is left behind or reachable by another user. `connect` needs `${socket}` in at
 least one argument and no other reference; it is refused with `runtime` other than `""` (native
-adapters only), and `${socket}` in a `stdio` adapter's `args` is refused too ("needs transport
-connect"). Delve: `"args": ["dap", "--client-addr=unix:${socket}"]`. A TCP transport is not offered:
-a socket anyone on the machine could connect to and drive the debugger as you would break the
-manifest trust model (ADR 0011); a listen-direction transport (the adapter listens, eyedbg dials
-in) is future work for adapters that host their own debuggee (Ruby's `rdbg`, follow-up F1).
+adapters only) and for a built-in language (one with its own Go driver, e.g. dotnet: it builds its
+own launch and never reads `adapter.transport`), and `${socket}` in a `stdio` adapter's `args` is
+refused too ("needs transport connect"). Delve: `"args": ["dap", "--client-addr=unix:${socket}"]`.
+A TCP transport is not offered: a socket anyone on the machine could connect to and drive the
+debugger as you would break the manifest trust model (ADR 0011); a listen-direction transport (the
+adapter listens, eyedbg dials in) is future work for adapters that host their own debuggee (Ruby's
+`rdbg`, follow-up F1).
 
 `python` (for `runtime: python`; the adapter runs as `<interpreter> <root>/<entry>`, and the
 interpreter's path is `${runtime}` in templates):
