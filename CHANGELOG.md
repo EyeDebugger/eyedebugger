@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (socket/token/sessions) is unaffected. This is unreleased, so there is no migration: reinstall
   adapters after upgrading (`eyedbg adapters install netcoredbg` / `python`), or set `EYEDBG_HOME`
   or `EYEDBG_DATA_DIR` to the old location.
+- A native (non-.NET) manifest-driven adapter's `ATTACH_FAILED` now carries a generic hint about
+  the OS's own attach restrictions (Linux `ptrace_scope`, macOS `task_for_pid`); .NET's hint is
+  unchanged (CoreCLR's debugger doesn't need either).
 - CI's `e2e` job runs on `ubuntu-latest` only for `push`/`pull_request`; the full 6-platform matrix
   now runs only on `workflow_dispatch` and the weekly `schedule` (the `test` job's unit-test matrix
   is unchanged). The matrix is computed by a small `e2e-matrix` job from `github.event_name` so

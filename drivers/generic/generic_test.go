@@ -247,6 +247,29 @@ func TestPrepareAttach(t *testing.T) {
 	}
 }
 
+// TestPrepareAttachNative checks a native (runtime "") manifest-driven
+// adapter's ATTACH_FAILED gets the generic ptrace_scope/task_for_pid hint;
+// TestPrepareAttach already covers a python-runtime one, which doesn't.
+func TestPrepareAttachNative(t *testing.T) {
+	t.Parallel()
+
+	m := &adapters.Manifest{
+		Name: "toydbg", Version: "1", Adapter: adapters.Adapter{ID: "toy", Entry: "toydbg", Env: "TOYDBG", Path: true},
+		Language: &adapters.Language{Name: "toy"},
+		Attach:   &adapters.Template{Arguments: map[string]any{"processId": "${pid}"}},
+	}
+	d := New(m)
+	d.find = func(*adapters.Manifest) (adapters.Location, error) {
+		return adapters.Location{Path: "/usr/bin/toydbg", Source: adapters.FoundPath}, nil
+	}
+
+	launch, err := d.PrepareAttach(t.Context(), api.AttachSpec{PID: 42})
+	if err != nil || launch.PID != 42 || !strings.Contains(launch.AttachHint, "ptrace_scope") ||
+		!strings.Contains(launch.AttachHint, "task_for_pid") {
+		t.Fatalf("PrepareAttach = %+v, %v; want a ptrace_scope/task_for_pid hint", launch, err)
+	}
+}
+
 func TestNativeAdapterNotInstalled(t *testing.T) {
 	t.Parallel()
 

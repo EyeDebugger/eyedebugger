@@ -95,6 +95,15 @@ func (d *Driver) Prepare(ctx context.Context, spec session.LaunchSpec) (session.
 	return launch, nil
 }
 
+// nativeAttachHint lists why attaching might fail for a native (runtime
+// "") manifest-driven adapter. Unlike .NET's own pipe transport (see
+// drivers/dotnet's attachHint), these typically attach through the OS's own
+// mechanism, restricted by default on both Linux and macOS.
+const nativeAttachHint = "the process must be yours, not already under a debugger, and the OS must allow it: " +
+	"on Linux check /proc/sys/kernel/yama/ptrace_scope (0 or 1 allows attaching to your own processes), " +
+	"on macOS the adapter needs the task_for_pid entitlement (install Xcode's command line tools, " +
+	"or run as root)"
+
 // PrepareAttach implements session.Attacher. Without an attach template
 // the manifest's language can't attach: UNSUPPORTED_BY_ADAPTER, with the
 // manifest's hint.
@@ -124,6 +133,10 @@ func (d *Driver) PrepareAttach(ctx context.Context, spec api.AttachSpec) (sessio
 	launch.Arguments = adapters.Render(d.m.Attach.Arguments, vars)
 	launch.Request = session.RequestAttach
 	launch.PID = spec.PID
+
+	if d.m.Adapter.Runtime == adapters.RuntimeNative {
+		launch.AttachHint = nativeAttachHint
+	}
 
 	return launch, nil
 }
