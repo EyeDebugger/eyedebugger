@@ -5,9 +5,16 @@ that needs no Go code, how to launch programs with it. The decision and its trus
 [ADR 0011](adr/0011-declarative-adapter-manifests-and-their-trust-model.md); this page is the field
 reference for manifest authors.
 
-eyedbg ships two: [netcoredbg.json](../internal/adapters/manifests/netcoredbg.json) (dotnet, served by
-the Go driver in `drivers/dotnet`) and [debugpy.json](../internal/adapters/manifests/debugpy.json)
-(python, served entirely by the manifest). `eyedbg adapters ls` lists what is loaded.
+eyedbg ships six, all served entirely by their manifest except netcoredbg (a Go driver in
+`drivers/dotnet`) and delve (the connect transport below, but still no Go driver):
+[netcoredbg.json](../internal/adapters/manifests/netcoredbg.json) (dotnet),
+[debugpy.json](../internal/adapters/manifests/debugpy.json) (python),
+[lldb-dap-c.json](../internal/adapters/manifests/lldb-dap-c.json),
+[lldb-dap-cpp.json](../internal/adapters/manifests/lldb-dap-cpp.json) and
+[lldb-dap-rust.json](../internal/adapters/manifests/lldb-dap-rust.json) (c, cpp, rust: one
+executable, lldb-dap, over three manifests — one language each), and
+[delve.json](../internal/adapters/manifests/delve.json) (go). `eyedbg adapters ls` lists what is
+loaded.
 
 ## Where manifests come from
 
@@ -288,3 +295,11 @@ netcoredbg's manifest (a built-in language: adapter metadata only) has `adapter`
 "entry": "netcoredbg", "args": ["--interpreter=vscode"], "env": "EYEDBG_NETCOREDBG", "path": true,
 "versionArgs": ["--version"], ...}`, one download per platform with `"root": "netcoredbg"`, and
 `"language": {"name": "dotnet", "builtin": true, ...}`.
+
+delve.json (the connect transport, § Transports): `adapter` `{"id": "go", "transport": "connect",
+"entry": "dlv", "args": ["dap", "--client-addr=unix:${socket}"], "env": "EYEDBG_DLV", "path": true,
+"versionArgs": ["version"]}`, one download per platform (`"root": ""`: `dlv` sits at the archive's
+own root, no subdirectory), and a `launch.arguments` template using `"mode": "${opt.mode}"` (the
+`mode` option: `debug` builds `${program}` — a package directory or `.go` file — `exec` runs an
+already-built binary, `test` runs the package's tests) alongside the usual `${program}`, `${args}`,
+`${cwd}` and `${env}`.

@@ -18,6 +18,11 @@ tests (docs/DESIGN.md §12-13). Go tooling ignores `testdata/`.
   `throw`). `loop` prints "total 150" (150 = sum of `price(item) = item*10` over `{1,2,3,4,5}`),
   and "env VALUE" when `EYEDBG_SAMPLE` is set (proves `${envList}`, the shape lldb-dap <=19's
   launch `env` needs); `wait` prints "pid N" then sleeps, for attach.
+- `go/basic`: the Delve e2e app (`drivers/generic`, `TestGo*`), its own module (`go 1.25`); `go run
+  . loop|panic|wait` (`debug` mode builds it from the package directory; `exec` mode runs a binary
+  built with `go build -gcflags=all=-N -l -o app .` first). `loop` prints "total 150" and "env
+  VALUE" as the others; `panic` panics unhandled (exit 2), for `--exceptions uncaught`; `wait`
+  prints "pid N" then sleeps, for attach. `func:main.price` is a function breakpoint target.
 
 `dotnet/console`, `python/basic` and `c/basic` are also used by `internal/e2e`'s CLI-level
 end-to-end test (`TestCLI`), which drives `eyedbg`/`eyedbgd` as real binaries against them behind

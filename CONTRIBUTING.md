@@ -18,7 +18,8 @@
 - `task test:race` needs cgo and a C compiler (on Windows, MinGW-w64 gcc).
 - For `task e2e`: the .NET 10 SDK and `eyedbg adapters install netcoredbg`; Python 3.10+ and
   `eyedbg adapters install debugpy`; a C/C++ compiler (`cc`/`c++`), rustc, and lldb-dap (on PATH,
-  or `EYEDBG_LLDB_DAP`) for c, cpp and rust. Narrow which languages run with `EYEDBG_E2E_LANGS`
+  or `EYEDBG_LLDB_DAP`) for c, cpp and rust; Go and `eyedbg adapters install delve` (or dlv on
+  PATH, or `EYEDBG_DLV`) for go. Narrow which languages run with `EYEDBG_E2E_LANGS`
   (comma-separated).
 - Without Task, use the raw commands below.
 

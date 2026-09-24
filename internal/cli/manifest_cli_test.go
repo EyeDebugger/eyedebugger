@@ -183,8 +183,8 @@ func TestDaemonDrivers(t *testing.T) {
 	slices.Sort(names)
 
 	// shadow may not take dotnet from its Go driver: it is ignored.
-	if !slices.Equal(names, []string{"c", "cpp", "dotnet", "fakelang", "python", "rust"}) {
-		t.Fatalf("drivers = %v, want c, cpp, dotnet, fakelang, python and rust", names)
+	if !slices.Equal(names, []string{"c", "cpp", "dotnet", "fakelang", "go", "python", "rust"}) {
+		t.Fatalf("drivers = %v, want c, cpp, dotnet, fakelang, go, python and rust", names)
 	}
 }
 
