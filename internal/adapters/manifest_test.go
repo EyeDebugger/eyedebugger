@@ -88,6 +88,22 @@ func TestParseValid(t *testing.T) {
 	}
 }
 
+func TestParseEnvListInLaunch(t *testing.T) {
+	t.Parallel()
+
+	m := validManifest()
+	at(m, "launch.arguments")["env"] = "${envList}"
+
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Parse(raw); err != nil {
+		t.Fatalf("Parse(${envList} in launch) = %v, want no error", err)
+	}
+}
+
 func TestParseInvalid(t *testing.T) {
 	t.Parallel()
 
@@ -173,6 +189,8 @@ func TestParseInvalid(t *testing.T) {
 			at(m, "adapter")["entry"] = "toy"
 		}, "${runtime} needs adapter.runtime python"},
 		{"interpolated args", func(m map[string]any) { at(m, "launch.arguments")["x"] = "a ${args}" }, "can only stand alone"},
+		{"interpolated envList", func(m map[string]any) { at(m, "launch.arguments")["x"] = "a ${envList}" }, "can only stand alone"},
+		{"envList in attach", func(m map[string]any) { at(m, "attach.arguments")["x"] = "${envList}" }, "${envList} is not a variable"},
 		{"interpolated bool option", func(m map[string]any) { at(m, "launch.arguments")["x"] = "a ${opt.fast}" }, "can only stand alone"},
 		{"malformed reference", func(m map[string]any) { at(m, "launch.arguments")["x"] = "${program" }, "without a closing"},
 		{"empty reference", func(m map[string]any) { at(m, "launch.arguments")["x"] = "${}" }, "is not a variable name"},
