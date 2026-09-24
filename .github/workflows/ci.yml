@@ -7,6 +7,12 @@ on:
   schedule:
     - cron: "17 4 * * 1" # weekly, to catch newly published vulnerabilities
   workflow_dispatch:
+    inputs:
+      e2e-count:
+        description: e2e test repeat count (COUNT=5 before merging an e2e change)
+        type: choice
+        options: ["1", "3", "5"]
+        default: "1"
 
 permissions:
   contents: read
@@ -22,6 +28,10 @@ env:
   GOLANGCI_LINT_VERSION: v2.13.2
   GOVULNCHECK_VERSION: v1.8.0
   GORELEASER_VERSION: v2.18.2
+  DOTNET_VERSION: "10.0.x"
+  PYTHON_VERSION: "3.13"
+  ACTIONLINT_VERSION: v1.7.12
+  ZIZMOR_VERSION: "1.30.1"
 
 jobs:
   lint:
@@ -50,11 +60,29 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        go: ["1.27.x"] # keep equal to env.GO_VERSION (env is not available in matrix)
+        # keep the "1.27.x" entries equal to env.GO_VERSION (env is not available in matrix)
         include:
           - os: ubuntu-latest
+            go: "1.27.x"
+            race: true
+          - os: ubuntu-24.04-arm
+            go: "1.27.x"
+            race: true
+          - os: macos-latest
+            go: "1.27.x"
+            race: true
+          - os: macos-15-intel
+            go: "1.27.x"
+            race: true
+          - os: windows-latest
+            go: "1.27.x"
+            race: true
+          - os: windows-11-arm
+            go: "1.27.x"
+            race: false # F16: the race detector doesn't support windows/arm64
+          - os: ubuntu-latest
             go: "1.26.x" # minimum supported, from go.mod
+            race: true
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -67,7 +95,10 @@ jobs:
           check-latest: true
           cache-dependency-path: go.sum
       - name: Test with race detector
-        run: go test -race -shuffle=on ./...
+        env:
+          RACE: ${{ matrix.race && '-race' || '' }}
+        shell: bash
+        run: go test ${RACE} -shuffle=on ./...
 
   build:
     name: build (6 targets)
@@ -96,6 +127,92 @@ jobs:
               echo "::endgroup::"
             done
           done
+
+  e2e:
+    name: e2e (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            netcoredbg: true
+          - os: ubuntu-24.04-arm
+            netcoredbg: true
+          - os: macos-latest
+            netcoredbg: true
+          - os: windows-latest
+            netcoredbg: true
+          - os: macos-15-intel
+            netcoredbg: false # D7/F16-adjacent: netcoredbg has no osx-x64 release
+          - os: windows-11-arm
+            netcoredbg: false # D7: netcoredbg has no win-arm64 release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      EYEDBG_E2E: "1"
+      EYEDBG_E2E_NETWORK: "1"
+      E2E_COUNT: ${{ inputs.e2e-count || '1' }}
+      RACE: -race
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          cache-dependency-path: go.sum
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        if: matrix.netcoredbg
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build eyedbg
+        run: |
+          go build -o "$RUNNER_TEMP/eyedbg-bin/" ./cmd/...
+          echo "EYEDBG_DATA_DIR=$RUNNER_TEMP/eyedbg-data" >> "$GITHUB_ENV"
+      - name: Install debugpy
+        run: $RUNNER_TEMP/eyedbg-bin/eyedbg adapters install debugpy
+      - name: Install netcoredbg
+        if: matrix.netcoredbg
+        run: $RUNNER_TEMP/eyedbg-bin/eyedbg adapters install netcoredbg
+      - name: No .NET e2e here
+        if: "!matrix.netcoredbg"
+        run: |
+          echo "::notice title=.NET e2e skipped::netcoredbg has no $RUNNER_OS/$RUNNER_ARCH release"
+          echo "netcoredbg has no $RUNNER_OS/$RUNNER_ARCH release: .NET e2e skipped" >> "$GITHUB_STEP_SUMMARY"
+      - name: Doctor
+        run: $RUNNER_TEMP/eyedbg-bin/eyedbg adapters doctor python
+      - name: Doctor (dotnet)
+        if: matrix.netcoredbg
+        run: $RUNNER_TEMP/eyedbg-bin/eyedbg adapters doctor dotnet
+      - name: e2e
+        run: go test ${RACE} -count="$E2E_COUNT" -p 1 -timeout 50m ./drivers/... ./internal/e2e/...
+
+  workflows:
+    name: workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          cache-dependency-path: go.sum
+      - name: actionlint
+        run: go run "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+      - name: zizmor
+        run: pipx run --spec "zizmor==${ZIZMOR_VERSION}" zizmor --offline .
 
   vuln:
     name: govulncheck
@@ -144,7 +261,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, test, build, vuln, goreleaser]
+    needs: [lint, test, build, e2e, workflows, vuln, goreleaser]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
