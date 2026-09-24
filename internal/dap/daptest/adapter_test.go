@@ -263,7 +263,7 @@ func newSocketSession(t *testing.T) *session {
 
 	s := &session{t: t, events: make(chan godap.EventMessage, 1000), served: make(chan error, 1)}
 
-	go func() { s.served <- daptest.ServeConnect(t.Context(), path, daptest.Options{}) }()
+	go func() { s.served <- daptest.ServeConnect(path, daptest.Options{}) }()
 
 	conn, err := ln.Accept()
 	if err != nil {
@@ -301,7 +301,7 @@ func TestServeConnect(t *testing.T) {
 	t.Run("fails without a listener", func(t *testing.T) {
 		t.Parallel()
 
-		if err := daptest.ServeConnect(t.Context(), filepath.Join(t.TempDir(), "none"), daptest.Options{}); err == nil {
+		if err := daptest.ServeConnect(filepath.Join(t.TempDir(), "none"), daptest.Options{}); err == nil {
 			t.Error("ServeConnect to a missing socket succeeded")
 		}
 	})

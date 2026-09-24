@@ -83,17 +83,7 @@ func (s *Session) startSocketAdapter(ctx context.Context, launch Launch, stderr 
 
 	conn, err := acceptAdapter(ctx, ln, exited, timeout)
 	if err != nil {
-		_ = cmd.Process.Kill()
-
-		// Return with the adapter gone, unless something it started holds
-		// its output open.
-		t := time.NewTimer(shutdownTimeout)
-		defer t.Stop()
-
-		select {
-		case <-exited:
-		case <-t.C:
-		}
+		abandon(cmd, exited)
 
 		return err
 	}
@@ -107,6 +97,21 @@ func (s *Session) startSocketAdapter(ctx context.Context, launch Launch, stderr 
 	go s.watchAdapter()
 
 	return nil
+}
+
+// abandon kills an adapter that didn't connect and waits until it is gone
+// (exited closed), at most shutdownTimeout: longer only if something it
+// started holds its output open.
+func abandon(cmd *exec.Cmd, exited <-chan struct{}) {
+	_ = cmd.Process.Kill()
+
+	t := time.NewTimer(shutdownTimeout)
+	defer t.Stop()
+
+	select {
+	case <-exited:
+	case <-t.C:
+	}
 }
 
 // listenSocket listens on a Unix socket at path.
