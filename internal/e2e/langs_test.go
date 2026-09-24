@@ -7,8 +7,10 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -20,6 +22,26 @@ import (
 // envE2E gates the real-adapter cases, as in drivers/generic and
 // drivers/dotnet (docs/CONVENTIONS.md § Testing).
 const envE2E = "EYEDBG_E2E"
+
+// envE2ELangs narrows which languages the end-to-end tests exercise: unset
+// runs every language; set (comma-separated) skips a language not listed,
+// naming the variable (never silently) — duplicated per package, like
+// markerLine.
+const envE2ELangs = "EYEDBG_E2E_LANGS"
+
+// requireLang skips t unless EYEDBG_E2E_LANGS is unset or names lang.
+func requireLang(t *testing.T, lang string) {
+	t.Helper()
+
+	list := os.Getenv(envE2ELangs)
+	if list == "" {
+		return
+	}
+
+	if !slices.Contains(strings.Split(list, ","), lang) {
+		t.Skipf("%s=%s excludes %s", envE2ELangs, list, lang)
+	}
+}
 
 // langCase is one language's script data: what to start, where the
 // anchor/run-until/logpoint locations are, and expressions whose values
@@ -52,7 +74,7 @@ type langCase struct {
 func langCases(t *testing.T) []langCase {
 	t.Helper()
 
-	return []langCase{fakeCase(t), pythonCase(t), dotnetCase(t)}
+	return []langCase{fakeCase(t), pythonCase(t), dotnetCase(t), cCase(t)}
 }
 
 // fakeCase is always on: the fake adapter is this test binary
@@ -100,6 +122,8 @@ func pythonCase(t *testing.T) langCase {
 			if os.Getenv(envE2E) != "1" {
 				t.Skip("set " + envE2E + "=1 (needs Python 3.10+ with debugpy, or 'eyedbg adapters install debugpy')")
 			}
+
+			requireLang(t, "python")
 		},
 		okExpr: "total", okValue: "10",
 		sideEffectExpr:  "total = 5",
@@ -181,6 +205,8 @@ func requireDotnetE2E(t *testing.T) {
 		t.Skip("set " + envE2E + "=1 (needs the .NET SDK and 'eyedbg adapters install netcoredbg')")
 	}
 
+	requireLang(t, dotnet.Language)
+
 	reg := adapters.Load(adapters.LoadConfig{Bundled: adapters.Bundled(), Builtin: []string{dotnet.Language}})
 
 	m := reg.Language(dotnet.Language)
@@ -196,9 +222,62 @@ func requireDotnetE2E(t *testing.T) {
 	}
 }
 
-// markerLine returns the line of file that ends in "# marker: NAME"
-// (testdata/apps/python/basic/app.py's convention; duplicated from
-// drivers/generic's unexported pyApp.line).
+// cCase needs EYEDBG_E2E=1 (a real cc and lldb-dap, or EYEDBG_LLDB_DAP); its
+// script positions come from testdata/apps/c/basic/main.c's own markers.
+// Unlike python and dotnet there is no bundled download to fall back on: a
+// missing cc or lldb-dap fails the test, it doesn't skip. Like pythonCase,
+// compiling is deferred until EYEDBG_E2E=1 is confirmed. attachSupported is
+// true: a real attach is exercised by drivers/generic's TestCAttach, not
+// here.
+func cCase(t *testing.T) langCase {
+	t.Helper()
+
+	lc := langCase{
+		name: "c",
+		lang: "c",
+		require: func(t *testing.T) {
+			t.Helper()
+
+			if os.Getenv(envE2E) != "1" {
+				t.Skip("set " + envE2E + "=1 (needs cc and lldb-dap, or EYEDBG_LLDB_DAP)")
+			}
+
+			requireLang(t, "c")
+		},
+		okExpr: "total", okValue: "10",
+		sideEffectExpr:  "total = 5",
+		logExpr:         "total",
+		attachSupported: true,
+	}
+
+	if os.Getenv(envE2E) != "1" {
+		return lc
+	}
+
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "..", "testdata", "apps", "c", "basic"))); err != nil {
+		t.Fatal(err)
+	}
+
+	file := filepath.Join(dir, "main.c")
+	bin := filepath.Join(dir, "app")
+
+	cmd := exec.CommandContext(t.Context(), "cc", "-g", "-O0", "-o", bin, file)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("cc -g -O0 -o %s %s: %v\n%s", bin, file, err, out)
+	}
+
+	lc.file = file
+	lc.anchor = markerLine(t, file, "loop-body")
+	lc.target = markerLine(t, file, "append")
+	lc.startArgs = func(*testing.T) []string { return []string{"--program", bin} }
+
+	return lc
+}
+
+// markerLine returns the line of file that ends in "# marker: NAME" (Python)
+// or "// marker: NAME" (C, testdata/apps/c/basic/main.c); duplicated from
+// drivers/generic's unexported pyApp.line and lldbApp.line.
 func markerLine(t *testing.T, file, marker string) int {
 	t.Helper()
 
@@ -210,7 +289,7 @@ func markerLine(t *testing.T, file, marker string) int {
 
 	sc := bufio.NewScanner(f)
 	for n := 1; sc.Scan(); n++ {
-		if strings.HasSuffix(strings.TrimSpace(sc.Text()), "# marker: "+marker) {
+		if strings.HasSuffix(strings.TrimSpace(sc.Text()), "marker: "+marker) {
 			return n
 		}
 	}
