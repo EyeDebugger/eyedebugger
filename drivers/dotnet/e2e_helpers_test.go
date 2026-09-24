@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,6 +24,26 @@ import (
 
 // appsDir holds the sample apps (testdata/apps/dotnet at the repo root).
 var appsDir = filepath.Join("..", "..", "testdata", "apps", "dotnet")
+
+// envE2ELangs narrows which languages the end-to-end tests exercise: unset
+// runs every language; set (comma-separated) skips a language not listed,
+// naming the variable (never silently: docs/CONVENTIONS.md § Testing) —
+// duplicated per package, like lineOf.
+const envE2ELangs = "EYEDBG_E2E_LANGS"
+
+// requireLang skips t unless EYEDBG_E2E_LANGS is unset or names lang.
+func requireLang(t *testing.T, lang string) {
+	t.Helper()
+
+	list := os.Getenv(envE2ELangs)
+	if list == "" {
+		return
+	}
+
+	if !slices.Contains(strings.Split(list, ","), lang) {
+		t.Skipf("%s=%s excludes %s", envE2ELangs, list, lang)
+	}
+}
 
 // requireE2E skips the test unless the end-to-end tests are enabled, and
 // unless netcoredbg's bundled manifest has a download for this platform or
@@ -36,6 +57,8 @@ func requireE2E(t *testing.T) {
 	if os.Getenv(envE2E) != "1" {
 		t.Skip("set " + envE2E + "=1 (needs the .NET SDK and 'eyedbg adapters install netcoredbg')")
 	}
+
+	requireLang(t, dotnet.Language)
 
 	reg := adapters.Load(adapters.LoadConfig{Bundled: adapters.Bundled(), Builtin: []string{dotnet.Language}})
 
