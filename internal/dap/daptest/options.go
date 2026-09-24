@@ -37,6 +37,11 @@ type Options struct {
 	// GlobalsScope marks the Locals scope with presentationHint "locals"
 	// and adds a cheap "Globals" scope holding g = 1, as debugpy does.
 	GlobalsScope bool `json:"globalsScope,omitempty"`
+	// ExitBeforeConnect makes an adapter started with [ConnectArg] exit
+	// at once without connecting; HangBeforeConnect makes it wait, without
+	// connecting, until it is killed.
+	ExitBeforeConnect bool `json:"exitBeforeConnect,omitempty"`
+	HangBeforeConnect bool `json:"hangBeforeConnect,omitempty"`
 }
 
 // DefaultCaps are the capabilities the fake adapter declares by default:

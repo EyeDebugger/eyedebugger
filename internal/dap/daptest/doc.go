@@ -9,7 +9,9 @@
 // binary: the package's TestMain calls [MaybeRun] first, and a driver launches
 // [Command] with [Arguments]. In the child, MaybeRun serves DAP on stdin and
 // stdout and returns true, and TestMain returns without running tests (a
-// TestMain that returns exits 0). [Command] passes -test.run=^$, so a TestMain
+// TestMain that returns exits 0). Given a [ConnectArg], it dials that Unix
+// socket and serves DAP on it instead, as adapters on the connect
+// transport do. [Command] passes -test.run=^$, so a TestMain
 // that forgets MaybeRun runs no tests either and the adapter just exits.
 //
 // The program is lines 1..N of a file, run Laps times ([ProgramArgs]).
