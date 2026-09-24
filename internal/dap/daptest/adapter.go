@@ -100,15 +100,15 @@ func runConnect(path string, opts Options) error {
 		return nil
 	}
 
-	return ServeConnect(context.Background(), path, opts)
+	return ServeConnect(path, opts)
 }
 
 // ServeConnect dials the Unix socket at path and speaks DAP on it, as
 // [ServeWith] does, until the client disconnects or closes it.
-func ServeConnect(ctx context.Context, path string, opts Options) error {
+func ServeConnect(path string, opts Options) error {
 	var d net.Dialer
 
-	conn, err := d.DialContext(ctx, "unix", path)
+	conn, err := d.DialContext(context.Background(), "unix", path)
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
