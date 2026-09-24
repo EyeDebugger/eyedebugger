@@ -131,30 +131,45 @@ jobs:
             done
           done
 
+  # The e2e job's matrix is computed here (rather than written inline) so that
+  # on push/pull_request it has exactly one entry (ubuntu-latest) and on
+  # workflow_dispatch/schedule it has all six platforms, without ever making
+  # the e2e job itself conditionally skipped: a skipped job would fail ci-ok.
+  e2e-matrix:
+    name: e2e matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      include: ${{ steps.matrix.outputs.include }}
+    steps:
+      - name: Compute matrix
+        id: matrix
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          full='[
+            {"os":"ubuntu-latest","netcoredbg":true,"race":true},
+            {"os":"ubuntu-24.04-arm","netcoredbg":true,"race":true},
+            {"os":"macos-latest","netcoredbg":true,"race":true},
+            {"os":"windows-latest","netcoredbg":true,"race":true},
+            {"os":"macos-15-intel","netcoredbg":false,"race":true},
+            {"os":"windows-11-arm","netcoredbg":false,"race":false}
+          ]'
+          reduced='[{"os":"ubuntu-latest","netcoredbg":true,"race":true}]'
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$EVENT_NAME" = "schedule" ]; then
+            echo "include=$(echo "$full" | jq -c .)" >> "$GITHUB_OUTPUT"
+          else
+            echo "include=$reduced" >> "$GITHUB_OUTPUT"
+          fi
+
   e2e:
     name: e2e (${{ matrix.os }})
+    needs: e2e-matrix
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            netcoredbg: true
-            race: true
-          - os: ubuntu-24.04-arm
-            netcoredbg: true
-            race: true
-          - os: macos-latest
-            netcoredbg: true
-            race: true
-          - os: windows-latest
-            netcoredbg: true
-            race: true
-          - os: macos-15-intel
-            netcoredbg: false # netcoredbg has no osx-x64 release
-            race: true
-          - os: windows-11-arm
-            netcoredbg: false # netcoredbg has no win-arm64 release
-            race: false # the race detector doesn't support windows/arm64
+        include: ${{ fromJSON(needs.e2e-matrix.outputs.include) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     defaults:
@@ -274,7 +289,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, test, build, e2e, workflows, vuln, goreleaser]
+    needs: [lint, test, build, e2e-matrix, e2e, workflows, vuln, goreleaser]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
