@@ -5,6 +5,7 @@ package adapters
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 )
 
@@ -84,6 +85,21 @@ func manifestWithLaunch(t *testing.T, tmpl string) []byte {
 	}
 
 	return raw
+}
+
+// TestRenderArgs checks adapter.args rendering: ${socket} exact or
+// interpolated, other text untouched.
+func TestRenderArgs(t *testing.T) {
+	t.Parallel()
+
+	vars := Vars{VarSocket: "/tmp/eyedbg-dap-x/dap.sock"}
+
+	got := RenderArgs([]string{"dap", "--client-addr=unix:${socket}", "${socket}", "--repl-mode"}, vars)
+	want := []string{"dap", "--client-addr=unix:/tmp/eyedbg-dap-x/dap.sock", "/tmp/eyedbg-dap-x/dap.sock", "--repl-mode"}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("RenderArgs = %v, want %v", got, want)
+	}
 }
 
 func TestScan(t *testing.T) {
