@@ -145,6 +145,14 @@ func TestParseInvalid(t *testing.T) {
 			at(m, "adapter")["args"] = []any{"--client-addr=unix:${socket}", "${program}"}
 			delete(at(m, "launch.arguments"), "python")
 		}, "${program} is not a variable here"},
+		{"connect for a built-in language", func(m map[string]any) {
+			delete(m, "python")
+			at(m, "adapter")["runtime"] = ""
+			at(m, "adapter")["entry"] = "toy"
+			at(m, "adapter")["transport"] = "connect"
+			at(m, "adapter")["args"] = []any{"--client-addr=unix:${socket}"}
+			at(m, "language")["builtin"] = true
+		}, "connect is not supported for a built-in language's driver"},
 		{"socket in a stdio arg", func(m map[string]any) {
 			at(m, "adapter")["args"] = []any{"--socket=${socket}"}
 		}, `"--socket=${socket}" needs transport connect`},

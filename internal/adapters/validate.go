@@ -107,7 +107,7 @@ func checkHTTPS(s string) error {
 func (m *Manifest) validateAdapter() error {
 	a := m.Adapter
 
-	if err := validateTransport(a); err != nil {
+	if err := validateTransport(a, m.Builtin()); err != nil {
 		return err
 	}
 
@@ -143,12 +143,19 @@ func (m *Manifest) validateAdapter() error {
 
 // validateTransport checks adapter.transport and, since transport decides
 // what adapter.args may reference, adapter.args too (checkAdapterArgs).
-func validateTransport(a Adapter) error {
+// builtin is the manifest's language.builtin: connect is refused there too,
+// since a built-in language's Go driver builds its own Launch by hand
+// (drivers/dotnet, unlike drivers/generic) and never consumes
+// adapter.transport, so a manifest offering connect would validate but be
+// silently ignored or misrun.
+func validateTransport(a Adapter, builtin bool) error {
 	switch {
 	case a.Transport != "" && a.Transport != TransportStdio && a.Transport != TransportConnect:
 		return fieldError("adapter.transport", "%q must be stdio or connect (\"\" for stdio)", a.Transport)
 	case a.Transport == TransportConnect && a.Runtime != RuntimeNative:
 		return fieldError("adapter.transport", "connect is only for a native adapter")
+	case a.Transport == TransportConnect && builtin:
+		return fieldError("adapter.transport", "connect is not supported for a built-in language's driver")
 	}
 
 	return checkAdapterArgs(a)
