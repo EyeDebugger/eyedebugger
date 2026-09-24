@@ -1,0 +1,242 @@
+// Copyright The EyeDebugger Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package e2e
+
+import (
+	"bufio"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/eyedebugger/eyedebugger/drivers/dotnet"
+	"github.com/eyedebugger/eyedebugger/internal/adapters"
+	"github.com/eyedebugger/eyedebugger/internal/dap/daptest"
+)
+
+// envE2E gates the real-adapter cases, as in drivers/generic and
+// drivers/dotnet (docs/CONVENTIONS.md § Testing).
+const envE2E = "EYEDBG_E2E"
+
+// langCase is one language's script data: what to start, where the
+// anchor/run-until/logpoint locations are, and expressions whose values
+// and side-effect status are known ahead of time.
+type langCase struct {
+	name string
+	lang string
+	// require skips t unless this case can run here.
+	require func(t *testing.T)
+	// startArgs are the 'eyedbg start' flags naming the program (e.g.
+	// --program or --project).
+	startArgs func(t *testing.T) []string
+	file      string
+	anchor    int // the breakpoint 'eyedbg start' sets
+	target    int // run-until's location
+	// okExpr evaluates without side effects to okValue at the target line.
+	okExpr, okValue string
+	// sideEffectExpr is flagged as SIDE_EFFECTS at the target line.
+	sideEffectExpr string
+	// logExpr is a logpoint expression at the anchor line, once re-added
+	// with --log; its value need not be predictable, only present.
+	logExpr string
+	// attachSupported skips the attach step (dotnet: M5's e2e covers it).
+	attachSupported bool
+}
+
+// langCases returns every language case; each decides for itself whether
+// it can run (fake always can; python/dotnet need EYEDBG_E2E=1 and, for
+// dotnet, a supported platform).
+func langCases(t *testing.T) []langCase {
+	t.Helper()
+
+	return []langCase{fakeCase(t), pythonCase(t), dotnetCase(t)}
+}
+
+// fakeCase is always on: the fake adapter is this test binary
+// (daptest.MaybeRun, main_test.go).
+func fakeCase(t *testing.T) langCase {
+	t.Helper()
+
+	dir := t.TempDir()
+	program := filepath.Join(dir, "prog.fake")
+
+	if err := os.WriteFile(program, []byte("fake program\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return langCase{
+		name:    "fake",
+		lang:    "fakelang",
+		require: func(*testing.T) {},
+		startArgs: func(*testing.T) []string {
+			// laps=2: a plain 1..10 pass never revisits the anchor line, so
+			// the logpoint step (marker3 reuses it) would never fire.
+			return []string{"--program", program, "--opt", "laps=2"}
+		},
+		file: program, anchor: 3, target: 6,
+		okExpr: "line", okValue: "6",
+		sideEffectExpr: "x = 5",
+		logExpr:        "x",
+	}
+}
+
+// pythonCase needs EYEDBG_E2E=1 (a real Python with debugpy); its script
+// positions come from testdata/apps/python/basic/app.py's own markers. Its
+// require closure skips before the script ever reads anchor/target/file, so
+// the app is copied and its markers scanned only when EYEDBG_E2E=1: without
+// it there is no app.py to scan.
+func pythonCase(t *testing.T) langCase {
+	t.Helper()
+
+	lc := langCase{
+		name: "python",
+		lang: "python",
+		require: func(t *testing.T) {
+			t.Helper()
+
+			if os.Getenv(envE2E) != "1" {
+				t.Skip("set " + envE2E + "=1 (needs Python 3.10+ with debugpy, or 'eyedbg adapters install debugpy')")
+			}
+		},
+		okExpr: "total", okValue: "10",
+		sideEffectExpr:  "total = 5",
+		logExpr:         "total",
+		attachSupported: false,
+	}
+
+	if os.Getenv(envE2E) != "1" {
+		return lc
+	}
+
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "..", "testdata", "apps", "python", "basic"))); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = os.RemoveAll(filepath.Join(dir, "__pycache__"))
+
+	file := filepath.Join(dir, "app.py")
+	lc.file = file
+	lc.anchor = markerLine(t, file, "loop-body")
+	lc.target = markerLine(t, file, "append")
+	lc.startArgs = func(*testing.T) []string { return []string{"--program", file} }
+
+	return lc
+}
+
+// dotnetCase needs EYEDBG_E2E=1 and a platform netcoredbg has a download
+// for (D7); testdata/apps/dotnet/console/Program.cs has no markers, so its
+// lines are literal.
+func dotnetCase(t *testing.T) langCase {
+	t.Helper()
+
+	dir := t.TempDir()
+
+	if os.Getenv(envE2E) == "1" {
+		if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "..", "testdata", "apps", "dotnet", "console"))); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	file := filepath.Join(dir, "Program.cs")
+
+	return langCase{
+		name: "dotnet",
+		lang: "dotnet",
+		require: func(t *testing.T) {
+			t.Helper()
+			requireDotnetE2E(t)
+		},
+		startArgs: func(*testing.T) []string {
+			return []string{"--project", dir}
+		},
+		file: file, anchor: 5, target: 6,
+		okExpr: "total", okValue: "1",
+		sideEffectExpr:  "total = 5",
+		logExpr:         "total",
+		attachSupported: true,
+	}
+}
+
+// requireDotnetE2E skips t unless EYEDBG_E2E=1 and netcoredbg's bundled
+// manifest has a download for this platform (D7, drivers/dotnet's
+// dotnetE2ESkip; duplicated here since that helper is unexported in a
+// _test.go file of another package).
+func requireDotnetE2E(t *testing.T) {
+	t.Helper()
+
+	if os.Getenv(envE2E) != "1" {
+		t.Skip("set " + envE2E + "=1 (needs the .NET SDK and 'eyedbg adapters install netcoredbg')")
+	}
+
+	reg := adapters.Load(adapters.LoadConfig{Bundled: adapters.Bundled(), Builtin: []string{dotnet.Language}})
+
+	m := reg.Language(dotnet.Language)
+	if m == nil || m.Install == nil {
+		t.Fatal("no bundled netcoredbg manifest for dotnet (or it has no install section)")
+	}
+
+	if _, found := m.Install.Downloads[runtime.GOOS+"/"+runtime.GOARCH]; !found {
+		t.Skipf("netcoredbg has no download for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+}
+
+// markerLine returns the line of file that ends in "# marker: NAME"
+// (testdata/apps/python/basic/app.py's convention; duplicated from
+// drivers/generic's unexported pyApp.line).
+func markerLine(t *testing.T, file, marker string) int {
+	t.Helper()
+
+	f, err := os.Open(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	for n := 1; sc.Scan(); n++ {
+		if strings.HasSuffix(strings.TrimSpace(sc.Text()), "# marker: "+marker) {
+			return n
+		}
+	}
+
+	t.Fatalf("no marker %q in %s", marker, file)
+
+	return 0
+}
+
+// fakeManifestFiles writes the fakelang user manifest (this test binary as
+// the adapter, EnvFakeAdapter=1; see main_test.go) into dir/adapters,
+// created private (M7 D4's trust check on Unix): dir must not exist yet.
+func fakeManifestFiles(t *testing.T, configDir string) {
+	t.Helper()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Under umask 002 t.TempDir's directories are group-writable, which the
+	// manifest permission check refuses; both the config dir and its
+	// adapters/ subdirectory must be private.
+	if err := os.Chmod(configDir, 0o700); err != nil { //nolint:gosec // A directory needs its x bit; 0700 is private.
+		t.Fatal(err)
+	}
+
+	dir := filepath.Join(configDir, "adapters")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := json.Marshal(daptest.UserManifest(exe, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "fakelang.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
