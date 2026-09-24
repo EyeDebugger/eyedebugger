@@ -275,8 +275,6 @@ func TestSkillInvocationResolution(t *testing.T) {
 		{name: "args after -- ignored", snippet: "`eyedbg start dotnet --project P -- --weird`"},
 	}
 
-	root := rootFactories()["eyedbg"]()
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -295,7 +293,8 @@ func TestSkillInvocationResolution(t *testing.T) {
 				t.Fatalf("skillInvocations(%q) = %v, want exactly one", tt.snippet, invocations)
 			}
 
-			err := resolveInvocation(root, invocations[0])
+			// cobra's Find merges flags into the tree: one root per subtest.
+			err := resolveInvocation(rootFactories()["eyedbg"](), invocations[0])
 			if (err != nil) != tt.wantErr {
 				t.Errorf("resolveInvocation(%v) err = %v, want error = %v", invocations[0], err, tt.wantErr)
 			}
