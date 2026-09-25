@@ -55,9 +55,10 @@ For example:
 - The terminal output on the page follows what `eyedbg` really prints (`internal/cli/testdata/*.golden`
   and the commands' help). When an output format changes, update the page with it.
 - Only code is monospace; everything else is RznSans.
-- RznSans comes from our font CDN at a pinned revision (`rznsans/v1.004`, the highest in the
-  `fonts` bucket when this page was written). To move to a newer one, change the version in the
-  three `cdn.fonts.izzat.dev` URLs in `<head>` together.
+- RznSans comes from our font CDN's `rznsans/latest`, which RznType's deploy script overwrites
+  with every release: a new release reaches the site once the CDN's cache expires (4 hours), with
+  no change here. Don't pin a `v<rev>`, and don't preload the `.woff2` files: the stylesheet's
+  font URLs carry the release in `?v=`, so a preload would stop matching after the next one.
 
 ## Deployment
 
