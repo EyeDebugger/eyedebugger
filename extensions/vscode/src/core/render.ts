@@ -54,12 +54,29 @@ function cutLine(s: string): string {
   return chars.length > maxEventLine ? `${chars.slice(0, maxEventLine).join('')}…` : s;
 }
 
-/** location is file:line, relative to base when under it. */
+/** A Windows path: a drive (C:\ or C:/) or UNC (\\server) path. */
+const windowsPath = /^(?:[A-Za-z]:[\\/]|\\\\)/;
+
+/** Folds a Windows path for comparison: case-insensitive, either separator. */
+function foldWindows(p: string): string {
+  return p.replaceAll('/', '\\').toLowerCase();
+}
+
+/**
+ * location is file:line, relative to base when under it. Under a Windows
+ * base, the comparison ignores case and the separator: VS Code's
+ * workspaceFolder.uri.fsPath has a lower-case drive letter (c:\…) while an
+ * adapter reports the path as given (C:\…) or with forward slashes.
+ */
 export function location(file: string, line: number, base: string): string {
   let f = file;
   if (base !== '') {
     const b = base.replace(/[\\/]+$/, '');
-    if (f.startsWith(`${b}/`) || f.startsWith(`${b}\\`)) {
+    const sep = f.charAt(b.length);
+    const inside = windowsPath.test(base)
+      ? (sep === '\\' || sep === '/') && foldWindows(f.slice(0, b.length)) === foldWindows(b)
+      : f.startsWith(`${b}/`) || f.startsWith(`${b}\\`);
+    if (inside) {
       f = f.slice(b.length + 1);
     }
   }
