@@ -12,10 +12,11 @@ Squash only. The default message is "Pull request title and commit details", whi
 
 ## Pinned versions and where to bump them
 
-Dependabot handles action SHAs, `go.mod`, and now the extension's npm dev dependencies
+Dependabot handles action SHAs, `go.mod`, the extension's npm dev dependencies
 (`extensions/vscode`, weekly, grouped, 7-day cooldown) — except `@types/vscode` (must equal
-`engines.vscode`) and semver-major bumps of `@types/node`/`typescript` (ADR 0015). Everything else
-is a manual bump.
+`engines.vscode`) and semver-major bumps of `@types/node`/`typescript` (ADR 0015) — and the .NET
+helper's NuGet packages (`nuget`, `/helpers/dotnet`, weekly, grouped, 7-day cooldown; ADR 0016).
+Everything else is a manual bump.
 
 - Go: the `go.mod` minimum, `ci.yml` `GO_VERSION`, and the test matrix `go` values.
 - golangci-lint and govulncheck: `ci.yml` `env` + `Taskfile.yml` `vars` + CONTRIBUTING/AGENTS
@@ -35,6 +36,14 @@ is a manual bump.
   together.
 - `actions/upload-artifact` and `actions/download-artifact`: pinned by SHA in `ci.yml` and
   `release.yml`; Dependabot bumps these (`github-actions` ecosystem).
+- The .NET helper (ADR 0016): the SDK floor in `helpers/dotnet/global.json` (10.0.x, feature
+  roll-forward); `DOTNET_VERSION` in `ci.yml` **and** `release.yml` `env`; the helper job's extra
+  `8.0.x` (its test floor, the helper's `net8.0`); package versions in
+  `helpers/dotnet/Directory.Packages.props` (Dependabot). A Dependabot PR that fails the locked
+  restore needs its lock files regenerated: `dotnet restore --force-evaluate` in `helpers/dotnet`,
+  commit both `packages.lock.json`. When the set of shipped assemblies changes (a new or dropped
+  transitive package), update `helpers/dotnet/THIRD-PARTY-NOTICES.txt` — CI's notices check fails
+  until it names every shipped `.dll`.
 
 ## CI cost
 
@@ -52,7 +61,9 @@ push/pull_request (its full 6-platform matrix runs on `workflow_dispatch` and th
    release with that CHANGELOG section as its notes, attests their provenance, and attaches the
    extension as `eyedebugger_X.Y.Z_vscode.vsix` (listed in `checksums.txt` and covered by the same
    attestation — `gh attestation verify eyedebugger_X.Y.Z_vscode.vsix -R EyeDebugger/eyedebugger`
-   works for it too). Its last job then calls `publish-extension.yml` (below).
+   works for it too). Every archive carries the .NET side helper under `helpers/dotnet/`, built
+   by release.yml's unprivileged `helper` job and packed by goreleaser, which fails if it's missing.
+   Its last job then calls `publish-extension.yml` (below).
 5. Pre-release tags (`vX.Y.Z-rc.N`, same version format in `package.json`): the VSIX is built and
    attached like any other, but never published to either registry.
 

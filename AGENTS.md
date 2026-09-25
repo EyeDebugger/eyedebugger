@@ -23,11 +23,16 @@ decisions are recorded in `docs/adr/`.
 - `internal/facade/` — the DAP facade: serves an editor's DAP connection (`eyedbg dap`, ADR 0012)
   as session calls under the CLI's rules.
 - `internal/present/` — budgeting, truncation, text/JSON renderers.
-- `internal/proc/` — process owner lookup (attach's same-user check) and process groups (test runs).
+- `internal/proc/` — process owner lookup (attach's and `dotnet`'s same-user check) and process
+  groups (test runs, side helpers).
+- `internal/helper/` — side-helper runner (spawn, hello, one call with notifications, cancel and
+  kill); `internal/helper/helpertest/` is the fake helper (the test binary re-executes itself).
 - `internal/adapters/` — adapter manifests (schema, loader, trust check, templates), installer,
   Python runtime; bundled manifests in `internal/adapters/manifests/` (`docs/adapter-manifests.md`).
 - `drivers/dotnet/` — the .NET driver (Go); `drivers/generic/` — the manifest-only driver (Python).
-- `helpers/dotnet/` — C# side helper (phase 2).
+- `helpers/dotnet/` — the C# side helper run by `eyedbg dotnet …` (ADR 0016): `src/`, `tests/`
+  (xUnit v3), its own `global.json`, `nuget.config`, lock files and `THIRD-PARTY-NOTICES.txt`;
+  `drivers/dotnet/helper.go` finds it and holds its wire types.
 - `skill/eyedbg/SKILL.md` — the agent-facing usage guide, embedded in `eyedbg`; a test keeps it in
   sync with the command tree.
 - `internal/e2e/` — CLI end-to-end tests driving the real `eyedbg`/`eyedbgd` binaries.
@@ -39,8 +44,8 @@ decisions are recorded in `docs/adr/`.
 
 ## Commands
 
-Run `task ci` before finishing: it covers Go and the extension (Node 24 + pnpm); `task ci:go` runs
-the Go checks alone. Individual tasks and their raw equivalents are in `CONTRIBUTING.md`. golangci-lint must be **v2.13.2**; older versions report different issues.
+Run `task ci` before finishing: it covers Go, the extension (Node 24 + pnpm) and the .NET helper
+(the .NET 10 SDK); `task ci:go` runs the Go checks alone. Individual tasks and their raw equivalents are in `CONTRIBUTING.md`. golangci-lint must be **v2.13.2**; older versions report different issues.
 
 ## Rules
 

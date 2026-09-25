@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- xUnit v3 without Microsoft.Testing.Platform (no telemetry); runs as a plain
+         executable ('dotnet run' on this project, see helpers/dotnet/README.md). -->
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net8.0</TargetFramework>
+        <RollForward>LatestMajor</RollForward>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>true</IsTestProject>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="xunit.v3.mtp-off" />
+        <Using Include="Xunit" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../../src/EyeDbg.DotnetHelper/EyeDbg.DotnetHelper.csproj" />
+    </ItemGroup>
+
+</Project>

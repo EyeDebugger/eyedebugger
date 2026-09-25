@@ -14,7 +14,14 @@
   https://taskfile.dev/installation/.
 - **golangci-lint v2.13.2**, installed as a binary
   (https://golangci-lint.run/docs/welcome/install/local/). Older versions report different issues.
-- Optional: goreleaser v2 for `task snapshot` (which also packages the extension: Node and pnpm).
+- Optional: goreleaser v2 for `task snapshot` (which also packages the extension: Node and pnpm,
+  and the .NET helper: the .NET 10 SDK).
+- For the .NET side helper (`helpers/dotnet`, ADR 0016): the .NET 10 SDK (any 10.0.x;
+  `helpers/dotnet/global.json`), and optionally the .NET 8 runtime to run its tests on the floor it
+  supports (`DOTNET_ROLL_FORWARD=Minor`). `task build` builds it into `bin/helpers/dotnet` when
+  `dotnet` is on PATH (else it says it skipped it); `eyedbg dotnet …` needs it there, or
+  `EYEDBG_DOTNET_HELPER` naming its `.dll`. Run every `dotnet` command in `helpers/dotnet`. `task
+  ci` needs the SDK; `task ci:go` doesn't. `task e2e` builds and publishes the helper itself.
 - `task test:race` needs cgo and a C compiler (on Windows, MinGW-w64 gcc).
 - For `task e2e`: the .NET 10 SDK and `eyedbg adapters install netcoredbg`; Python 3.10+ and
   `eyedbg adapters install debugpy`; a C/C++ compiler (`cc`/`c++`), rustc, and lldb-dap (on PATH,
@@ -34,7 +41,7 @@
 
 | Task | Raw equivalent |
 |---|---|
-| `task build` | `go build -o bin/ ./cmd/...` |
+| `task build` | `go build -o bin/ ./cmd/...`, then `task helper:build` when `dotnet` is found |
 | `task test` | `go test -shuffle=on ./...` |
 | `task test:race` | `go test -race -shuffle=on ./...` |
 | `task test:golden` | `EYEDBG_UPDATE_GOLDEN=1 go test ./...` |
@@ -54,8 +61,16 @@
 | `task ext:package` | `pnpm --dir extensions/vscode run package` (VSIX in `extensions/vscode/out/`) |
 | `task ext:test:integration` | `EYEDBG_TEST_COUNT=1 pnpm --dir extensions/vscode run test:integration` |
 | `task ext:ci` | the extension checks CI runs, without the integration tests |
+| `task helper:restore` | in `helpers/dotnet`: `dotnet restore --locked-mode` |
+| `task helper:build` | in `helpers/dotnet`: `dotnet publish src/EyeDbg.DotnetHelper/EyeDbg.DotnetHelper.csproj -c Release -p:RestoreLockedMode=true -o ../../bin/helpers/dotnet` |
+| `task helper:dist` | the same into `helpers/dotnet/artifacts/dist` (for goreleaser) |
+| `task helper:test` | in `helpers/dotnet`: `dotnet run --project tests/EyeDbg.DotnetHelper.Tests -c Release` |
+| `task helper:fmt` | in `helpers/dotnet`: `dotnet format` |
+| `task helper:lint` | in `helpers/dotnet`: `dotnet format --verify-no-changes`, `dotnet build -c Release --no-restore` |
+| `task helper:vuln` | in `helpers/dotnet`: `dotnet restore --locked-mode --force -p:EyeDbgNuGetAudit=true` |
+| `task helper:ci` | the helper checks CI runs (restore, lint, test, vuln) |
 | `task ci:go` | the Go checks CI runs |
-| `task ci` | runs the checks CI runs (`ci:go` and `ext:ci`) |
+| `task ci` | runs the checks CI runs (`ci:go`, `ext:ci` and `helper:ci`) |
 
 A change to `drivers/...` or `internal/e2e` needs a clean `task e2e COUNT=5` run before it merges —
 these tests spawn real processes and daemons, so run them repeatedly to catch flakes a single pass

@@ -1,7 +1,10 @@
 # GoReleaser v2 configuration. Docs: https://goreleaser.com/customization/
 # Releases run from .github/workflows/release.yml, on a pushed tag. The VS Code
 # extension's VSIX must be built first (`task ext:package`) so extra_files below
-# find it; use `goreleaser release --snapshot --clean` (or `task snapshot`) for a
+# find it, and the .NET side helper (`task helper:dist`, into
+# helpers/dotnet/artifacts/dist) so every archive carries it: without that
+# directory goreleaser fails rather than ship archives lacking the helper. Use
+# `task snapshot` (or those two, then `goreleaser release --snapshot --clean`) for a
 # local dry run.
 version: 2
 
@@ -46,6 +49,10 @@ archives:
       - NOTICE
       - README.md
       - CHANGELOG.md
+      # The .NET side helper, built by release.yml's `helper` job. No glob
+      # characters: a missing directory is an error, not a silently empty match.
+      - src: helpers/dotnet/artifacts/dist
+        dst: helpers/dotnet
 
 checksum:
   name_template: checksums.txt

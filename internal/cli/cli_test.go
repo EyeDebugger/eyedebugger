@@ -404,6 +404,12 @@ func TestExitCodeClasses(t *testing.T) {
 		{api.NewError(api.CodeAttachFailed, "", ""), exitEnvironment},
 		{api.NewError(api.CodeNoTestHost, "", ""), exitEnvironment},
 		{api.NewError(api.CodeUnsupported, "", ""), exitAdapter},
+		{api.NewError(api.CodeHelperNotFound, "", ""), exitEnvironment},
+		{api.NewError(api.CodeHelperMismatch, "", ""), exitEnvironment},
+		{api.NewError(api.CodeHelperFailed, "", ""), exitAdapter},
+		{api.NewError(api.CodeNotDotnet, "", ""), exitState},
+		{api.NewError(api.CodeDiagnosticsDisabled, "", ""), exitState},
+		{api.NewError(api.CodeDiagnosticsTimeout, "", ""), exitState},
 	}
 
 	for _, tt := range tests {

@@ -1,0 +1,18 @@
+pid 4321 (dotnet), session s-k3f9: System.Runtime, 3 samples over 5s (every 1s)
+  cpu-usage        0.0286% (0.0286–12.35)
+  working-set      50.5 MB (49.25–50.5)
+  alloc-rate       total 6144 B (2048 B/s)
+  exception-count  total 6 (2/s)
+  aa-custom        3
+  zz-custom        1
+note: 2 intervals brought no sample (the process was paused or busy)
+note: the process exited during the collection
+pid 4321 (api?[2J): System.Runtime, 2 samples over 5s (every 1s)
+  cpu-usage        1% (0.5–1)
+  working-set      49.25 MB
+  alloc-rate       total 1024 B (1024 B/s)
+  exception-count  total 2 (2/s)
+  aa-custom        3
+  evil?]0;x?       total 1 B?[2J (1 B?[2J/s)
+  zz-custom        1
+note: 3 intervals brought no sample (the process was paused or busy)

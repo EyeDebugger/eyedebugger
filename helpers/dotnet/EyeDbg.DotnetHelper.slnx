@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EyeDbg.DotnetHelper/EyeDbg.DotnetHelper.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EyeDbg.DotnetHelper.Tests/EyeDbg.DotnetHelper.Tests.csproj" />
+  </Folder>
+</Solution>

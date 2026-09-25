@@ -44,13 +44,20 @@ func isolate(t *testing.T) daemon.Paths {
 func serveInProcess(t *testing.T, p daemon.Paths) {
 	t.Helper()
 
+	serveWithDrivers(t, p, fakeDriver{})
+}
+
+// serveWithDrivers runs a daemon with drivers until the test ends.
+func serveWithDrivers(t *testing.T, p daemon.Paths, drivers ...session.Driver) {
+	t.Helper()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 
 	go func() {
 		done <- daemon.Serve(ctx, daemon.Config{
 			Paths: p, IdleTimeout: time.Hour, Info: testInfo, Logger: slog.New(slog.DiscardHandler),
-			Drivers: []session.Driver{fakeDriver{}},
+			Drivers: drivers,
 		})
 	}()
 

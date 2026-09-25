@@ -46,3 +46,18 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: typescript # 7 is the native port; ADR 0015 chose 6
         update-types: ["version-update:semver-major"]
+
+  # The .NET side helper's NuGet packages (Directory.Packages.props, lock files).
+  # A PR that fails the locked restore: docs/MAINTAINING.md § Pinned versions.
+  - package-ecosystem: nuget
+    directory: /helpers/dotnet
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      dotnet-helper:
+        patterns: ["*"]

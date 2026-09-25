@@ -12,11 +12,15 @@ import (
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/dap/daptest"
+	"github.com/eyedebugger/eyedebugger/internal/helper/helpertest"
 	"github.com/eyedebugger/eyedebugger/internal/session"
 )
 
-// TestMain lets the test binary double as the fake DAP adapter.
+// TestMain lets the test binary double as the fake DAP adapter and the
+// fake .NET side helper.
 func TestMain(m *testing.M) {
+	helpertest.MaybeRun()
+
 	if daptest.MaybeRun() {
 		return
 	}
