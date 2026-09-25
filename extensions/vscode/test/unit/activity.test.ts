@@ -59,6 +59,36 @@ test('another client step lands on its stop, and a hinted stop is revealed', () 
   assert.deepEqual(entry.location, { path: '/w/app.py', line: 13 });
 });
 
+test('win32: a step is shown relative to the workspace folder whatever the drive letter case and separators', () => {
+  // VS Code's workspaceFolder.uri.fsPath has a lower-case drive letter; the
+  // adapter reports the path as the program was given (upper case), or with
+  // forward slashes.
+  const base = 'c:\\Users\\me\\ws';
+  for (const [path, want] of [
+    ['C:\\Users\\me\\ws\\app.py', 'app.py'],
+    ['c:\\users\\ME\\WS\\app.py', 'app.py'],
+    ['C:/Users/me/ws/app.py', 'app.py'],
+    ['C:\\Users\\me\\ws\\sub\\app.py', 'sub\\app.py'],
+    ['C:\\Users\\me\\ws2\\app.py', 'C:\\Users\\me\\ws2\\app.py'],
+    ['D:\\Users\\me\\ws\\app.py', 'D:\\Users\\me\\ws\\app.py'],
+  ] as const) {
+    const log = new ActivityLog();
+    const { entry } = stepTo(log, 'next', path, 23);
+    assert.equal(activityLabel(entry, base), `agent stepped over → ${want}:23`, path);
+    assert.equal(
+      activityLabel(entry, `${base}\\`),
+      `agent stepped over → ${want}:23`,
+      `${path} (base with a separator)`,
+    );
+  }
+  const bp = { id: 2, file: 'C:\\Users\\me\\ws\\app.py', line: 15, requestedLine: 15, owner: 'agent', verified: true };
+  const e = new ActivityLog().add(ev({ kind: 'breakpoint', client: 'agent', action: 'added', breakpoint: bp }), '');
+  assert.equal(activityLabel(e, base), 'bp 2 added by agent: app.py:15');
+  // POSIX paths stay case-sensitive.
+  const { entry } = stepTo(new ActivityLog(), 'next', '/W/app.py', 3);
+  assert.equal(activityLabel(entry, '/w'), 'agent stepped over → /W/app.py:3');
+});
+
 test('an unhinted stop gets its location but is not revealed', () => {
   const log = new ActivityLog();
   const { entry, update } = stepTo(log, 'continue', '/w/app.py', 20, false, 'breakpoint');
