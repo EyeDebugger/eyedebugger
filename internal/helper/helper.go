@@ -186,8 +186,11 @@ func spawn(ctx context.Context, spec Spec) (*Helper, error) {
 			return nil, ctx.Err()
 		}
 
+		// A missing file is fs.ErrNotExist from the start itself, or
+		// exec.ErrNotFound from the lookup exec.Command does first — on
+		// Windows even for a full path, which it tries with each PATHEXT.
 		code := api.CodeHelperFailed
-		if errors.Is(err, fs.ErrNotExist) {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, exec.ErrNotFound) {
 			code = api.CodeHelperNotFound
 		}
 
