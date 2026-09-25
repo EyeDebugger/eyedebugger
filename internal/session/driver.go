@@ -58,6 +58,18 @@ type Launch struct {
 	SideEffects func(expr string) (reason string, found bool)
 	// AttachHint is the hint of an ATTACH_FAILED error.
 	AttachHint string
+
+	// AdapterName names the adapter for status (its manifest's name).
+	AdapterName string
+	// PauseUnsupported, when set, makes the session refuse pause
+	// (UNSUPPORTED_BY_ADAPTER) with it as the hint: for an adapter whose
+	// pause stops the program without reporting the stop, which would
+	// leave the session running as far as it knows.
+	PauseUnsupported string
+	// SetByEval makes set, on an adapter with neither setExpression nor
+	// setVariable, evaluate "VARIABLE = VALUE" in the repl context instead
+	// of refusing: for an adapter whose evaluator runs assignments.
+	SetByEval bool
 }
 
 // Request kinds for [Launch.Request].
@@ -65,6 +77,16 @@ const (
 	RequestLaunch = "launch"
 	RequestAttach = "attach"
 )
+
+// AdapterSelector is a [Driver] that has more than one adapter: the
+// session uses the driver WithAdapter returns for [api.StartParams.Adapter]
+// (docs/DESIGN.md §7's AdapterFor). A driver without it has only its own,
+// and a start naming an adapter is refused.
+type AdapterSelector interface {
+	// WithAdapter returns the driver bound to the adapter named name, or
+	// an *api.Error if it has none by that name.
+	WithAdapter(name string) (Driver, error)
+}
 
 // Attacher is a [Driver] that can attach to a running process.
 type Attacher interface {

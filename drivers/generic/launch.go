@@ -180,7 +180,7 @@ func (d *Driver) adapter(ctx context.Context, opts map[string]any, in adapters.P
 	}
 
 	launch := session.Launch{
-		AdapterEnv: adapters.Environ(m), AdapterID: m.Adapter.ID,
+		AdapterEnv: adapters.Environ(m), AdapterID: m.Adapter.ID, AdapterName: m.Name,
 		ExceptionFilters: exceptionFilters(m), SideEffects: sideEffects(m.EvalGuard),
 	}
 

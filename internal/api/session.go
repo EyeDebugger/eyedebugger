@@ -92,6 +92,10 @@ type StartParams struct {
 	Attach *AttachSpec `json:"attach,omitempty"`
 	// Test debugs a test run of the project (see [TestSpec]).
 	Test *TestSpec `json:"test,omitempty"`
+	// Adapter chooses the debug adapter by name, for a language whose
+	// driver has more than one (dotnet: netcoredbg or sharpdbg); empty
+	// means the driver's default.
+	Adapter string `json:"adapter,omitempty"`
 }
 
 // SessionRef names a session, and the client acting on it.
@@ -134,6 +138,10 @@ type SessionInfo struct {
 	// Mode is how the session got its program: [ModeAttach], [ModeTest],
 	// or empty for a launched one.
 	Mode string `json:"mode,omitempty"`
+	// Adapter names the debug adapter (its manifest's name, e.g.
+	// netcoredbg); empty until a test run's host is attached, and in
+	// records of older daemons.
+	Adapter string `json:"adapter,omitempty"`
 }
 
 // Session modes ([SessionInfo.Mode]).

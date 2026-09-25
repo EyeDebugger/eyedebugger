@@ -207,6 +207,11 @@
                   "none"
                 ],
                 "description": "Which exceptions stop the program for you."
+              },
+              "adapter": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,31}$",
+                "description": "dotnet only: the debug adapter, netcoredbg (the default) or sharpdbg (after 'eyedbg adapters install sharpdbg'; it can't pause). Default: EYEDBG_DOTNET_ADAPTER, else netcoredbg where it has a build."
               }
             }
           }

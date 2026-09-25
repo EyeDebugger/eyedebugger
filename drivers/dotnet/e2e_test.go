@@ -30,11 +30,15 @@ func newApp(t *testing.T) string {
 	return copyApp(t, "console")
 }
 
-// TestDebugConsoleApp drives a real program through netcoredbg: breakpoints,
-// locals, changed locals, expand, eval, stepping, conditional run-until,
-// output and exit.
+// TestDebugConsoleApp drives a real program through each adapter:
+// breakpoints, locals, changed locals, expand, eval, stepping, conditional
+// run-until, output and exit.
 func TestDebugConsoleApp(t *testing.T) {
-	requireE2E(t)
+	forEachAdapter(t, debugConsoleApp)
+}
+
+func debugConsoleApp(t *testing.T, adapter string) {
+	t.Helper()
 
 	dir := newApp(t)
 	src := filepath.Join(dir, "Program.cs")
@@ -46,6 +50,7 @@ func TestDebugConsoleApp(t *testing.T) {
 
 	sess, err := m.Start(t.Context(), agent, api.StartParams{
 		Lang:        "dotnet",
+		Adapter:     adapter,
 		LaunchSpec:  api.LaunchSpec{Project: dir},
 		Breakpoints: []api.BreakpointSpec{{File: src, Line: 5}},
 	})
@@ -60,6 +65,10 @@ func TestDebugConsoleApp(t *testing.T) {
 
 	if snap.Changes == nil || !snap.Changes.NewFrame || changeOf(snap.Changes.Vars, "i") == nil {
 		t.Errorf("first stop changes = %+v, want every local as new", snap.Changes)
+	}
+
+	if got := sess.Info().Adapter; got != adapter {
+		t.Errorf("session adapter = %q, want %s", got, adapter)
 	}
 
 	inspectFirstStop(t, sess)
@@ -87,9 +96,13 @@ func TestDebugConsoleApp(t *testing.T) {
 
 // TestTwoClients shares one real session between an agent and a human:
 // breakpoint ownership, one shared line, the handoff lease and the event
-// log, through netcoredbg.
+// log, through each adapter.
 func TestTwoClients(t *testing.T) {
-	requireE2E(t)
+	forEachAdapter(t, twoClients)
+}
+
+func twoClients(t *testing.T, adapter string) {
+	t.Helper()
 
 	agentE2E := api.Client{ID: "agent:e2e", Kind: api.KindAgent, Name: "e2e"}
 	humanE2E := api.Client{ID: "human:e2e", Kind: api.KindHuman, Name: "e2e"}
@@ -103,7 +116,7 @@ func TestTwoClients(t *testing.T) {
 	defer m.StopAll(t.Context())
 
 	sess, err := m.Start(t.Context(), agentE2E, api.StartParams{
-		Lang: "dotnet", LaunchSpec: api.LaunchSpec{Project: dir}, LeasePolicy: api.LeaseHandoff,
+		Lang: "dotnet", Adapter: adapter, LaunchSpec: api.LaunchSpec{Project: dir}, LeasePolicy: api.LeaseHandoff,
 		Breakpoints: []api.BreakpointSpec{{File: src, Line: 5}},
 	})
 	if err != nil {
@@ -118,9 +131,10 @@ func TestTwoClients(t *testing.T) {
 	h5 := addE2EBreakpoint(t, sess, humanE2E, src, 5)
 	addE2EBreakpoint(t, sess, humanE2E, src, 8)
 
-	for _, b := range sess.Breakpoints("") {
-		if !b.Verified {
-			t.Errorf("breakpoint %+v is not verified", b)
+	bps := sess.Breakpoints("")
+	for i := range bps {
+		if !bps[i].Verified {
+			t.Errorf("breakpoint %+v is not verified", bps[i])
 		}
 	}
 

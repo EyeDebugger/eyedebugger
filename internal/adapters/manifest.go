@@ -21,6 +21,9 @@ const (
 	RuntimeNative = ""
 	// RuntimePython is a Python package run on the user's interpreter.
 	RuntimePython = "python"
+	// RuntimeDotnet is a framework-dependent .NET program (a .dll) run on
+	// the user's dotnet host (docs/adr/0017).
+	RuntimeDotnet = "dotnet"
 )
 
 // Adapter transports (Adapter.Transport).
@@ -61,6 +64,7 @@ type Manifest struct {
 	Version  string       `json:"version"`
 	Adapter  Adapter      `json:"adapter"`
 	Python   *Python      `json:"python,omitempty"`
+	Dotnet   *Dotnet      `json:"dotnet,omitempty"`
 	Install  *InstallSpec `json:"install,omitempty"`
 	Language *Language    `json:"language,omitempty"`
 	// Options are the language's --opt options, by name.
@@ -88,17 +92,18 @@ type Adapter struct {
 	ID string `json:"id"`
 	// Transport is how eyedbg talks to the adapter: "stdio" (or empty).
 	Transport string `json:"transport,omitempty"`
-	// Runtime is RuntimeNative or RuntimePython.
+	// Runtime is RuntimeNative, RuntimePython or RuntimeDotnet.
 	Runtime string `json:"runtime,omitempty"`
 	// Entry is, for a native adapter, an executable name (".exe" is added
 	// on Windows) or an absolute path; for a Python one, a slash path
-	// relative to the package root.
+	// relative to the package root; for a .NET one, a slash path to its
+	// .dll relative to the install directory.
 	Entry string   `json:"entry"`
 	Args  []string `json:"args,omitempty"`
 	// Environment is added to the adapter's environment.
 	Environment map[string]string `json:"environment,omitempty"`
-	// Env names an environment variable pointing at the executable
-	// (native only).
+	// Env names an environment variable pointing at the executable (native)
+	// or at the .dll (.NET).
 	Env string `json:"env,omitempty"`
 	// Path also looks Entry up on PATH (native only).
 	Path bool `json:"path,omitempty"`
@@ -124,6 +129,13 @@ type Python struct {
 	MinVersion string `json:"minVersion,omitempty"`
 	// Module is the import name of the package holding Adapter.Entry.
 	Module string `json:"module"`
+}
+
+// Dotnet is what a .NET-hosted adapter needs from the dotnet host.
+type Dotnet struct {
+	// MinRuntime ("X.Y") is the oldest Microsoft.NETCore.App the adapter
+	// runs on.
+	MinRuntime string `json:"minRuntime"`
 }
 
 // InstallSpec lists the downloadable builds, by "os/arch" or "*".

@@ -6,7 +6,9 @@ package cli
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/eyedebugger/eyedebugger/internal/adapters"
@@ -31,25 +33,37 @@ func fakeDoctor(loc adapters.Location, findErr error, host string, broken map[st
 
 			return host, nil
 		},
-		probe: func(_ context.Context, exe string, _ ...string) (string, error) {
-			if broken[exe] {
+		probe: func(_ context.Context, exe string, args ...string) (string, error) {
+			if broken[exe] || (len(args) > 0 && broken[args[0]]) {
 				return "", errors.New("exit status 1")
 			}
 
-			if exe == host {
+			switch {
+			case exe == host && len(args) > 0 && strings.HasSuffix(args[0], ".dll"):
+				return "SharpDbg - .NET Core Debugger\n\nOptions:\n", nil
+			case exe == host:
 				return "10.0.100\n", nil
+			default:
+				return "NET Core debugger 3.2.0-1092 (x)\n\nCopyright\n", nil
 			}
-
-			return "NET Core debugger 3.2.0-1092 (x)\n\nCopyright\n", nil
 		},
 		resolvePython: func(context.Context, *adapters.Manifest, adapters.PythonInput) (adapters.Runtime, error) {
 			return rt, pyErr
 		},
+		resolveDotnet: func(context.Context, *adapters.Manifest) (adapters.DotnetRuntime, error) {
+			return adapters.DotnetRuntime{}, errSharpdbgMissing
+		},
+		defaultAdapter: func(context.Context, *adapters.Registry) (string, error) { return "netcoredbg", nil },
 	}
 }
 
+// errSharpdbgMissing is ResolveDotnet's error for SharpDbg not installed.
+var errSharpdbgMissing = errors.Join(api.NewError(api.CodeAdapterMissing, "sharpdbg is not installed",
+	"run 'eyedbg adapters install sharpdbg' (downloads sharpdbg 0.1.17 once)"), adapters.ErrNotInstalled)
+
 // TestDoctorNetcoredbgTexts pins netcoredbg's and the dotnet host's
-// doctor lines to what eyedbg printed before manifests.
+// doctor lines to what eyedbg printed before manifests ('doctor dotnet'
+// printed them alone then; TestDoctorDotnet has what it adds now).
 func TestDoctorNetcoredbgTexts(t *testing.T) {
 	t.Parallel()
 
@@ -83,7 +97,7 @@ func TestDoctorNetcoredbgTexts(t *testing.T) {
 			t.Parallel()
 
 			// Named: a missing adapter is a problem, as before manifests.
-			got, err := tt.d.run(t.Context(), bundledRegistry(), []string{"dotnet"})
+			got, err := tt.d.run(t.Context(), bundledRegistry(), []string{"netcoredbg"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -186,12 +200,122 @@ func TestDoctorAll(t *testing.T) {
 		}
 	}
 
-	want := []string{"netcoredbg", "dotnet", "debugpy", "delve", "lldb-dap-c", "lldb-dap-cpp", "lldb-dap-rust"}
+	want := []string{"netcoredbg", "dotnet", "sharpdbg", "debugpy", "delve", "lldb-dap-c", "lldb-dap-cpp", "lldb-dap-rust"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("checks = %v, want %v", names, want)
 	}
 
 	if _, err := d.run(t.Context(), bundledRegistry(), []string{"cobol"}); err == nil {
 		t.Fatal("doctor cobol: want an unknown adapter error")
+	}
+}
+
+// sharpdbgFound is ResolveDotnet's answer for an installed SharpDbg.
+func sharpdbgFound() adapters.DotnetRuntime {
+	return adapters.DotnetRuntime{
+		Host: "/usr/bin/dotnet", Entry: "/t/sharpdbg/0.1.17/SharpDbg.Cli.dll", Source: adapters.FoundInstalled, Runtime: "10.0.10",
+	}
+}
+
+// TestDoctorDotnet covers 'doctor dotnet': SharpDbg is checked when it is
+// installed or netcoredbg isn't usable, one usable adapter is enough, and a
+// last line says which adapter sessions use.
+func TestDoctorDotnet(t *testing.T) {
+	t.Parallel()
+
+	const ncd, host = "/d/netcoredbg", "/usr/bin/dotnet"
+
+	var (
+		ncdOK      = doctorCheck{Name: "netcoredbg", OK: true, Detail: "NET Core debugger 3.2.0-1092 (x) (installed, /d/netcoredbg)"}
+		ncdMissing = doctorCheck{Name: "netcoredbg", Detail: "not found", Fix: "run 'eyedbg adapters install netcoredbg' or set EYEDBG_NETCOREDBG", Missing: true}
+		hostOK     = doctorCheck{Name: "dotnet", OK: true, Detail: "SDK 10.0.100 (/usr/bin/dotnet)"}
+		sharpOK    = doctorCheck{
+			Name: "sharpdbg", OK: true,
+			Detail: "SharpDbg - .NET Core Debugger (installed, /t/sharpdbg/0.1.17/SharpDbg.Cli.dll) on .NET 10.0.10 (/usr/bin/dotnet)",
+		}
+		sharpMissing = doctorCheck{Name: "sharpdbg", Detail: errSharpdbgMissing.Error(), Fix: "run 'eyedbg adapters install sharpdbg' (downloads sharpdbg 0.1.17 once)"}
+		tooOld       = api.NewError(api.CodeAdapterMissing, "sharpdbg 0.1.17 needs the .NET 10.0+ runtime", "install the .NET 10.0 runtime")
+		defaultNcd   = doctorCheck{Name: "dotnet adapter", OK: true, Detail: "sessions use netcoredbg by default (--adapter or EYEDBG_DOTNET_ADAPTER chooses another)"}
+	)
+
+	tests := []struct {
+		name       string
+		ncdErr     error
+		sharp      adapters.DotnetRuntime
+		sharpErr   error
+		broken     map[string]bool
+		def        string // the driver's default ("" fails)
+		env        string // EYEDBG_DOTNET_ADAPTER
+		want       []doctorCheck
+		wantFailed bool // a check is a problem
+	}{
+		{"netcoredbg only", nil, adapters.DotnetRuntime{}, errSharpdbgMissing, nil, "netcoredbg", "", []doctorCheck{ncdOK, hostOK, defaultNcd}, false},
+		{"both", nil, sharpdbgFound(), nil, nil, "netcoredbg", "", []doctorCheck{ncdOK, hostOK, sharpOK, defaultNcd}, false},
+		{"sharpdbg only, its default here", adapters.ErrNotInstalled, sharpdbgFound(), nil, nil, "sharpdbg", "", []doctorCheck{
+			ncdMissing, hostOK, sharpOK,
+			{Name: "dotnet adapter", OK: true, Detail: "sessions use sharpdbg by default (--adapter or EYEDBG_DOTNET_ADAPTER chooses another)"},
+		}, false},
+		{"sharpdbg only, not the default here", adapters.ErrNotInstalled, sharpdbgFound(), nil, nil, "", "", []doctorCheck{
+			ncdMissing, hostOK, sharpOK,
+			{
+				Name: "dotnet adapter", Missing: true, Detail: "the default adapter can't run here: netcoredbg is not installed",
+				Fix: "start with --adapter sharpdbg, or set EYEDBG_DOTNET_ADAPTER=sharpdbg",
+			},
+		}, false},
+		{"neither", adapters.ErrNotInstalled, adapters.DotnetRuntime{}, errSharpdbgMissing, nil, "", "", []doctorCheck{
+			{Name: "netcoredbg", Detail: "not found", Fix: "run 'eyedbg adapters install netcoredbg' or set EYEDBG_NETCOREDBG"},
+			hostOK, sharpMissing,
+		}, true},
+		{"sharpdbg broken", nil, adapters.DotnetRuntime{}, tooOld, nil, "netcoredbg", "", []doctorCheck{
+			ncdOK, hostOK, {Name: "sharpdbg", Detail: tooOld.Error(), Fix: "install the .NET 10.0 runtime"}, defaultNcd,
+		}, true},
+		{"sharpdbg does not run", nil, sharpdbgFound(), nil, map[string]bool{"/t/sharpdbg/0.1.17/SharpDbg.Cli.dll": true}, "netcoredbg", "", []doctorCheck{
+			ncdOK, hostOK,
+			{
+				Name: "sharpdbg", Detail: "/t/sharpdbg/0.1.17/SharpDbg.Cli.dll does not run on /usr/bin/dotnet: exit status 1",
+				Fix: "reinstall it: delete " + filepath.Dir(sharpdbgFound().Entry) + ", then 'eyedbg adapters install sharpdbg'",
+			},
+			defaultNcd,
+		}, true},
+		{"EYEDBG_DOTNET_ADAPTER", nil, sharpdbgFound(), nil, nil, "netcoredbg", "sharpdbg", []doctorCheck{
+			ncdOK, hostOK, sharpOK, {Name: "dotnet adapter", OK: true, Detail: "sessions use sharpdbg (EYEDBG_DOTNET_ADAPTER)"},
+		}, false},
+		{"EYEDBG_DOTNET_ADAPTER unusable", nil, adapters.DotnetRuntime{}, errSharpdbgMissing, nil, "netcoredbg", "sharpdbg", []doctorCheck{
+			ncdOK, hostOK,
+			{Name: "dotnet adapter", Detail: "EYEDBG_DOTNET_ADAPTER=sharpdbg chooses an adapter that isn't usable here", Fix: "unset it, or set it to netcoredbg"},
+		}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := fakeDoctor(adapters.Location{Path: ncd, Source: "installed"}, tt.ncdErr, host, tt.broken, adapters.Runtime{}, nil)
+			d.resolveDotnet = func(context.Context, *adapters.Manifest) (adapters.DotnetRuntime, error) {
+				return tt.sharp, tt.sharpErr
+			}
+			d.defaultAdapter = func(context.Context, *adapters.Registry) (string, error) {
+				if tt.def == "" {
+					return "", errors.New("netcoredbg is not installed\n(more)")
+				}
+
+				return tt.def, nil
+			}
+			d.dotnetAdapter = tt.env
+
+			got, err := d.run(t.Context(), bundledRegistry(), []string{"dotnet"})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("checks:\n%+v\nwant\n%+v", got, tt.want)
+			}
+
+			failed := slices.ContainsFunc(got, func(c doctorCheck) bool { return !c.OK && !c.Missing })
+			if failed != tt.wantFailed {
+				t.Errorf("a problem = %v, want %v", failed, tt.wantFailed)
+			}
+		})
 	}
 }

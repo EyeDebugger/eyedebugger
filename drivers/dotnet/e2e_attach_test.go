@@ -17,9 +17,13 @@ import (
 )
 
 // TestAttach attaches to a running program, changes it, detaches, and
-// checks it ran on with the change.
+// checks it ran on with the change, through each adapter.
 func TestAttach(t *testing.T) {
-	requireE2E(t)
+	forEachAdapter(t, attach)
+}
+
+func attach(t *testing.T, adapter string) {
+	t.Helper()
 
 	dir := copyApp(t, "breadth")
 	src := filepath.Join(dir, "Program.cs")
@@ -57,7 +61,7 @@ func TestAttach(t *testing.T) {
 	m := newManager(t)
 
 	sess, err := m.Start(t.Context(), agent, api.StartParams{
-		Lang: "dotnet", Attach: &api.AttachSpec{PID: pid},
+		Lang: "dotnet", Adapter: adapter, Attach: &api.AttachSpec{PID: pid},
 		Breakpoints: []api.BreakpointSpec{{File: src, Anchor: "ticks++;"}},
 	})
 	if err != nil {
@@ -66,8 +70,8 @@ func TestAttach(t *testing.T) {
 
 	expectStop(t, sess.Wait(t.Context(), 0, e2eWait, api.DumpSpec{}), "breakpoint", lineOf(t, src, "wait-tick"))
 
-	if info := sess.Info(); info.Mode != api.ModeAttach || info.PID != pid {
-		t.Errorf("info = %+v, want attached to %d", info, pid)
+	if info := sess.Info(); info.Mode != api.ModeAttach || info.PID != pid || info.Adapter != adapter {
+		t.Errorf("info = %+v, want attached to %d with %s", info, pid, adapter)
 	}
 
 	t.Logf("ticks when stopped: %s", e2eEval(t, sess, "ticks"))

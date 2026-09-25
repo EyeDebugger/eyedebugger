@@ -131,8 +131,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   active eyedbg debug session, a session or a process from `eyedbg dotnet ps` (**EyeDebugger:
   Choose .NET Target…**); every operation cancellable; dumps and traces stay in eyedbg's private
   directory. The extension's API gains `dotnet()` and the four trees in `views()`.
+- SharpDbg as dotnet's alternative adapter (P2-M10, ADR 0017): `eyedbg adapters install sharpdbg`
+  fetches SharpDbg.Cli 0.1.17 from nuget.org (pinned, SHA-256 and size checked; opt-in, never
+  shipped with eyedbg: it bundles a Microsoft-licensed DAP library, not open source — see `eyedbg
+  help adapters install`), run on your `dotnet` with the .NET 10+ runtime. `start`, `attach` and
+  `test` take `--adapter netcoredbg|sharpdbg` (else `EYEDBG_DOTNET_ADAPTER`); where netcoredbg has
+  no build (Intel Macs, Windows on Arm) an installed SharpDbg is the default. Under SharpDbg, eval
+  runs lambdas and LINQ and shows `[DebuggerDisplay]` values, `set` evaluates the assignment, and
+  pause is refused (`UNSUPPORTED_BY_ADAPTER`: SharpDbg stops the program without saying where).
+  Adapter manifests gain `adapter.runtime: "dotnet"` and a `dotnet.minRuntime` block; `adapters
+  doctor dotnet` checks both adapters (one usable is enough) and says which one sessions use;
+  `adapters ls` shows `for: dotnet (--adapter sharpdbg)` (`alternateFor` in `--json`). The VS Code
+  extension's launch configuration takes `"adapter"` (it needs an eyedbg with `adapter.select`).
+- `version --json` lists the feature `adapter.select`; sessions report their adapter
+  (`SessionInfo.adapter` in `--json`).
 
 ### Changed
+
+- `eyedbg sessions` has an `ADAPTER` column after `LANG` ("-" for a lost session of an older
+  daemon), and the first line of a stop snapshot names it: `session s-k3f9 (dotnet, netcoredbg)
+  stopped: …`.
 
 - The .NET helper ships ClrMD 4.1 (`Microsoft.Diagnostics.Runtime`) and its dependencies — among
   them Azure.Core, Azure.Identity and MSAL, which it never uses (ClrMD's symbol server, which the

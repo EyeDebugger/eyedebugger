@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "name": "sharpdbg",
+  "description": ".NET debugger by MattParkerDev (MIT; bundles a Microsoft-licensed DAP library); needs .NET 10+",
+  "homepage": "https://github.com/MattParkerDev/sharpdbg",
+  "license": "MIT (bundles Microsoft.VisualStudio.Shared.VSCodeDebugProtocol under Microsoft Software License Terms)",
+  "version": "0.1.17",
+  "adapter": {
+    "id": "coreclr",
+    "transport": "stdio",
+    "runtime": "dotnet",
+    "entry": "SharpDbg.Cli.dll",
+    "args": ["--interpreter=vscode"],
+    "env": "EYEDBG_SHARPDBG"
+  },
+  "dotnet": {"minRuntime": "10.0"},
+  "install": {
+    "downloads": {
+      "*": {
+        "url": "https://api.nuget.org/v3-flatcontainer/sharpdbg.cli/0.1.17/sharpdbg.cli.0.1.17.nupkg",
+        "sha256": "549fe48fd42dd00af1ab923c2a9d617502dddd1b6461c6dbdbd641561e961309",
+        "size": 7951923,
+        "archive": "zip",
+        "root": "tools/net10.0/any"
+      }
+    }
+  }
+}

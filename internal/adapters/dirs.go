@@ -67,7 +67,7 @@ func InstallDir(m *Manifest) (string, error) {
 
 // installedEntry is the path of m's entry inside its install directory.
 func installedEntry(m *Manifest, dir string) string {
-	if m.Adapter.Runtime == RuntimePython {
+	if m.Adapter.Runtime == RuntimePython || m.Adapter.Runtime == RuntimeDotnet {
 		return filepath.Join(dir, filepath.FromSlash(m.Adapter.Entry))
 	}
 

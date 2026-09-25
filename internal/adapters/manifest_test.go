@@ -289,3 +289,96 @@ func TestOptionParse(t *testing.T) {
 		}
 	}
 }
+
+// validDotnetManifest returns a valid manifest of a .NET-hosted adapter
+// with no language (sharpdbg's shape) as JSON-shaped data.
+func validDotnetManifest() map[string]any {
+	return map[string]any{
+		"schema": 1, "name": "toydbg", "description": "A toy .NET adapter", "version": "0.1.0",
+		"adapter": map[string]any{
+			"id": "coreclr", "transport": "stdio", "runtime": "dotnet", "entry": "Toy.Cli.dll",
+			"args": []any{"--interpreter=vscode"}, "env": "EYEDBG_TOYDBG",
+		},
+		"dotnet": map[string]any{"minRuntime": "10.0"},
+		"install": map[string]any{"downloads": map[string]any{"*": map[string]any{
+			"url": "https://example.com/toy.nupkg", "sha256": strings.Repeat("ab", 32), "archive": "zip",
+			"root": "tools/net10.0/any", "size": 10,
+		}}},
+	}
+}
+
+// TestParseDotnet covers the dotnet runtime: what a .NET-hosted adapter
+// must, may and must not have.
+func TestParseDotnet(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		change func(m map[string]any)
+		want   string // "" for valid
+	}{
+		{"valid", func(map[string]any) {}, ""},
+		{"entry in a subdirectory", func(m map[string]any) { at(m, "adapter")["entry"] = "bin/Toy.Cli.dll" }, ""},
+		{"upper-case .DLL", func(m map[string]any) { at(m, "adapter")["entry"] = "TOY.CLI.DLL" }, ""},
+		{"no env", func(m map[string]any) { delete(at(m, "adapter"), "env") }, ""},
+		{"built-in language", func(m map[string]any) {
+			m["language"] = map[string]any{"name": "dotnet", "builtin": true}
+		}, ""},
+		{"entry not a dll", func(m map[string]any) { at(m, "adapter")["entry"] = "Toy.Cli" }, "must be the adapter's .dll"},
+		{"entry an exe", func(m map[string]any) { at(m, "adapter")["entry"] = "Toy.Cli.exe" }, "must be the adapter's .dll"},
+		{"absolute entry", func(m map[string]any) { at(m, "adapter")["entry"] = "/opt/Toy.Cli.dll" }, "adapter.entry:"},
+		{"entry with ..", func(m map[string]any) { at(m, "adapter")["entry"] = "../Toy.Cli.dll" }, "adapter.entry:"},
+		{"entry with backslash", func(m map[string]any) { at(m, "adapter")["entry"] = `bin\Toy.Cli.dll` }, "adapter.entry:"},
+		{"entry with a drive", func(m map[string]any) { at(m, "adapter")["entry"] = "C:Toy.Cli.dll" }, "adapter.entry:"},
+		{"path", func(m map[string]any) { at(m, "adapter")["path"] = true }, "only for native adapters"},
+		{"versionArgs", func(m map[string]any) { at(m, "adapter")["versionArgs"] = []any{"--version"} }, "only for native adapters"},
+		{"bad env", func(m map[string]any) { at(m, "adapter")["env"] = "toy" }, "adapter.env:"},
+		{"no dotnet block", func(m map[string]any) { delete(m, "dotnet") }, "dotnet: is required"},
+		{"dotnet block on python", func(m map[string]any) {
+			at(m, "adapter")["runtime"] = "python"
+			at(m, "adapter")["entry"] = "toy/adapter"
+			delete(at(m, "adapter"), "env")
+			m["python"] = map[string]any{"commands": []any{[]any{"python3"}}, "module": "toy"}
+		}, "dotnet: is only for adapter.runtime dotnet"},
+		{"dotnet block on native", func(m map[string]any) {
+			at(m, "adapter")["runtime"] = ""
+			at(m, "adapter")["entry"] = "toy"
+		}, "dotnet: is only for adapter.runtime dotnet"},
+		{"missing minRuntime", func(m map[string]any) { at(m, "dotnet")["minRuntime"] = "" }, "dotnet.minRuntime:"},
+		{"bad minRuntime", func(m map[string]any) { at(m, "dotnet")["minRuntime"] = "10" }, "dotnet.minRuntime:"},
+		{"unknown dotnet field", func(m map[string]any) { at(m, "dotnet")["sdk"] = "10.0" }, `unknown field "sdk"`},
+		{"generic language", func(m map[string]any) {
+			m["language"] = map[string]any{"name": "fsx", "extensions": []any{".fsx"}}
+			m["launch"] = map[string]any{"require": []any{"program"}, "arguments": map[string]any{"program": "${program}"}}
+		}, "dotnet is only for an adapter the .NET driver runs"},
+		{"connect", func(m map[string]any) {
+			at(m, "adapter")["transport"] = "connect"
+			at(m, "adapter")["args"] = []any{"--socket=${socket}"}
+		}, "connect is only for a native adapter"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := validDotnetManifest()
+			tt.change(m)
+
+			raw, err := json.Marshal(m)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := Parse(raw)
+
+			switch {
+			case tt.want == "" && err != nil:
+				t.Fatalf("Parse = %v, want no error", err)
+			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)):
+				t.Fatalf("Parse = %v, want an error containing %q", err, tt.want)
+			case tt.want == "" && got.Adapter.Runtime != RuntimeDotnet:
+				t.Fatalf("runtime = %q, want dotnet", got.Adapter.Runtime)
+			}
+		})
+	}
+}

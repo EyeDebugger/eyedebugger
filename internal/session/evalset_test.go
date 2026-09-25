@@ -106,25 +106,34 @@ func TestSet(t *testing.T) {
 	t.Parallel()
 
 	setVariableOnly := &godap.Capabilities{SupportsConfigurationDoneRequest: true, SupportsSetVariable: true}
+	neither := &godap.Capabilities{SupportsConfigurationDoneRequest: true}
 
 	tests := []struct {
 		name string
 		caps *godap.Capabilities
 		// result: setVariable answers "result", not "value" (lldb-dap 18-20).
 		result bool
+		// byEval is the driver's Launch.SetByEval.
+		byEval bool
 		code   api.Code
 	}{
 		{name: "setExpression"},
 		{name: "setVariable", caps: setVariableOnly},
 		{name: "setVariable answering result", caps: setVariableOnly, result: true},
-		{name: "neither", caps: &godap.Capabilities{SupportsConfigurationDoneRequest: true}, code: api.CodeUnsupported},
+		{name: "neither", caps: neither, code: api.CodeUnsupported},
+		// The fake answers "x = 5" only in the repl context.
+		{name: "neither, by evaluate", caps: neither, byEval: true},
+		// SetByEval is a fallback: setExpression and setVariable still win
+		// (the fake's evaluate would also work, so the adapter's answer
+		// shows which ran: setVariableResult only changes setVariable's).
+		{name: "setVariable despite byEval", caps: setVariableOnly, result: true, byEval: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			drv := fakeDriver{opts: daptest.Options{Caps: tt.caps, SetVariableResult: tt.result}}
+			drv := fakeDriver{opts: daptest.Options{Caps: tt.caps, SetVariableResult: tt.result}, knobs: Launch{SetByEval: tt.byEval}}
 			s := start(t, newTestManagerWith(t, nil, drv), agentC, api.StartParams{LaunchSpec: api.LaunchSpec{StopOnEntry: true}})
 
 			// Stop twice, so a changed local diffs against a previous stop.
@@ -171,5 +180,87 @@ func checkAfterSet(t *testing.T, s *Session) {
 	last := eventsOf(s, api.EventExec)
 	if e := last[len(last)-1]; e.Action != ExecSet || e.Text != "line" {
 		t.Errorf("exec event = %+v, want set line", e)
+	}
+}
+
+// TestSetByEvaluate checks set's evaluate fallback: the assignment it sends
+// (in the repl context, as an execution request) and the paths it refuses
+// before sending anything.
+func TestSetByEvaluate(t *testing.T) {
+	t.Parallel()
+
+	drv := fakeDriver{opts: daptest.Options{Caps: &godap.Capabilities{SupportsConfigurationDoneRequest: true}}, knobs: Launch{SetByEval: true}}
+	s := start(t, newTestManagerWith(t, nil, drv), agentC, api.StartParams{LaunchSpec: api.LaunchSpec{StopOnEntry: true}})
+
+	res, err := s.Set(t.Context(), agentC, api.SetParams{Variable: "x", Value: "7"})
+	if err != nil || res.Value != "7" || res.Type != "int" || res.Variable != "x" {
+		t.Fatalf("set x 7 = %+v, %v", res, err)
+	}
+
+	last := eventsOf(s, api.EventExec)
+	if e := last[len(last)-1]; e.Action != ExecSet || e.Text != "x" || e.Client != agentC.ID {
+		t.Errorf("exec event = %+v, want agent's set x", e)
+	}
+
+	// The fake's evaluate refuses a non-integer for x: the adapter's error.
+	if _, err := s.Set(t.Context(), agentC, api.SetParams{Variable: "x", Value: "abc"}); api.CodeOf(err) != api.CodeAdapterFailed {
+		t.Errorf("set x abc = %v, want the adapter's refusal", err)
+	}
+
+	execs := len(eventsOf(s, api.EventExec))
+
+	for _, path := range []string{"Foo()", "a[Foo()]", "a.b()", `d["k\\"]`, `d["a" + b]`, "a[i]", "1x", "a b"} {
+		_, err := s.Set(t.Context(), agentC, api.SetParams{Variable: path, Value: "1"})
+		expectCode(t, err, api.CodeInvalidRequest)
+	}
+
+	if n := len(eventsOf(s, api.EventExec)); n != execs {
+		t.Errorf("refused paths logged %d exec events", n-execs)
+	}
+
+	if got := evalValue(t, s, "x"); got != "7" {
+		t.Errorf("x = %s after the refused sets, want 7", got)
+	}
+}
+
+func TestCheckAssignable(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		path string
+		ok   bool
+	}{
+		{"x", true},
+		{"_x1", true},
+		{"@class", true},
+		{"größe", true},
+		{"order.Items[0].Name", true},
+		{"a[-1]", true},
+		{`d["key"]`, true},
+		{`d["a b.c"]`, true},
+		{"this.total", true},
+		{"Foo()", false},
+		{"a[Foo()]", false},
+		{"a[i]", false},
+		{`d["a" + b]`, false},
+		{`d["a\\"]`, false},
+		{`d["a\nb"]`, false},
+		{"1x", false},
+		{"a-b", false},
+		{"@", false},
+		{`d[""]`, true},
+		{`d["]`, false},
+		{"a[]", false},
+	}
+
+	for _, tt := range tests {
+		segs, err := splitPath(tt.path)
+		if err == nil {
+			err = checkAssignable(segs)
+		}
+
+		if (err == nil) != tt.ok {
+			t.Errorf("checkAssignable(%q) = %v, want ok %v", tt.path, err, tt.ok)
+		}
 	}
 }

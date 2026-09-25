@@ -31,7 +31,8 @@ decisions are recorded in `docs/adr/`.
   `<EYEDBG_HOME>/traces`, 0700/0600): fresh names, pruning (7 days, newest 10; stale trace-summary
   scratch files after 1 h), `--out` placement that never overwrites.
 - `internal/adapters/` — adapter manifests (schema, loader, trust check, templates), installer,
-  Python runtime; bundled manifests in `internal/adapters/manifests/` (`docs/adapter-manifests.md`).
+  Python and .NET runtimes; bundled manifests in `internal/adapters/manifests/`
+  (`docs/adapter-manifests.md`).
 - `drivers/dotnet/` — the .NET driver (Go); `drivers/generic/` — the manifest-only driver (Python).
 - `helpers/dotnet/` — the C# side helper run by `eyedbg dotnet …` (ADR 0016): `src/`, `tests/`
   (xUnit v3), its own `global.json`, `nuget.config`, lock files and `THIRD-PARTY-NOTICES.txt`;

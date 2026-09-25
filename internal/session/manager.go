@@ -127,6 +127,10 @@ func (m *Manager) Start(ctx context.Context, c api.Client, p api.StartParams) (*
 		return nil, err
 	}
 
+	if drv, err = withAdapter(drv, p); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
 
@@ -143,6 +147,22 @@ func (m *Manager) Start(ctx context.Context, c api.Client, p api.StartParams) (*
 	}
 
 	return m.run(ctx, m.create(ctx, c, p, policy, launch, ""), launch, p.Breakpoints)
+}
+
+// withAdapter is drv bound to the adapter p names (drv itself when p names
+// none): before anything is built or run, so a wrong name fails fast.
+func withAdapter(drv Driver, p api.StartParams) (Driver, error) {
+	if p.Adapter == "" {
+		return drv, nil
+	}
+
+	sel, ok := drv.(AdapterSelector)
+	if !ok {
+		return nil, api.NewError(api.CodeInvalidRequest, "--adapter "+p.Adapter+": "+p.Lang+" has only its own adapter",
+			"drop --adapter (see 'eyedbg adapters ls' for each language's adapter)")
+	}
+
+	return sel.WithAdapter(p.Adapter)
 }
 
 // create makes a session and starts its recording and event log.

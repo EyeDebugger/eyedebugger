@@ -10,6 +10,8 @@ import { isRecord, type LeasePolicy, leasePolicies } from './protocol';
 export const sessionIdPattern = /^s-[a-z0-9]{1,32}$/;
 const langPattern = /^[a-z][a-z0-9_+-]{0,31}$/;
 const optKeyPattern = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+/** An adapter manifest's name (internal/adapters: namePattern). */
+const adapterPattern = /^[a-z][a-z0-9-]{0,31}$/;
 
 export type ExceptionMode = 'all' | 'uncaught' | 'none';
 export const exceptionModes: readonly ExceptionMode[] = ['all', 'uncaught', 'none'];
@@ -27,6 +29,8 @@ export interface LaunchSpec {
   noBuild: boolean;
   leasePolicy?: LeasePolicy;
   exceptions?: ExceptionMode;
+  /** The debug adapter, for a language with a choice (dotnet: netcoredbg or sharpdbg). */
+  adapter?: string;
 }
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -175,6 +179,16 @@ export function validateLaunch(cfg: Record<string, unknown>): Result<LaunchSpec>
       return fail(`"exceptions" must be all, uncaught or none, not ${describe(exceptions)}`);
     }
     spec.exceptions = e;
+  }
+
+  const adapter = cfg.adapter;
+  if (adapter !== undefined && adapter !== null && adapter !== '') {
+    if (typeof adapter !== 'string' || !adapterPattern.test(adapter)) {
+      return fail(
+        `"adapter" must name a debug adapter such as netcoredbg or sharpdbg (see 'eyedbg adapters ls'), not ${describe(adapter)}`,
+      );
+    }
+    spec.adapter = adapter;
   }
 
   if (spec.noBuild && spec.program === undefined) {

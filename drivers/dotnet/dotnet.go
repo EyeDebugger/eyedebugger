@@ -33,31 +33,107 @@ const (
 // Language is the language name the .NET driver serves.
 const Language = lang
 
-// Driver debugs .NET programs with netcoredbg (docs/DESIGN.md §8), as
-// described by the adapter manifest serving dotnet.
+// SharpDbg is the name of the .NET driver's alternative adapter's manifest
+// (internal/adapters/manifests/sharpdbg.json; docs/adr/0017).
+const SharpDbg = "sharpdbg"
+
+// sharpdbgPauseHint is the hint of a pause refused under SharpDbg, whose
+// pause (0.1.17) stops the program without a stopped event.
+const sharpdbgPauseHint = "set a breakpoint and continue to it, or see where the threads are without stopping them with " +
+	"'eyedbg dotnet threads'; where netcoredbg has a build, start with --adapter netcoredbg to pause"
+
+// Driver debugs .NET programs (docs/DESIGN.md §8) with the adapter manifest
+// serving dotnet (netcoredbg) or, chosen with --adapter or by default where
+// netcoredbg has no build, SharpDbg's.
 type Driver struct {
-	m *adapters.Manifest
+	// m serves dotnet; sharp is the manifest named SharpDbg (nil: none).
+	m, sharp *adapters.Manifest
+	// pick is the adapter WithAdapter chose ("": the default).
+	pick string
+	env  driverEnv
 }
 
-// New returns the .NET driver with the manifest the default registry
-// (bundled and user manifests) has for dotnet.
-func New() *Driver { return NewWith(adapters.Default(lang).Language(lang)) }
+// driverEnv is what choosing and finding the adapter reads from the
+// system; tests replace it.
+type driverEnv struct {
+	goos, goarch  string
+	find          func(m *adapters.Manifest) (adapters.Location, error)
+	resolveDotnet func(ctx context.Context, m *adapters.Manifest) (adapters.DotnetRuntime, error)
+}
 
-// NewWith returns the .NET driver for adapter manifest m (nil: none, so
-// every start fails with ADAPTER_NOT_INSTALLED).
-func NewWith(m *adapters.Manifest) *Driver { return &Driver{m: m} }
+func systemDriverEnv() driverEnv {
+	return driverEnv{goos: runtime.GOOS, goarch: runtime.GOARCH, find: adapters.Find, resolveDotnet: adapters.ResolveDotnet}
+}
+
+// New returns the .NET driver with the manifests of the default registry
+// (bundled and user manifests).
+func New() *Driver { return NewFrom(adapters.Default(lang)) }
+
+// NewFrom returns the .NET driver with reg's manifest serving dotnet and
+// its manifest named SharpDbg.
+func NewFrom(reg *adapters.Registry) *Driver {
+	return &Driver{m: reg.Language(lang), sharp: reg.Adapter(SharpDbg), env: systemDriverEnv()}
+}
+
+// NewWith returns the .NET driver for adapter manifest m alone (nil: none,
+// so every start fails with ADAPTER_NOT_INSTALLED).
+func NewWith(m *adapters.Manifest) *Driver { return &Driver{m: m, env: systemDriverEnv()} }
 
 // Name implements session.Driver.
 func (*Driver) Name() string { return lang }
 
+// WithAdapter implements session.AdapterSelector: the driver bound to the
+// adapter named name, the manifest serving dotnet or SharpDbg's.
+func (d *Driver) WithAdapter(name string) (session.Driver, error) {
+	if d.manifest(name) == nil {
+		names := d.adapterNames()
+		if len(names) == 0 {
+			names = []string{"none"}
+		}
+
+		return nil, api.NewError(api.CodeInvalidRequest,
+			"dotnet has no adapter "+name+" (its adapters: "+strings.Join(names, ", ")+")",
+			"fix --adapter, or EYEDBG_DOTNET_ADAPTER if it chose it (see 'eyedbg adapters ls')")
+	}
+
+	c := *d
+	c.pick = name
+
+	return &c, nil
+}
+
+// manifest is the driver's manifest named name, or nil.
+func (d *Driver) manifest(name string) *adapters.Manifest {
+	for _, m := range []*adapters.Manifest{d.m, d.sharp} {
+		if m != nil && m.Name == name {
+			return m
+		}
+	}
+
+	return nil
+}
+
+// adapterNames are the names --adapter takes.
+func (d *Driver) adapterNames() []string {
+	var names []string
+
+	for _, m := range []*adapters.Manifest{d.m, d.sharp} {
+		if m != nil && !slices.Contains(names, m.Name) {
+			names = append(names, m.Name)
+		}
+	}
+
+	return names
+}
+
 // Prepare implements session.Driver: it builds the project (unless a program
-// is given) and launches the result under netcoredbg via the dotnet host.
+// is given) and launches the result under the adapter via the dotnet host.
 func (d *Driver) Prepare(ctx context.Context, spec session.LaunchSpec) (session.Launch, error) {
 	if len(spec.Options) > 0 {
 		return session.Launch{}, api.NewError(api.CodeInvalidRequest, "dotnet takes no --opt options", "see 'eyedbg help start'")
 	}
 
-	launch, err := d.netcoredbg()
+	launch, err := d.adapterLaunch(ctx)
 	if err != nil {
 		return session.Launch{}, err
 	}
@@ -101,42 +177,150 @@ func (d *Driver) Prepare(ctx context.Context, spec session.LaunchSpec) (session.
 	return launch, nil
 }
 
-// netcoredbg returns the Launch fields every netcoredbg session shares,
-// from the manifest.
-func (d *Driver) netcoredbg() (session.Launch, error) {
-	m := d.m
+// Adapter returns the name of the adapter a session of d would use (the
+// chosen one, else the default here), or why none can run.
+func (d *Driver) Adapter(ctx context.Context) (string, error) {
+	launch, err := d.adapterLaunch(ctx)
 
-	switch {
-	case m == nil:
+	return launch.AdapterName, err
+}
+
+// adapterLaunch returns the Launch fields every session with the chosen
+// adapter shares: the one WithAdapter picked, else SharpDbg where it is the
+// default (autoDefault), else the manifest serving dotnet.
+func (d *Driver) adapterLaunch(ctx context.Context) (session.Launch, error) {
+	if d.pick != "" {
+		return d.launchWith(ctx, d.manifest(d.pick))
+	}
+
+	if launch, ok, err := d.autoDefault(ctx); ok {
+		return launch, err
+	}
+
+	if d.m == nil {
 		return session.Launch{}, api.NewError(api.CodeAdapterMissing, "no adapter manifest serves dotnet",
 			"see 'eyedbg adapters ls': a user manifest may have replaced netcoredbg's or failed to load")
-	case m.Adapter.Runtime != adapters.RuntimeNative:
-		return session.Launch{}, api.NewError(api.CodeAdapterMissing,
-			"the dotnet adapter manifest "+m.Name+" is not a native executable", "see 'eyedbg adapters ls'")
 	}
 
-	dbg, err := adapters.Find(m)
+	return d.launchWith(ctx, d.m)
+}
+
+// autoDefault chooses SharpDbg when it is the only adapter that can run
+// here: netcoredbg (the manifest serving dotnet, native) has no build for
+// this platform and is not otherwise found (EYEDBG_NETCOREDBG, installed,
+// PATH), SharpDbg is installed (nothing is ever downloaded unasked), and CI
+// has not withheld the platform (sharpdbgWithheld). ok reports whether it
+// chose SharpDbg: then err is SharpDbg's failure, if any (it is installed,
+// but can't run).
+func (d *Driver) autoDefault(ctx context.Context) (launch session.Launch, ok bool, err error) {
+	if d.m == nil || d.sharp == nil || d.m == d.sharp || d.m.Adapter.Runtime != adapters.RuntimeNative {
+		return session.Launch{}, false, nil
+	}
+
+	if _, has := d.m.DownloadFor(d.env.goos, d.env.goarch); has || d.withheld() != "" {
+		return session.Launch{}, false, nil
+	}
+
+	if _, err := d.env.find(d.m); !errors.Is(err, adapters.ErrNotInstalled) {
+		return session.Launch{}, false, nil // found, or broken: netcoredbg's own path says so
+	}
+
+	launch, err = d.launchWith(ctx, d.sharp)
 	if errors.Is(err, adapters.ErrNotInstalled) {
-		return session.Launch{}, api.NewError(api.CodeAdapterMissing, m.Name+" is not installed", installHint(m))
+		return session.Launch{}, false, nil
 	}
 
-	if err != nil {
-		return session.Launch{}, err
+	return launch, true, err
+}
+
+// withheld is why this platform doesn't default to an installed SharpDbg
+// ("" when it does).
+func (d *Driver) withheld() string {
+	return SharpDbgWithheld(d.env.goos + "/" + d.env.goarch)
+}
+
+// SharpDbgWithheld says why sessions on platform ("os/arch") don't default
+// to an installed SharpDbg although netcoredbg has no build there: CI's
+// SharpDbg e2e fails there (--adapter sharpdbg still chooses it, unverified).
+// It is "" everywhere while CI passes on both platforms without a
+// netcoredbg build (darwin/amd64, windows/arm64; docs/adr/0017).
+func SharpDbgWithheld(platform string) string {
+	withheld := map[string]string{}
+
+	return withheld[platform]
+}
+
+// launchWith returns the Launch fields every session with adapter m shares:
+// its process (a native executable, or a .dll on the dotnet host), and the
+// .NET settings, with SharpDbg's own (docs/adr/0017).
+func (d *Driver) launchWith(ctx context.Context, m *adapters.Manifest) (session.Launch, error) {
+	var launch session.Launch
+
+	switch m.Adapter.Runtime {
+	case adapters.RuntimeNative:
+		dbg, err := d.env.find(m)
+		if errors.Is(err, adapters.ErrNotInstalled) {
+			return session.Launch{}, api.NewError(api.CodeAdapterMissing, m.Name+" is not installed", d.installHint(m))
+		}
+
+		if err != nil {
+			return session.Launch{}, err
+		}
+
+		launch.Adapter, launch.AdapterArgs = dbg.Path, slices.Clone(m.Adapter.Args)
+	case adapters.RuntimeDotnet:
+		rt, err := d.env.resolveDotnet(ctx, m)
+		if err != nil {
+			return session.Launch{}, err
+		}
+
+		launch.Adapter, launch.AdapterArgs = rt.Host, append([]string{rt.Entry}, m.Adapter.Args...)
+	default:
+		return session.Launch{}, api.NewError(api.CodeAdapterMissing,
+			"the dotnet adapter manifest "+m.Name+" runs on "+m.Adapter.Runtime+", which the .NET driver can't start",
+			"see 'eyedbg adapters ls'")
 	}
 
-	return session.Launch{
-		Adapter:     dbg.Path,
-		AdapterArgs: slices.Clone(m.Adapter.Args),
-		AdapterEnv:  adapters.Environ(m),
-		AdapterID:   m.Adapter.ID,
-		// netcoredbg's exception filters (docs/adr/0010).
-		ExceptionFilters: map[api.ExceptionMode][]string{
-			api.ExceptionsAll:      {"all"},
-			api.ExceptionsUncaught: {"user-unhandled"},
-		},
-		SideEffects: SideEffects,
-		AttachHint:  attachHint,
-	}, nil
+	launch.AdapterEnv = adapters.Environ(m)
+	launch.AdapterID = m.Adapter.ID
+	launch.AdapterName = m.Name
+	// Both adapters' exception filters (docs/adr/0010, 0017).
+	launch.ExceptionFilters = map[api.ExceptionMode][]string{
+		api.ExceptionsAll:      {"all"},
+		api.ExceptionsUncaught: {"user-unhandled"},
+	}
+	launch.SideEffects = SideEffects
+	launch.AttachHint = attachHint
+
+	if m.Name == SharpDbg {
+		launch.PauseUnsupported = sharpdbgPauseHint
+		launch.SetByEval = true
+	}
+
+	return launch, nil
+}
+
+// installHint says how to get native adapter m: "run 'eyedbg adapters
+// install netcoredbg', or set EYEDBG_NETCOREDBG to an existing
+// netcoredbg"; where it has no build, SharpDbg first.
+func (d *Driver) installHint(m *adapters.Manifest) string {
+	hint := installHint(m)
+	if _, has := m.DownloadFor(d.env.goos, d.env.goarch); has || m != d.m || d.sharp == nil || d.sharp == m {
+		return hint
+	}
+
+	platform := d.env.goos + "/" + d.env.goarch
+	if m.Adapter.Env != "" {
+		hint = "set " + m.Adapter.Env + " to your own " + m.Adapter.Entry + " build"
+	}
+
+	if reason := d.withheld(); reason != "" {
+		return m.Name + " has no build for " + platform + ": run 'eyedbg adapters install " + d.sharp.Name + "' and start with --adapter " +
+			d.sharp.Name + " (not verified here: " + reason + "), or " + hint
+	}
+
+	return m.Name + " has no build for " + platform + ": run 'eyedbg adapters install " + d.sharp.Name +
+		"' (sessions here then use it unless --adapter or EYEDBG_DOTNET_ADAPTER picks " + m.Name + "), or " + hint
 }
 
 // installHint says how to get m's adapter: "run 'eyedbg adapters install
@@ -159,9 +343,9 @@ func installHint(m *adapters.Manifest) string {
 	return strings.Join(ways, ", or ")
 }
 
-// launchArguments builds netcoredbg's launch request. netcoredbg starts
-// "program" as a process: a .dll runs through the dotnet host, an apphost
-// executable runs directly.
+// launchArguments builds the launch request (netcoredbg's; SharpDbg takes
+// the same). The adapter starts "program" as a process: a .dll runs through
+// the dotnet host, an apphost executable runs directly.
 func launchArguments(host, program, cwd string, spec session.LaunchSpec) map[string]any {
 	exe, args := host, append([]string{program}, spec.Args...)
 	if !strings.EqualFold(filepath.Ext(program), ".dll") {
@@ -260,39 +444,8 @@ func build(ctx context.Context, host, project string) (string, error) {
 }
 
 // FindHost locates the dotnet host: $DOTNET_HOST_PATH, PATH, $DOTNET_ROOT,
-// then ~/.dotnet.
-func FindHost() (string, error) {
-	name := "dotnet"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-
-	if p := os.Getenv("DOTNET_HOST_PATH"); p != "" {
-		return p, nil
-	}
-
-	if p, err := exec.LookPath(name); err == nil {
-		return p, nil
-	}
-
-	var candidates []string
-	if root := os.Getenv("DOTNET_ROOT"); root != "" {
-		candidates = append(candidates, filepath.Join(root, name))
-	}
-
-	if home, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(home, ".dotnet", name))
-	}
-
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil { //nolint:gosec // Candidates come from the user's environment and home.
-			return c, nil
-		}
-	}
-
-	return "", api.NewError(api.CodeAdapterMissing, "the dotnet host was not found",
-		"install the .NET SDK, or put dotnet on PATH / set DOTNET_ROOT for the daemon (restart it with 'eyedbg daemon stop')")
-}
+// then ~/.dotnet (adapters.FindDotnetHost).
+func FindHost() (string, error) { return adapters.FindDotnetHost() }
 
 // withoutResultJSON drops the leading -getProperty/-getTargetResult JSON
 // document from dotnet build's output, keeping the diagnostics after it.

@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -247,4 +248,61 @@ func TestExtractRejectsEscapes(t *testing.T) {
 	if err := extractZip(archive, filepath.Join(dir, "out")); err == nil || !strings.Contains(err.Error(), "escapes") {
 		t.Fatalf("extractZip(../evil) = %v, want an escape error", err)
 	}
+}
+
+// TestInstallNupkg installs a zip shaped like SharpDbg's nupkg (NuGet's
+// package files around tools/net10.0/any): only the root subtree lands, with
+// the .dll entry and its native runtimes, and nothing else is left behind.
+func TestInstallNupkg(t *testing.T) {
+	t.Parallel()
+
+	body := zipOf(t,
+		archiveFile{"_rels/.rels", "rels"},
+		archiveFile{"SharpDbg.Cli.nuspec", "nuspec"},
+		archiveFile{"tools/net10.0/any/SharpDbg.Cli.dll", "dll"},
+		archiveFile{"tools/net10.0/any/SharpDbg.Cli.runtimeconfig.json", "{}"},
+		archiveFile{"tools/net10.0/any/runtimes/osx-x64/native/libdbgshim.dylib", "shim"},
+		archiveFile{"[Content_Types].xml", "types"},
+		archiveFile{"package/services/metadata/core-properties/x.psmdcp", "props"},
+		archiveFile{".signature.p7s", "sig"},
+	)
+	srv, _ := serve(t, body)
+
+	m := &Manifest{
+		Name: "sharpdbg", Version: "0.1.17",
+		Adapter: Adapter{ID: "coreclr", Runtime: RuntimeDotnet, Entry: "SharpDbg.Cli.dll", Env: "EYEDBG_SHARPDBG"},
+		Dotnet:  &Dotnet{MinRuntime: "10.0"},
+		Install: &InstallSpec{Downloads: map[string]Download{"*": {
+			URL: srv.URL + "/sharpdbg.cli.0.1.17.nupkg", SHA256: digest(body), Archive: archiveZip,
+			Root: "tools/net10.0/any", Size: int64(len(body)),
+		}}},
+	}
+
+	dir := filepath.Join(t.TempDir(), m.Name, m.Version)
+
+	got, err := install(t.Context(), srv.Client(), m, "darwin/amd64", dir)
+	if want := filepath.Join(dir, "SharpDbg.Cli.dll"); err != nil || got != want {
+		t.Fatalf("install = %q, %v; want %s", got, err, want)
+	}
+
+	var files []string
+
+	err = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			rel, _ := filepath.Rel(dir, p)
+			files = append(files, filepath.ToSlash(rel))
+		}
+
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"SharpDbg.Cli.dll", "SharpDbg.Cli.runtimeconfig.json", "runtimes/osx-x64/native/libdbgshim.dylib"}
+	if !slices.Equal(files, want) {
+		t.Errorf("installed files = %q, want %q", files, want)
+	}
+
+	checkNoLeftovers(t, filepath.Dir(dir), m.Version)
 }

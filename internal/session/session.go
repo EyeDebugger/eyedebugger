@@ -132,6 +132,13 @@ type Session struct {
 	excInfoStops int
 	// sideEffects is the driver's check of eval expressions (nil: none).
 	sideEffects func(expr string) (string, bool)
+	// adapter names the adapter; pauseUnsupported is the hint of a refused
+	// pause ("" allows pause); setByEval lets set assign by evaluate (all
+	// the driver's Launch settings; a test run's are set once its host is
+	// known).
+	adapter          string
+	pauseUnsupported string
+	setByEval        bool
 	// curStale means cur's values may have changed (set, eval with side
 	// effects): the next capture refetches them.
 	curStale bool
@@ -198,6 +205,10 @@ func newSession(life context.Context, id, lang, mode string, launch Launch, logg
 		changed:     make(chan struct{}),
 		excFilters:  launch.ExceptionFilters,
 		sideEffects: launch.SideEffects,
+
+		adapter:          launch.AdapterName,
+		pauseUnsupported: launch.PauseUnsupported,
+		setByEval:        launch.SetByEval,
 	}
 }
 
@@ -737,6 +748,7 @@ func (s *Session) infoLocked() api.SessionInfo {
 		Clients:   s.clientsLocked(),
 		Recording: s.recPath,
 		Mode:      s.mode,
+		Adapter:   s.adapter,
 	}
 
 	if s.state == api.StateStopped {
@@ -1020,11 +1032,18 @@ func (s *Session) execute(ctx context.Context, r execRequest) (execution, error)
 	return x, nil
 }
 
-// admit checks the state and the lease (taking it when the policy allows)
-// and logs the exec event. It returns the thread to act on.
+// admit checks that the adapter can do it, the state and the lease (taking
+// it when the policy allows) and logs the exec event. It returns the thread
+// to act on.
 func (s *Session) admit(r execRequest) (execution, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if r.kind == ExecPause && s.pauseUnsupported != "" {
+		return execution{}, 0, api.NewError(api.CodeUnsupported,
+			"the "+s.Lang+" debug adapter ("+s.adapter+") can't pause a running program: it stops it without reporting where",
+			s.pauseUnsupported)
+	}
 
 	switch {
 	case r.kind == ExecPause && s.state != api.StateRunning:

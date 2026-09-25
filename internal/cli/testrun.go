@@ -34,7 +34,7 @@ both with the end of the output.
 Only dotnet has test runs. For python, run pytest as a module under 'eyedbg start':
 'eyedbg start python --opt module=pytest --bp tests/test_x.py:8 -- -x tests/test_x.py'.
 
-Breakpoints, exceptions, the lease policy and recording work as for 'eyedbg start'.` + dumpHelp
+Breakpoints, exceptions, the lease policy and recording work as for 'eyedbg start'.` + adapterHelp + dumpHelp
 
 func newTestCommand(info version.Info, g *globals) *cobra.Command {
 	var (
@@ -50,7 +50,8 @@ func newTestCommand(info version.Info, g *globals) *cobra.Command {
 		Long:  testLong,
 		Example: `  eyedbg test dotnet Adds --bp 'CalculatorTests.cs@"Assert.Equal"'
   eyedbg test dotnet --project tests/Api.Tests --exceptions all
-  eyedbg test dotnet 'FullyQualifiedName~Orders' --framework net10.0 --no-build`,
+  eyedbg test dotnet 'FullyQualifiedName~Orders' --framework net10.0 --no-build
+  eyedbg test dotnet Adds --adapter sharpdbg --bp CalculatorTests.cs:13`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if project == "" {

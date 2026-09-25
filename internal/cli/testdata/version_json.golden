@@ -1,1 +1,1 @@
-{"schema":1,"name":"eyedbg","version":"v1.2.3","commit":"0123abcd","date":"2026-09-01T10:00:00Z","goVersion":"go1.26.0","platform":"linux/amd64","protocol":2,"features":["dap","presence","lease.request","dap.collab","dotnet.helper","dotnet.dump","dotnet.trace"]}
+{"schema":1,"name":"eyedbg","version":"v1.2.3","commit":"0123abcd","date":"2026-09-01T10:00:00Z","goVersion":"go1.26.0","platform":"linux/amd64","protocol":2,"features":["dap","presence","lease.request","dap.collab","dotnet.helper","dotnet.dump","dotnet.trace","adapter.select"]}

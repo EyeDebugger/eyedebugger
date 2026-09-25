@@ -33,8 +33,13 @@ const hostPIDPrefix = "Process Id: "
 
 // TestCommand implements session.Tester: 'dotnet test' in Debug with
 // VSTest's host debugging on, so the test host prints its process id and
-// waits for a debugger (VSTEST_DEBUG_NOBP: without breaking into it).
-func (*Driver) TestCommand(_ context.Context, spec session.TestSpec) (session.TestCommand, error) {
+// waits for a debugger (VSTEST_DEBUG_NOBP: without breaking into it). The
+// adapter is checked first: a missing one fails before the build.
+func (d *Driver) TestCommand(ctx context.Context, spec session.TestSpec) (session.TestCommand, error) {
+	if _, err := d.adapterLaunch(ctx); err != nil {
+		return session.TestCommand{}, err
+	}
+
 	host, err := FindHost()
 	if err != nil {
 		return session.TestCommand{}, err

@@ -43,7 +43,8 @@
 // terminateDebuggee=true|false|unset" first. Capabilities default to
 // [DefaultCaps]; [CommandWith] passes other [Options].
 //
-// evaluate knows "line", "lap", "x", "obj" (with members a and b), the
+// evaluate knows "line", "lap", "x", "obj" (with members a and b), "x =
+// VALUE" in the repl context (it sets x, answering its new value), the
 // conditions above (as "true" or "false"), "$context" (the request's
 // context), "$bps" (the program file's breakpoints, e.g. "3,5 if
 // false,9"), "$fbps" (the function breakpoints) and "$filters" (the

@@ -5,9 +5,12 @@ that needs no Go code, how to launch programs with it. The decision and its trus
 [ADR 0011](adr/0011-declarative-adapter-manifests-and-their-trust-model.md); this page is the field
 reference for manifest authors.
 
-eyedbg ships six, all served entirely by their manifest except netcoredbg (a Go driver in
-`drivers/dotnet`) and delve (the connect transport below, but still no Go driver):
+eyedbg ships seven, all served entirely by their manifest except netcoredbg and sharpdbg (the Go
+driver in `drivers/dotnet` runs them) and delve (the connect transport below, but still no Go
+driver):
 [netcoredbg.json](../internal/adapters/manifests/netcoredbg.json) (dotnet),
+[sharpdbg.json](../internal/adapters/manifests/sharpdbg.json) (no language: dotnet's alternative,
+chosen with `--adapter sharpdbg`; a `dotnet`-runtime adapter, [ADR 0017](adr/0017-sharpdbg-as-an-alternative-dotnet-adapter.md)),
 [debugpy.json](../internal/adapters/manifests/debugpy.json) (python),
 [lldb-dap-c.json](../internal/adapters/manifests/lldb-dap-c.json),
 [lldb-dap-cpp.json](../internal/adapters/manifests/lldb-dap-cpp.json) and
@@ -55,7 +58,9 @@ your shell configuration: whoever can write it can run code as you. eyedbg there
   extracting, extracts into a staging directory and renames it into place, refusing archive
   entries that escape it;
 * probes a Python interpreter with `-c`, after removing the working directory from `sys.path`, and
-  never imports the adapter's package to find it.
+  never imports the adapter's package to find it;
+* checks a `dotnet`-runtime adapter's host with `dotnet --list-runtimes` only (fixed arguments, run
+  in the adapter's own directory; no project code).
 
 ## Fields (schema 1)
 
@@ -72,6 +77,7 @@ being half-read. Top level:
 | `version` | required | `^[0-9A-Za-z._+-]{1,40}$`: the release `adapters install` fetches |
 | `adapter` | required | how the adapter runs (below) |
 | `python` | iff `adapter.runtime` is `python` | interpreter and package (below) |
+| `dotnet` | iff `adapter.runtime` is `dotnet` | the .NET runtime it needs (below) |
 | `install` | | downloads (below) |
 | `language` | | the language it debugs (below) |
 | `options` | | `start --opt` options (generic languages only) |
@@ -87,11 +93,11 @@ being half-read. Top level:
 |---|---|---|
 | `id` | required | the DAP `adapterID` sent in `initialize` |
 | `transport` | | `stdio` (the default) or `connect` (below); native adapters only |
-| `runtime` | | `""` (a native executable) or `python` |
-| `entry` | required | native: an executable name (`.exe` is added on Windows) or an absolute path; python: a slash path relative to the package root, no `..` (debugpy: `debugpy/adapter`) |
+| `runtime` | | `""` (a native executable), `python` or `dotnet` |
+| `entry` | required | native: an executable name (`.exe` is added on Windows) or an absolute path; python: a slash path relative to the package root, no `..` (debugpy: `debugpy/adapter`); dotnet: a slash path to the adapter's `.dll` relative to the install directory, no `..` (sharpdbg: `SharpDbg.Cli.dll`) |
 | `args` | | literal arguments; on `connect`, `${socket}` (below) |
 | `environment` | | `{NAME: value}` added to the adapter's environment |
-| `env` | native | an environment variable naming the executable, e.g. `EYEDBG_NETCOREDBG` |
+| `env` | native, dotnet | an environment variable naming the executable, e.g. `EYEDBG_NETCOREDBG`, or the `.dll` (`EYEDBG_SHARPDBG`) |
 | `path` | native | also look `entry` up on PATH |
 | `versionArgs` | native | arguments that make it print its version, for `adapters doctor` |
 | `notRunningHint` | | doctor's fix when it doesn't run |
@@ -144,6 +150,34 @@ run. Windows has no mode bits to check, so there only your profile directory (`%
 what is inside it count as yours: a project outside it names its interpreter with `--opt python`.
 The package root is the installed copy when it exists and the interpreter meets `minVersion`, else
 the interpreter's own copy of `module`.
+
+`dotnet` (for `runtime: dotnet`; the adapter runs as `dotnet <install dir>/<entry> <args...>` on
+the dotnet host — `DOTNET_HOST_PATH`, else `dotnet` on PATH, else `$DOTNET_ROOT`, else
+`~/.dotnet` — found in the daemon's environment):
+
+| field | | |
+|---|---|---|
+| `minRuntime` | required | `X.Y`: the oldest `Microsoft.NETCore.App` it runs on (`dotnet --list-runtimes` must list one at least this new; a pre-release counts) |
+
+The `.dll` is `env`'s (it must exist and end in `.dll`), else the installed copy. Only the .NET
+driver runs a `dotnet` adapter, so the runtime is refused with a `language` other than a built-in
+one: sharpdbg has no language and is chosen with `--adapter` (a user manifest named `sharpdbg`
+replaces it). An example, the bundled sharpdbg:
+
+```json
+{
+  "schema": 1, "name": "sharpdbg", "version": "0.1.17",
+  "description": ".NET debugger by MattParkerDev (MIT; bundles a Microsoft-licensed DAP library); needs .NET 10+",
+  "adapter": {"id": "coreclr", "transport": "stdio", "runtime": "dotnet", "entry": "SharpDbg.Cli.dll",
+              "args": ["--interpreter=vscode"], "env": "EYEDBG_SHARPDBG"},
+  "dotnet": {"minRuntime": "10.0"},
+  "install": {"downloads": {"*": {
+    "url": "https://api.nuget.org/v3-flatcontainer/sharpdbg.cli/0.1.17/sharpdbg.cli.0.1.17.nupkg",
+    "sha256": "549fe48fd42dd00af1ab923c2a9d617502dddd1b6461c6dbdbd641561e961309",
+    "size": 7951923, "archive": "zip", "root": "tools/net10.0/any"
+  }}}
+}
+```
 
 `install.downloads`: keys `linux`, `darwin` or `windows` / `amd64` or `arm64` (e.g.
 `linux/amd64`), or `"*"` for any platform (a specific key wins). Each value:

@@ -23,7 +23,10 @@
   `EYEDBG_DOTNET_HELPER` naming its `.dll`. Run every `dotnet` command in `helpers/dotnet`. `task
   ci` needs the SDK; `task ci:go` doesn't. `task e2e` builds and publishes the helper itself.
 - `task test:race` needs cgo and a C compiler (on Windows, MinGW-w64 gcc).
-- For `task e2e`: the .NET 10 SDK and `eyedbg adapters install netcoredbg`; Python 3.10+ and
+- For `task e2e`: the .NET 10 SDK, `eyedbg adapters install netcoredbg` and `eyedbg adapters
+  install sharpdbg` (every .NET e2e test runs once per adapter; where netcoredbg has no build, its
+  runs skip and SharpDbg's run alone; narrow with `EYEDBG_E2E_DOTNET_ADAPTERS`, e.g.
+  `netcoredbg`, comma-separated); Python 3.10+ and
   `eyedbg adapters install debugpy`; a C/C++ compiler (`cc`/`c++`), rustc, and lldb-dap (on PATH,
   or `EYEDBG_LLDB_DAP`) for c, cpp and rust; Go and `eyedbg adapters install delve` (or dlv on
   PATH, or `EYEDBG_DLV`) for go. Narrow which languages run with `EYEDBG_E2E_LANGS`

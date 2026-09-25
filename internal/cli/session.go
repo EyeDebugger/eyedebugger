@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/eyedebugger/eyedebugger/drivers/dotnet"
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/daemon"
 	"github.com/eyedebugger/eyedebugger/internal/version"
@@ -136,14 +137,31 @@ func dialRunning(ctx context.Context, info version.Info) (*daemon.Client, error)
 // envNoRecord, when "1", turns recording off for new sessions.
 const envNoRecord = "EYEDBG_NO_RECORD"
 
+// envDotnetAdapter chooses dotnet sessions' adapter when --adapter doesn't.
+// The CLI reads it per request (the daemon's own environment is fixed when
+// it starts).
+const envDotnetAdapter = "EYEDBG_DOTNET_ADAPTER"
+
+// adapterHelp is the --adapter paragraph of start, attach and test.
+const adapterHelp = `
+
+--adapter chooses the debug adapter, for dotnet only: netcoredbg (the default) or sharpdbg
+(SharpDbg, opt-in: 'eyedbg adapters install sharpdbg' downloads it from nuget.org; it needs the
+.NET 10+ runtime, and bundles a Microsoft-licensed library, see 'eyedbg help adapters install').
+EYEDBG_DOTNET_ADAPTER sets it when --adapter doesn't. Where netcoredbg has no build (Intel Macs,
+Windows on Arm) an installed SharpDbg is used without --adapter. Under SharpDbg, pause is refused
+(UNSUPPORTED_BY_ADAPTER: it stops the program without saying where), 'eyedbg set' runs the
+assignment as an expression, and eval also runs lambdas and LINQ (with --allow-side-effects) and
+shows [DebuggerDisplay] values. 'eyedbg sessions' shows each session's adapter.`
+
 // sessionFlags are the flags every command that creates a session has
 // (start, attach, test).
 type sessionFlags struct {
-	leasePolicy, exceptions string
-	bps                     []string
-	noRecord                bool
-	timeout                 time.Duration
-	dump                    *dumpFlag
+	leasePolicy, exceptions, adapter string
+	bps                              []string
+	noRecord                         bool
+	timeout                          time.Duration
+	dump                             *dumpFlag
 }
 
 // register adds the flags to cmd.
@@ -154,6 +172,7 @@ func (sf *sessionFlags) register(cmd *cobra.Command) {
 	f.StringVar(&sf.leasePolicy, "lease-policy", string(api.LeaseFree), "who may take the control lease: free, handoff or human-priority")
 	f.BoolVar(&sf.noRecord, "no-record", false, "don't record the session's control events (also EYEDBG_NO_RECORD=1)")
 	f.DurationVar(&sf.timeout, "timeout", defaultExecTimeout, "how long to wait for the first stop when there are --bp breakpoints (or --stop-on-entry)")
+	f.StringVar(&sf.adapter, "adapter", "", "dotnet's debug adapter: netcoredbg or sharpdbg (default: $"+envDotnetAdapter+", else netcoredbg where it has a build)")
 	sf.dump = addDumpFlag(cmd)
 }
 
@@ -172,6 +191,11 @@ func (sf *sessionFlags) params(g *globals, p *api.StartParams) error {
 
 	p.Client, p.LeasePolicy, p.Wait = g.clientID(), policy, api.Duration(sf.timeout)
 	p.NoRecord = sf.noRecord || os.Getenv(envNoRecord) == "1"
+
+	p.Adapter = sf.adapter
+	if p.Adapter == "" && p.Lang == dotnet.Language {
+		p.Adapter = os.Getenv(envDotnetAdapter)
+	}
 
 	for _, b := range sf.bps {
 		spec, err := parseLocation(b)
@@ -255,7 +279,7 @@ turns that off.
 Output: the new session id and its state (text), or the session snapshot in --json. The session id
 is also the value to pass to -s. Exits 0 once the program is running or stopped, non-zero on
 failure (BUILD_FAILED with the compiler errors, ADAPTER_NOT_INSTALLED, ...; see 'eyedbg --help'
-for the exit codes).` + dumpHelp + `
+for the exit codes).` + adapterHelp + dumpHelp + `
 `
 
 func newStartCommand(info version.Info, g *globals) *cobra.Command {
@@ -269,6 +293,7 @@ func newStartCommand(info version.Info, g *globals) *cobra.Command {
   eyedbg start dotnet --bp 'Program.cs@"return total"' --exceptions all
   eyedbg start dotnet --project src/App/App.csproj --stop-on-entry
   eyedbg start dotnet --program bin/Debug/net10.0/App.dll -- --verbose input.txt
+  eyedbg start dotnet --adapter sharpdbg --bp Program.cs:12
   eyedbg start python --program app.py --bp app.py:12 -- --verbose
   eyedbg start python --opt module=pytest --bp tests/test_x.py:8 -- -x tests/test_x.py
   eyedbg start python --program app.py --opt python=.venv/bin/python --opt justMyCode=false
@@ -527,7 +552,10 @@ its caller when the function returns).`,
 		},
 		{
 			"pause", "pause", "Pause the running program",
-			`Pause a running program wherever it is (e.g. to find where it hangs), then show where.`,
+			`Pause a running program wherever it is (e.g. to find where it hangs), then show where. Under
+SharpDbg (dotnet --adapter sharpdbg) pause is UNSUPPORTED_BY_ADAPTER (exit 4): SharpDbg 0.1 stops
+the program without saying where. There, set a breakpoint and continue to it, or see what a
+hanging program's threads are doing without stopping it with 'eyedbg dotnet threads'.`,
 			"  eyedbg pause\n  eyedbg stack   # then see the whole stack",
 		},
 	}

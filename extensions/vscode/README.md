@@ -69,8 +69,9 @@ Add `"session": "s-7f3k"` to join a given one. Disconnecting leaves the session 
 
 This runs `eyedbg start` as you and joins the new session; the agent can join it too (`eyedbg
 sessions`). Other properties: `project`, `cwd` (relative: to the workspace folder), `env`, `opts`
-(language options), `noBuild`, `leasePolicy` (`free`, `handoff`, `human-priority`) and `exceptions`
-(`all`, `uncaught`, `none`).
+(language options), `noBuild`, `leasePolicy` (`free`, `handoff`, `human-priority`), `exceptions`
+(`all`, `uncaught`, `none`) and, for dotnet, `adapter` (`netcoredbg`, the default, or `sharpdbg`
+once `eyedbg adapters install sharpdbg` has fetched it; SharpDbg can't pause).
 Stopping the debug session stops the eyedbg session.
 
 ### launch.json snippets

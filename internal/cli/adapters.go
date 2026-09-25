@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -53,14 +54,15 @@ func newAdaptersCommand(g *globals) *cobra.Command {
 		Short: "List, install and check debug adapters",
 		Long: `List, install and check the debug adapters eyedbg drives (docs/DESIGN.md §7, §8). Each is
 described by an adapter manifest (docs/adapter-manifests.md): dotnet uses netcoredbg (Samsung,
-MIT), python uses debugpy (Microsoft, MIT), c, cpp and rust share LLVM's lldb-dap
-(Apache-2.0 WITH LLVM-exception), found on PATH or via EYEDBG_LLDB_DAP, and go uses Delve (MIT),
-which speaks DAP over a private socket it dials in to rather than stdio (docs/adapter-manifests.md
-§ Transports). Downloads are pinned to one release and verified by SHA-256 before use. Microsoft's
-vsdbg is never used: its license restricts it to Microsoft's IDEs.
+MIT), or SharpDbg (MattParkerDev, MIT; opt-in with --adapter sharpdbg, and the default where
+netcoredbg has no build once you install it), python uses debugpy (Microsoft, MIT), c, cpp and
+rust share LLVM's lldb-dap (Apache-2.0 WITH LLVM-exception), found on PATH or via EYEDBG_LLDB_DAP,
+and go uses Delve (MIT), which speaks DAP over a private socket it dials in to rather than stdio
+(docs/adapter-manifests.md § Transports). Downloads are pinned to one release and verified by
+SHA-256 before use. Microsoft's vsdbg is never used: its license restricts it to Microsoft's IDEs.
 
 Adapters are installed per user under ~/.eyedbg/tools (override with EYEDBG_DATA_DIR); set
-EYEDBG_NETCOREDBG to use your own netcoredbg build instead. Your own manifests go in
+EYEDBG_NETCOREDBG (or EYEDBG_SHARPDBG, to a SharpDbg.Cli.dll) to use your own build instead. Your own manifests go in
 ~/.eyedbg/adapters (EYEDBG_CONFIG_DIR overrides the ~/.eyedbg part): they add languages or
 replace a bundled adapter, and are trusted like your shell configuration. EYEDBG_HOME overrides
 ~/.eyedbg itself, for both.
@@ -69,6 +71,7 @@ Without a subcommand, prints this help and exits 0; an unknown subcommand exits 
 		Example: `  eyedbg adapters ls
   eyedbg adapters install netcoredbg
   eyedbg adapters install python
+  eyedbg adapters install sharpdbg
   eyedbg adapters doctor`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
@@ -92,12 +95,22 @@ macOS x64/arm64 and Windows x64). c, cpp and rust have no download: install lldb
 yourself (your OS's LLVM/Clang package) and put it on PATH, or set EYEDBG_LLDB_DAP.
 'eyedbg adapters ls' lists them all.
 
-Needs network access (github.com, files.pythonhosted.org); blocks until done (typically seconds,
-at most 5m). Idempotent: an installed adapter is left as is. Prints the installed path ("path" in
---json). Exits 1 for an unknown adapter, an adapter with no download, or a download, checksum or
-extraction failure; nothing half-installed is left behind.`,
+sharpdbg ` + bundledVersion("sharpdbg") + ` is dotnet's alternative adapter, SharpDbg (any platform; runs on your own
+dotnet with the .NET 10+ runtime): the SharpDbg.Cli package from nuget.org, fetched only by this
+command, never shipped with eyedbg. It is MIT, but bundles Microsoft.VisualStudio.Shared.
+VSCodeDebugProtocol under the Microsoft Software License Terms (not open source): they let you use
+it to develop and test your applications, put duties on whoever redistributes it (not you, by
+installing it), forbid reverse engineering, and say the software may collect data and send it to
+Microsoft (docs/adr/0017). Install it only if you accept that; then 'eyedbg start dotnet --adapter
+sharpdbg' uses it, as do sessions where netcoredbg has no build (Intel Macs, Windows on Arm).
+
+Needs network access (github.com, files.pythonhosted.org, api.nuget.org); blocks until done
+(typically seconds, at most 5m). Idempotent: an installed adapter is left as is. Prints the
+installed path ("path" in --json). Exits 1 for an unknown adapter, an adapter with no download, or
+a download, checksum or extraction failure; nothing half-installed is left behind.`,
 		Example: `  eyedbg adapters install netcoredbg
-  eyedbg adapters install python        # the same as: eyedbg adapters install debugpy`,
+  eyedbg adapters install python        # the same as: eyedbg adapters install debugpy
+  eyedbg adapters install sharpdbg      # then: eyedbg start dotnet --adapter sharpdbg`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			m, err := resolveAdapter(loadRegistry(), args[0])
@@ -157,8 +170,10 @@ func newAdaptersDoctorCommand(g *globals) *cobra.Command {
 		Use:   "doctor [adapter|language...]",
 		Short: "Check that adapters and toolchains are usable",
 		Long: `Check what debugging needs on this machine and say what to fix. For dotnet: that netcoredbg
-is found (and where from: EYEDBG_NETCOREDBG, installed, or PATH) and runs, and that the dotnet
-host is found and reports its version. For python: which interpreter a start from this directory
+is found (and where from: EYEDBG_NETCOREDBG, installed, or PATH) and runs, that the dotnet host is
+found and reports its version, SharpDbg too when it is installed (EYEDBG_SHARPDBG or installed; its
+.NET 10+ runtime on that host; that it runs) or netcoredbg isn't usable, and which of them sessions
+use by default; one usable adapter is enough ('doctor sharpdbg' checks SharpDbg alone). For python: which interpreter a start from this directory
 would use (EYEDBG_PYTHON, else your active $VIRTUAL_ENV, else a .venv or venv here, else python3,
 python or 'py -3' on PATH; start's --opt python=PATH overrides them) and which debugpy it runs (the one 'eyedbg adapters
 install debugpy' downloaded, else the interpreter's own). Other adapters are checked the same
@@ -174,7 +189,8 @@ doesn't fail the check). Exits 1 if a check has a problem: something installed t
 a broken user manifest, or a named adapter or language that is missing.`,
 		Example: `  eyedbg adapters doctor
   eyedbg adapters doctor python
-  eyedbg adapters doctor dotnet --json`,
+  eyedbg adapters doctor dotnet --json
+  eyedbg adapters doctor sharpdbg`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			checks, err := systemDoctor().run(cmd.Context(), loadRegistry(), args)
 			if err != nil {
@@ -214,13 +230,23 @@ type doctor struct {
 	findHost      func() (string, error)
 	probe         func(ctx context.Context, exe string, args ...string) (string, error)
 	resolvePython func(ctx context.Context, m *adapters.Manifest, in adapters.PythonInput) (adapters.Runtime, error)
-	workDir       string
+	resolveDotnet func(ctx context.Context, m *adapters.Manifest) (adapters.DotnetRuntime, error)
+	// defaultAdapter is the adapter a dotnet session uses without
+	// --adapter (the .NET driver's choice), or why none can run.
+	defaultAdapter func(ctx context.Context, reg *adapters.Registry) (string, error)
+	workDir        string
+	// dotnetAdapter is $EYEDBG_DOTNET_ADAPTER.
+	dotnetAdapter string
 }
 
 func systemDoctor() doctor {
 	return doctor{
 		find: adapters.Find, findHost: dotnet.FindHost, probe: probe, resolvePython: adapters.ResolvePython,
-		workDir: workDir(),
+		resolveDotnet: adapters.ResolveDotnet,
+		defaultAdapter: func(ctx context.Context, reg *adapters.Registry) (string, error) {
+			return dotnet.NewFrom(reg).Adapter(ctx)
+		},
+		workDir: workDir(), dotnetAdapter: os.Getenv(envDotnetAdapter),
 	}
 }
 
@@ -242,6 +268,12 @@ func (d doctor) run(ctx context.Context, reg *adapters.Registry, names []string)
 	}
 
 	for _, name := range names {
+		if name == toolDotnet && reg.Adapter(name) == nil && reg.Language(name) != nil {
+			checks = append(checks, d.dotnetChecks(ctx, reg)...)
+
+			continue
+		}
+
 		m, err := resolveAdapter(reg, name)
 		if err != nil {
 			return nil, err
@@ -251,6 +283,74 @@ func (d doctor) run(ctx context.Context, reg *adapters.Registry, names []string)
 	}
 
 	return checks, nil
+}
+
+// dotnetChecks are 'doctor dotnet': the adapter serving dotnet (netcoredbg)
+// and the dotnet host, SharpDbg when it is installed or netcoredbg isn't
+// usable, and which adapter sessions use by default. One usable adapter is
+// enough: a missing one is then not a problem.
+func (d doctor) dotnetChecks(ctx context.Context, reg *adapters.Registry) []doctorCheck {
+	m := reg.Language(toolDotnet)
+	checks := d.check(ctx, m, false)
+	usable := checks[0].OK
+
+	if sharp := reg.Adapter(dotnet.SharpDbg); sharp != nil && sharp != m {
+		c := d.check(ctx, sharp, false)
+		if !c[0].Missing || !usable {
+			checks = append(checks, c...)
+		}
+
+		usable = usable || c[0].OK
+	}
+
+	for i := range checks {
+		// The host is needed either way; a missing adapter only when none
+		// is usable.
+		if !usable || checks[i].Name == toolDotnet {
+			checks[i].Missing = false
+		}
+	}
+
+	if usable {
+		checks = append(checks, d.dotnetDefault(ctx, reg, checks))
+	}
+
+	return checks
+}
+
+// dotnetDefault is the line saying which adapter dotnet sessions use
+// without --adapter: EYEDBG_DOTNET_ADAPTER's, else the driver's default.
+func (d doctor) dotnetDefault(ctx context.Context, reg *adapters.Registry, checks []doctorCheck) doctorCheck {
+	const name = "dotnet adapter"
+
+	var usable []string
+
+	for _, c := range checks {
+		if c.OK && c.Name != toolDotnet {
+			usable = append(usable, c.Name)
+		}
+	}
+
+	if d.dotnetAdapter != "" {
+		if slices.Contains(usable, d.dotnetAdapter) {
+			return doctorCheck{Name: name, OK: true, Detail: "sessions use " + d.dotnetAdapter + " (" + envDotnetAdapter + ")"}
+		}
+
+		return doctorCheck{
+			Name: name, Detail: envDotnetAdapter + "=" + d.dotnetAdapter + " chooses an adapter that isn't usable here",
+			Fix: "unset it, or set it to " + strings.Join(usable, " or "),
+		}
+	}
+
+	def, err := d.defaultAdapter(ctx, reg)
+	if err == nil {
+		return doctorCheck{Name: name, OK: true, Detail: "sessions use " + def + " by default (--adapter or " + envDotnetAdapter + " chooses another)"}
+	}
+
+	return doctorCheck{
+		Name: name, Missing: true, Detail: "the default adapter can't run here: " + firstLine(err.Error()),
+		Fix: "start with --adapter " + usable[0] + ", or set " + envDotnetAdapter + "=" + usable[0],
+	}
 }
 
 // problemText is a manifest problem as one line.
@@ -263,20 +363,26 @@ func problemText(p adapters.Problem) string {
 }
 
 // doctorOrder puts the adapter serving dotnet first (netcoredbg's checks
-// come first, as before manifests), then the others by name.
+// come first, as before manifests), then SharpDbg, then the others by name.
 func doctorOrder(ms []*adapters.Manifest) []*adapters.Manifest {
-	out := slices.Clone(ms)
-	slices.SortStableFunc(out, func(a, b *adapters.Manifest) int {
-		ad, bd := a.LanguageName() == toolDotnet, b.LanguageName() == toolDotnet
-
+	rank := func(m *adapters.Manifest) int {
 		switch {
-		case ad && !bd:
-			return -1
-		case bd && !ad:
+		case m.LanguageName() == toolDotnet:
+			return 0
+		case m.Name == dotnet.SharpDbg:
 			return 1
 		default:
-			return strings.Compare(a.Name, b.Name)
+			return 2
 		}
+	}
+
+	out := slices.Clone(ms)
+	slices.SortStableFunc(out, func(a, b *adapters.Manifest) int {
+		if c := rank(a) - rank(b); c != 0 {
+			return c
+		}
+
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	return out
@@ -287,9 +393,12 @@ func doctorOrder(ms []*adapters.Manifest) []*adapters.Manifest {
 func (d doctor) check(ctx context.Context, m *adapters.Manifest, named bool) []doctorCheck {
 	var checks []doctorCheck
 
-	if m.Adapter.Runtime == adapters.RuntimePython {
+	switch m.Adapter.Runtime {
+	case adapters.RuntimePython:
 		checks = append(checks, d.pythonCheck(ctx, m))
-	} else {
+	case adapters.RuntimeDotnet:
+		checks = append(checks, d.dotnetCheck(ctx, m))
+	default:
 		checks = append(checks, d.nativeCheck(ctx, m))
 	}
 
@@ -387,6 +496,36 @@ func (d doctor) pythonCheck(ctx context.Context, m *adapters.Manifest) doctorChe
 		m.Python.Module, rt.ModuleVersion, rt.RootSource, rt.Root, rt.Version, rt.Exe, rt.Source)}
 }
 
+// dotnetCheck finds a .NET adapter's .dll, the dotnet host and a runtime
+// new enough, then runs the .dll with --help.
+func (d doctor) dotnetCheck(ctx context.Context, m *adapters.Manifest) doctorCheck {
+	rt, err := d.resolveDotnet(ctx, m)
+	if err != nil {
+		c := doctorCheck{Name: m.Name, Detail: err.Error(), Missing: errors.Is(err, adapters.ErrNotInstalled)}
+		if apiErr, ok := errors.AsType[*api.Error](err); ok {
+			c.Fix = apiErr.Hint
+		}
+
+		return c
+	}
+
+	out, err := d.probe(ctx, rt.Host, rt.Entry, "--help")
+	if err != nil {
+		fix := m.Adapter.NotRunningHint
+		if fix == "" {
+			fix = "reinstall it: delete " + filepath.Dir(rt.Entry) + ", then 'eyedbg adapters install " + m.Name + "'"
+			if rt.Source == adapters.FoundEnv {
+				fix = "fix or unset " + m.Adapter.Env
+			}
+		}
+
+		return doctorCheck{Name: m.Name, Detail: rt.Entry + " does not run on " + rt.Host + ": " + err.Error(), Fix: fix}
+	}
+
+	return doctorCheck{Name: m.Name, OK: true, Detail: fmt.Sprintf("%s (%s, %s) on .NET %s (%s)",
+		firstLine(out), rt.Source, rt.Entry, rt.Runtime, rt.Host)}
+}
+
 func probe(ctx context.Context, exe string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -434,13 +573,15 @@ func newAdaptersListCommand(g *globals) *cobra.Command {
 		Long: `List every adapter manifest eyedbg loaded: the bundled ones and yours (from ~/.eyedbg/adapters;
 EYEDBG_CONFIG_DIR or EYEDBG_HOME moves it), with the version
 'eyedbg adapters install' fetches, the language each debugs ("built-in" when a Go driver serves
-it) and its --opt options for 'eyedbg start'. A manifest of yours replaces the bundled one of the
+it; "for: dotnet (--adapter sharpdbg)" under an adapter a driver can use instead of its own) and
+its --opt options for 'eyedbg start'. A manifest of yours replaces the bundled one of the
 same name or language. Manifests that could not be loaded are listed as "ignored" with why (also
 'eyedbg adapters doctor').
 
 Reads the manifests only; doesn't check what is installed (that is 'eyedbg adapters doctor').
 Output: a table ("adapters" and "problems" in --json, with each adapter's download for this
-platform, options, file extensions and project markers). Exits 0, even with ignored manifests.`,
+platform, options, file extensions and project markers, and "alternateFor": the languages it can
+serve with --adapter). Exits 0, even with ignored manifests.`,
 		Example: `  eyedbg adapters ls
   eyedbg adapters ls --json`,
 		Args: cobra.NoArgs,
@@ -459,20 +600,23 @@ platform, options, file extensions and project markers). Exits 0, even with igno
 
 // adapterJSON is one adapter in 'adapters ls --json'.
 type adapterJSON struct {
-	Name        string        `json:"name"`
-	Version     string        `json:"version"`
-	Description string        `json:"description"`
-	Homepage    string        `json:"homepage,omitempty"`
-	Language    string        `json:"language,omitempty"`
-	Builtin     bool          `json:"builtin"`
-	Runtime     string        `json:"runtime"`
-	Source      string        `json:"source"`
-	Path        string        `json:"path,omitempty"`
-	Replaces    string        `json:"replaces,omitempty"`
-	Download    *downloadJSON `json:"download,omitempty"`
-	Options     []optionJSON  `json:"options"`
-	Extensions  []string      `json:"extensions"`
-	Markers     []string      `json:"markers"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+	Homepage    string `json:"homepage,omitempty"`
+	Language    string `json:"language,omitempty"`
+	Builtin     bool   `json:"builtin"`
+	Runtime     string `json:"runtime"`
+	Source      string `json:"source"`
+	Path        string `json:"path,omitempty"`
+	Replaces    string `json:"replaces,omitempty"`
+	// AlternateFor lists the languages whose driver can use it instead of
+	// the language's own adapter (--adapter).
+	AlternateFor []string      `json:"alternateFor,omitempty"`
+	Download     *downloadJSON `json:"download,omitempty"`
+	Options      []optionJSON  `json:"options"`
+	Extensions   []string      `json:"extensions"`
+	Markers      []string      `json:"markers"`
 }
 
 // downloadJSON is the build 'adapters install' fetches on this platform.
@@ -513,6 +657,10 @@ func listJSON(reg *adapters.Registry, platform string) listOutput {
 
 		if a.Runtime == adapters.RuntimeNative {
 			a.Runtime = "native"
+		}
+
+		if lang := alternateFor(m); lang != "" {
+			a.AlternateFor = []string{lang}
 		}
 
 		if d, ok := m.DownloadFor(goos, goarch); ok {
@@ -594,9 +742,23 @@ func listText(reg *adapters.Registry) string {
 	return b.String()
 }
 
+// alternateFor is the language whose driver can use m instead of its own
+// adapter ("" for none): SharpDbg's manifest, for dotnet.
+func alternateFor(m *adapters.Manifest) string {
+	if m.Name == dotnet.SharpDbg && m.LanguageName() == "" {
+		return toolDotnet
+	}
+
+	return ""
+}
+
 // listDetails are the indented lines under an adapter's row.
 func listDetails(m *adapters.Manifest) string {
 	var b strings.Builder
+
+	if lang := alternateFor(m); lang != "" {
+		b.WriteString("  for: " + lang + " (--adapter " + m.Name + ")\n")
+	}
 
 	if m.Path != "" {
 		b.WriteString("  file: " + m.Path)

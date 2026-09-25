@@ -550,3 +550,50 @@ func TestUserDirEnv(t *testing.T) {
 		t.Fatal("Default did not read $EYEDBG_CONFIG_DIR/adapters")
 	}
 }
+
+// TestSharpdbgManifest pins the bundled sharpdbg manifest: its one
+// platform-independent download from nuget.org (the SharpDbg.Cli nupkg,
+// SHA-256 and size), its .NET runtime and entry, and its license note (it
+// bundles a Microsoft-licensed library: docs/adr/0017). It serves no
+// language: the .NET driver chooses it (--adapter sharpdbg).
+func TestSharpdbgManifest(t *testing.T) {
+	t.Parallel()
+
+	m := Load(LoadConfig{Bundled: Bundled(), Builtin: builtinLangs}).Adapter("sharpdbg")
+	if m == nil {
+		t.Fatal("no bundled sharpdbg manifest")
+	}
+
+	checkSharpdbgAdapter(t, m)
+
+	want := Download{
+		URL:     "https://api.nuget.org/v3-flatcontainer/sharpdbg.cli/0.1.17/sharpdbg.cli.0.1.17.nupkg",
+		SHA256:  "549fe48fd42dd00af1ab923c2a9d617502dddd1b6461c6dbdbd641561e961309",
+		Archive: archiveZip, Root: "tools/net10.0/any", Size: 7951923,
+	}
+	if len(m.Install.Downloads) != 1 || m.Install.Downloads["*"] != want {
+		t.Fatalf("sharpdbg downloads = %+v, want only * = %+v", m.Install.Downloads, want)
+	}
+
+	if !strings.Contains(want.URL, "/"+m.Version+"/") || !strings.HasSuffix(want.URL, "."+m.Version+".nupkg") {
+		t.Fatalf("download URL %q does not name version %s", want.URL, m.Version)
+	}
+}
+
+// checkSharpdbgAdapter checks the sharpdbg manifest's adapter and top-level
+// fields.
+func checkSharpdbgAdapter(t *testing.T, m *Manifest) {
+	t.Helper()
+
+	a := m.Adapter
+	if a.ID != "coreclr" || a.Runtime != RuntimeDotnet || a.Entry != "SharpDbg.Cli.dll" || a.Env != "EYEDBG_SHARPDBG" ||
+		!slices.Equal(a.Args, []string{"--interpreter=vscode"}) || a.Path || len(a.VersionArgs) > 0 {
+		t.Fatalf("sharpdbg adapter = %+v", a)
+	}
+
+	if m.Dotnet == nil || m.Dotnet.MinRuntime != "10.0" || m.Language != nil || m.Version != "0.1.17" ||
+		m.Homepage != "https://github.com/MattParkerDev/sharpdbg" ||
+		!strings.Contains(m.License, "Microsoft.VisualStudio.Shared.VSCodeDebugProtocol under Microsoft Software License Terms") {
+		t.Fatalf("sharpdbg manifest = %+v", m)
+	}
+}
