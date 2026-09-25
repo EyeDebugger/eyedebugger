@@ -58,7 +58,9 @@ func copyExclusive(src, out string) error {
 
 	f, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		if errors.Is(err, fs.ErrExist) {
+		// Windows reports an existing directory as "is a directory", not
+		// as existing.
+		if _, lerr := os.Lstat(out); errors.Is(err, fs.ErrExist) || lerr == nil {
 			return fmt.Errorf("%s: %w", out, ErrExists)
 		}
 
