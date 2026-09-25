@@ -15,6 +15,7 @@ import { AutoJoin } from './vscode/autojoin';
 import { BreakpointsUi } from './vscode/breakpoints';
 import { ClientsUi } from './vscode/clients';
 import { ConfigurationProvider, client, DynamicProvider, debugType, launchToken } from './vscode/config';
+import { DotnetUi } from './vscode/dotnet/views';
 import { Eyedbg, timeouts } from './vscode/exec';
 import { Follow } from './vscode/follow';
 import { LeaseUi } from './vscode/lease';
@@ -30,6 +31,7 @@ export function activate(context: vscode.ExtensionContext): EyedbgApi {
   const activity = new ActivityUi(state);
   const clients = new ClientsUi(state);
   const follow = new Follow(state);
+  const dotnet = new DotnetUi(state, eyedbg);
 
   const tracker = new TrackerFactory(state, {
     lease: (t, l) => lease.lease(t, l),
@@ -110,6 +112,7 @@ export function activate(context: vscode.ExtensionContext): EyedbgApi {
     activity,
     clients,
     follow,
+    dotnet,
     new AutoJoin(state, eyedbg, (id) => join(id), process.env.EYEDBG_TEST_ASSUME_FOCUSED === '1'),
     vscode.debug.registerDebugConfigurationProvider(debugType, new ConfigurationProvider(eyedbg, state)),
     vscode.debug.registerDebugConfigurationProvider(
@@ -126,7 +129,7 @@ export function activate(context: vscode.ExtensionContext): EyedbgApi {
     vscode.commands.registerCommand('eyedbg.checkInstallation', checkInstallation),
   );
 
-  return api(state, { activity, clients });
+  return api(state, { activity, clients, ...dotnet.trees() }, () => dotnet.stats());
 }
 
 export function deactivate(): void {}

@@ -32,9 +32,12 @@
   `corepack enable` (checks the pinned sha512), or use any pnpm ≥ 11, which switches itself to
   the version `package.json` pins without checking its hash. pnpm only: never npm, npx or yarn. `task ext:test:integration` downloads VS Code 1.100.0
   and 1.139.0 into `extensions/vscode/.vscode-test`, needs debugpy (`eyedbg adapters install
-  debugpy`, or `EYEDBG_DATA_DIR`/`EYEDBG_PYTHON` as for `task e2e`) and, on Linux, xvfb
-  (`xvfb-run`); it builds `eyedbg` with Go unless `EYEDBG_TEST_BIN_DIR` names a directory holding
-  `eyedbg` and `eyedbgd`. `task ci:go` skips the extension.
+  debugpy`, or `EYEDBG_DATA_DIR`/`EYEDBG_PYTHON` as for `task e2e`), for the .NET views' tests the
+  .NET 10 SDK and netcoredbg (`eyedbg adapters install netcoredbg`; `EYEDBG_TEST_DOTNET=0` skips
+  them) and, on Linux, xvfb (`xvfb-run`); it builds `eyedbg` with Go and publishes the .NET helper
+  next to it unless `EYEDBG_TEST_BIN_DIR` names a directory holding `eyedbg`, `eyedbgd` and
+  `helpers/dotnet/`. Each VS Code run gets its own `EYEDBG_HOME`; adapters come from
+  `EYEDBG_DATA_DIR`, else `~/.eyedbg/tools`. `task ci:go` skips the extension.
 - Without Task, use the raw commands below.
 
 ## Everyday commands

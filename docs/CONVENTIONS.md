@@ -154,12 +154,16 @@ The VS Code extension (ADR 0015) follows the same rules where they apply; these 
   can be unit-tested: parsing, validation, argv building, the mirror model, lease decisions and
   every string shown to the user. `src/vscode/` is the glue. `src/vscode/exec.ts` is the only
   place that starts a process.
-- Processes: `child_process.execFile` of the resolved absolute `eyedbg`, never a shell; flag
-  values bound as `--flag=value`, program arguments after `--`; every value from a configuration
-  validated first. Nothing a workspace can set names the binary (`eyedbg.path` is
+- Processes: `child_process.execFile` of the resolved absolute `eyedbg` (`spawn` for a command
+  that streams lines, like `dotnet counters --watch`), never a shell; flag values bound as
+  `--flag=value`, program arguments and file paths after `--`; every value from a configuration
+  or a command argument validated first; `eyedbg dotnet …` runs are interrupted with SIGINT off
+  Windows (eyedbg's Ctrl-C path), never just killed. Nothing a workspace can set names the binary (`eyedbg.path` is
   machine-scoped).
 - Text from a session (other clients' names, conditions, log and lease-request messages, the
-  adapter's messages, program paths) is untrusted: build it in `src/core/render.ts`; control
+  adapter's messages, program paths) and from a .NET program or its dumps (type, method, module,
+  file and process names) is untrusted: build it in `src/core/render.ts` (the .NET views:
+  `dotnetRender.ts`, `dotnetTrees.ts`); control
   characters become spaces and lengths are capped (`plainText`); notifications go through
   `notificationSafe` (VS Code runs `command:` links in them); hovers are `MarkdownString`s with
   `isTrusted` and `supportHtml` off, filled with `appendText`; labels that render `$(icon)` go

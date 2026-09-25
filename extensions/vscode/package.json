@@ -429,6 +429,129 @@
         "command": "eyedbg.clients.policy",
         "title": "Change Lease Policy…",
         "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.dotnet.showViews",
+        "title": "Show .NET Views",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.dotnet.chooseTarget",
+        "title": "Choose .NET Target…",
+        "category": "EyeDebugger",
+        "icon": "$(target)"
+      },
+      {
+        "command": "eyedbg.dotnet.cancel",
+        "title": "Cancel .NET Operation",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.dotnet.counters.start",
+        "title": "Start .NET Counters",
+        "category": "EyeDebugger",
+        "icon": "$(play)"
+      },
+      {
+        "command": "eyedbg.dotnet.counters.pause",
+        "title": "Pause .NET Counters",
+        "category": "EyeDebugger",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "eyedbg.dotnet.counters.clear",
+        "title": "Clear .NET Counters",
+        "category": "EyeDebugger",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "eyedbg.dotnet.memory.takeDump",
+        "title": "Take Heap Dump",
+        "category": "EyeDebugger",
+        "icon": "$(database)"
+      },
+      {
+        "command": "eyedbg.dotnet.memory.openDump",
+        "title": "Open Dump File…",
+        "category": "EyeDebugger",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "eyedbg.dotnet.memory.cancel",
+        "title": "Cancel Heap Dump",
+        "category": "EyeDebugger",
+        "icon": "$(stop-circle)"
+      },
+      {
+        "command": "eyedbg.dotnet.memory.gcroot",
+        "title": "Find GC Roots",
+        "category": "EyeDebugger",
+        "icon": "$(search)"
+      },
+      {
+        "command": "eyedbg.dotnet.memory.copyPath",
+        "title": "Copy Dump Path",
+        "category": "EyeDebugger",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "eyedbg.dotnet.memory.showThreads",
+        "title": "Show Threads of This Dump",
+        "category": "EyeDebugger",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "eyedbg.dotnet.memory.clear",
+        "title": "Clear Heap Dumps",
+        "category": "EyeDebugger",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "eyedbg.dotnet.threads.capture",
+        "title": "Capture Threads",
+        "category": "EyeDebugger",
+        "icon": "$(device-camera)"
+      },
+      {
+        "command": "eyedbg.dotnet.threads.cancel",
+        "title": "Cancel Thread Capture",
+        "category": "EyeDebugger",
+        "icon": "$(stop-circle)"
+      },
+      {
+        "command": "eyedbg.dotnet.threads.openFrame",
+        "title": "Open Frame Source",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.dotnet.threads.clear",
+        "title": "Clear Threads",
+        "category": "EyeDebugger",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "eyedbg.dotnet.trace.start",
+        "title": "Start CPU Trace…",
+        "category": "EyeDebugger",
+        "icon": "$(record)"
+      },
+      {
+        "command": "eyedbg.dotnet.trace.openFile",
+        "title": "Open Trace File…",
+        "category": "EyeDebugger",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "eyedbg.dotnet.trace.cancel",
+        "title": "Cancel Trace",
+        "category": "EyeDebugger",
+        "icon": "$(stop-circle)"
+      },
+      {
+        "command": "eyedbg.dotnet.trace.clear",
+        "title": "Clear Traces",
+        "category": "EyeDebugger",
+        "icon": "$(clear-all)"
       }
     ],
     "menus": {
@@ -496,6 +619,86 @@
         {
           "command": "eyedbg.followAgent.disable",
           "when": "config.eyedbg.followAgent"
+        },
+        {
+          "command": "eyedbg.dotnet.chooseTarget",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "command": "eyedbg.dotnet.cancel",
+          "when": "false"
+        },
+        {
+          "command": "eyedbg.dotnet.counters.start",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "command": "eyedbg.dotnet.counters.pause",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "command": "eyedbg.dotnet.counters.clear",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "command": "eyedbg.dotnet.memory.takeDump",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "command": "eyedbg.dotnet.memory.openDump",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "command": "eyedbg.dotnet.memory.cancel",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "command": "eyedbg.dotnet.memory.gcroot",
+          "when": "false"
+        },
+        {
+          "command": "eyedbg.dotnet.memory.copyPath",
+          "when": "false"
+        },
+        {
+          "command": "eyedbg.dotnet.memory.showThreads",
+          "when": "false"
+        },
+        {
+          "command": "eyedbg.dotnet.memory.clear",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "command": "eyedbg.dotnet.threads.capture",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "command": "eyedbg.dotnet.threads.cancel",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "command": "eyedbg.dotnet.threads.openFrame",
+          "when": "false"
+        },
+        {
+          "command": "eyedbg.dotnet.threads.clear",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "command": "eyedbg.dotnet.trace.start",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "command": "eyedbg.dotnet.trace.openFile",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "command": "eyedbg.dotnet.trace.cancel",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "command": "eyedbg.dotnet.trace.clear",
+          "when": "eyedbg.dotnet.show"
         }
       ],
       "editor/lineNumber/context": [
@@ -540,6 +743,96 @@
           "command": "eyedbg.clients.refresh",
           "when": "view == eyedbg.clients",
           "group": "navigation@1"
+        },
+        {
+          "command": "eyedbg.dotnet.counters.start",
+          "when": "view == eyedbg.dotnet.counters && !eyedbg.dotnet.counters.running",
+          "group": "navigation@1"
+        },
+        {
+          "command": "eyedbg.dotnet.counters.pause",
+          "when": "view == eyedbg.dotnet.counters && eyedbg.dotnet.counters.running",
+          "group": "navigation@1"
+        },
+        {
+          "command": "eyedbg.dotnet.chooseTarget",
+          "when": "view == eyedbg.dotnet.counters",
+          "group": "navigation@2"
+        },
+        {
+          "command": "eyedbg.dotnet.counters.clear",
+          "when": "view == eyedbg.dotnet.counters",
+          "group": "navigation@3"
+        },
+        {
+          "command": "eyedbg.dotnet.memory.takeDump",
+          "when": "view == eyedbg.dotnet.memory && !eyedbg.dotnet.memory.busy",
+          "group": "navigation@1"
+        },
+        {
+          "command": "eyedbg.dotnet.memory.cancel",
+          "when": "view == eyedbg.dotnet.memory && eyedbg.dotnet.memory.busy",
+          "group": "navigation@1"
+        },
+        {
+          "command": "eyedbg.dotnet.chooseTarget",
+          "when": "view == eyedbg.dotnet.memory",
+          "group": "navigation@2"
+        },
+        {
+          "command": "eyedbg.dotnet.memory.clear",
+          "when": "view == eyedbg.dotnet.memory",
+          "group": "navigation@3"
+        },
+        {
+          "command": "eyedbg.dotnet.memory.openDump",
+          "when": "view == eyedbg.dotnet.memory && !eyedbg.dotnet.memory.busy",
+          "group": "1_open@1"
+        },
+        {
+          "command": "eyedbg.dotnet.threads.capture",
+          "when": "view == eyedbg.dotnet.threads && !eyedbg.dotnet.threads.busy",
+          "group": "navigation@1"
+        },
+        {
+          "command": "eyedbg.dotnet.threads.cancel",
+          "when": "view == eyedbg.dotnet.threads && eyedbg.dotnet.threads.busy",
+          "group": "navigation@1"
+        },
+        {
+          "command": "eyedbg.dotnet.chooseTarget",
+          "when": "view == eyedbg.dotnet.threads",
+          "group": "navigation@2"
+        },
+        {
+          "command": "eyedbg.dotnet.threads.clear",
+          "when": "view == eyedbg.dotnet.threads",
+          "group": "navigation@3"
+        },
+        {
+          "command": "eyedbg.dotnet.trace.start",
+          "when": "view == eyedbg.dotnet.trace && !eyedbg.dotnet.trace.busy",
+          "group": "navigation@1"
+        },
+        {
+          "command": "eyedbg.dotnet.trace.cancel",
+          "when": "view == eyedbg.dotnet.trace && eyedbg.dotnet.trace.busy",
+          "group": "navigation@1"
+        },
+        {
+          "command": "eyedbg.dotnet.chooseTarget",
+          "when": "view == eyedbg.dotnet.trace",
+          "group": "navigation@2"
+        },
+        {
+          "command": "eyedbg.dotnet.trace.clear",
+          "when": "view == eyedbg.dotnet.trace",
+          "group": "navigation@3"
+        },
+        {
+          "command": "eyedbg.dotnet.trace.openFile",
+          "when": "view == eyedbg.dotnet.trace && !eyedbg.dotnet.trace.busy",
+          "group": "1_open@1"
         }
       ],
       "view/item/context": [
@@ -577,6 +870,26 @@
           "command": "eyedbg.clients.policy",
           "when": "view == eyedbg.clients && viewItem =~ /\\bcanPolicy\\b/",
           "group": "1_lease@5"
+        },
+        {
+          "command": "eyedbg.dotnet.memory.gcroot",
+          "when": "view == eyedbg.dotnet.memory && viewItem == type",
+          "group": "inline@1"
+        },
+        {
+          "command": "eyedbg.dotnet.memory.gcroot",
+          "when": "view == eyedbg.dotnet.memory && viewItem == type",
+          "group": "1_dump@1"
+        },
+        {
+          "command": "eyedbg.dotnet.memory.showThreads",
+          "when": "view == eyedbg.dotnet.memory && viewItem == dump",
+          "group": "1_dump@1"
+        },
+        {
+          "command": "eyedbg.dotnet.memory.copyPath",
+          "when": "view == eyedbg.dotnet.memory && viewItem == dump",
+          "group": "1_dump@2"
         }
       ]
     },
@@ -602,6 +915,15 @@
         }
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "eyedbg-dotnet",
+          "title": "EyeDebugger .NET",
+          "icon": "$(pulse)"
+        }
+      ]
+    },
     "views": {
       "debug": [
         {
@@ -611,6 +933,28 @@
         {
           "id": "eyedbg.clients",
           "name": "EyeDebugger Clients"
+        }
+      ],
+      "eyedbg-dotnet": [
+        {
+          "id": "eyedbg.dotnet.counters",
+          "name": "Counters",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "id": "eyedbg.dotnet.memory",
+          "name": "Memory",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "id": "eyedbg.dotnet.threads",
+          "name": "Threads",
+          "when": "eyedbg.dotnet.show"
+        },
+        {
+          "id": "eyedbg.dotnet.trace",
+          "name": "CPU Trace",
+          "when": "eyedbg.dotnet.show"
         }
       ]
     },
@@ -622,6 +966,22 @@
       {
         "view": "eyedbg.clients",
         "contents": "Who is in the eyedbg sessions you join, who has control, and when each was last seen.\n[Join Session](command:eyedbg.joinSession)"
+      },
+      {
+        "view": "eyedbg.dotnet.counters",
+        "contents": "Live runtime counters of the program you debug, or of a .NET process you pick.\n[Start Counters](command:eyedbg.dotnet.counters.start)\n[Choose Target…](command:eyedbg.dotnet.chooseTarget)"
+      },
+      {
+        "view": "eyedbg.dotnet.memory",
+        "contents": "The types that take the program's memory, from a heap dump, and why their objects are alive.\n[Take Heap Dump](command:eyedbg.dotnet.memory.takeDump)\n[Open Dump File…](command:eyedbg.dotnet.memory.openDump)"
+      },
+      {
+        "view": "eyedbg.dotnet.threads",
+        "contents": "Every thread's stack and the locks, from a heap dump.\n[Capture Threads](command:eyedbg.dotnet.threads.capture)"
+      },
+      {
+        "view": "eyedbg.dotnet.trace",
+        "contents": "The program's hottest methods, or its garbage collections, over a few seconds.\n[Start Trace](command:eyedbg.dotnet.trace.start)\n[Open Trace File…](command:eyedbg.dotnet.trace.openFile)"
       }
     ],
     "walkthroughs": [

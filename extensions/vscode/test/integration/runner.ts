@@ -8,10 +8,15 @@
 // directories and a workspace. EYEDBG_TEST_COUNT=N (or --count N) repeats
 // the whole run N times; the first failure stops it.
 //
-// Environment: EYEDBG_TEST_BIN_DIR (eyedbg and eyedbgd; else they are built
-// from the repository with go), EYEDBG_DATA_DIR / EYEDBG_PYTHON (debugpy, as
-// for the Go e2e tests). On Linux without DISPLAY it re-runs itself under
-// xvfb-run -a.
+// Environment: EYEDBG_TEST_BIN_DIR (eyedbg and eyedbgd, and the .NET helper
+// in helpers/dotnet; else they are built from the repository with go and
+// dotnet), EYEDBG_DATA_DIR / EYEDBG_PYTHON (debugpy, as for the Go e2e
+// tests; the adapters' directory defaults to ~/.eyedbg/tools, used as is),
+// EYEDBG_TEST_DOTNET=0 (skip the .NET tests; else a missing dotnet, helper
+// or netcoredbg fails the run). Each VS Code run has its own EYEDBG_HOME, so
+// dumps and traces never reach ~/.eyedbg. The .NET sample (breadth) is
+// built once per runner invocation. On Linux without DISPLAY it re-runs
+// itself under xvfb-run -a.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -95,7 +100,12 @@ function refuseRealProfile(dirs: string[]): void {
   }
 }
 
-function binaries(scratch: string): string {
+/** dotnetTests: the .NET tests run unless EYEDBG_TEST_DOTNET=0. */
+const dotnetTests = process.env.EYEDBG_TEST_DOTNET !== '0';
+
+const helperDll = path.join('helpers', 'dotnet', 'eyedbg-dotnet-helper.dll');
+
+function binaries(scratch: string, dotnet: string | undefined): string {
   const given = process.env.EYEDBG_TEST_BIN_DIR;
   if (given !== undefined && given !== '') {
     const dir = path.resolve(given);
@@ -103,6 +113,11 @@ function binaries(scratch: string): string {
       if (!fs.existsSync(path.join(dir, b + exe))) {
         throw new Error(`EYEDBG_TEST_BIN_DIR ${dir} has no ${b}${exe}`);
       }
+    }
+    if (dotnetTests && !fs.existsSync(path.join(dir, helperDll))) {
+      throw new Error(
+        `EYEDBG_TEST_BIN_DIR ${dir} has no ${helperDll} (publish it there, see CONTRIBUTING.md), or set EYEDBG_TEST_DOTNET=0`,
+      );
     }
     return dir;
   }
@@ -113,14 +128,96 @@ function binaries(scratch: string): string {
     cwd: repoRoot,
     stdio: 'inherit',
   });
+  if (dotnet !== undefined) {
+    log(`publishing the .NET helper into ${path.join(dir, 'helpers', 'dotnet')}`);
+    execFileSync(
+      dotnet,
+      [
+        'publish',
+        path.join('src', 'EyeDbg.DotnetHelper', 'EyeDbg.DotnetHelper.csproj'),
+        '-c',
+        'Release',
+        '-p:RestoreLockedMode=true',
+        '-nodeReuse:false',
+        '-p:UseSharedCompilation=false',
+        '-o',
+        path.join(dir, 'helpers', 'dotnet'),
+      ],
+      { cwd: path.join(repoRoot, 'helpers', 'dotnet'), stdio: 'inherit' },
+    );
+  }
   return dir;
 }
 
-/** eyedbgEnv is the environment of one run's eyedbg: its own runtime and config directories. */
+/** dataDir is where the adapters are: EYEDBG_DATA_DIR, else ~/.eyedbg/tools (EYEDBG_HOME moves elsewhere). */
+function dataDir(): string {
+  const given = process.env.EYEDBG_DATA_DIR;
+  return given !== undefined && given !== '' ? path.resolve(given) : path.join(os.homedir(), '.eyedbg', 'tools');
+}
+
+/** The .NET sample the .NET tests run: breadth, built in the scratch directory. */
+interface Breadth {
+  dll: string;
+  src: string;
+}
+
+/**
+ * dotnetSetup checks what the .NET tests need — dotnet, netcoredbg — and
+ * builds testdata/apps/dotnet/breadth once, in a copy without bin/obj, so no
+ * build server stays behind; undefined when EYEDBG_TEST_DOTNET=0.
+ */
+function dotnetSetup(scratch: string, eyedbg: string, dotnet: string | undefined): Breadth | undefined {
+  if (!dotnetTests) {
+    log('EYEDBG_TEST_DOTNET=0: skipping the .NET tests');
+    return undefined;
+  }
+  if (dotnet === undefined) {
+    throw new Error('no dotnet on PATH: install the .NET 10 SDK, or set EYEDBG_TEST_DOTNET=0');
+  }
+  const doctor = spawnSync(eyedbg, ['adapters', 'doctor', 'dotnet', '--json'], {
+    env: { ...process.env, EYEDBG_DATA_DIR: dataDir() },
+    encoding: 'utf8',
+    timeout: 60_000,
+  });
+  const line = (doctor.stdout ?? '').split(/\r?\n/)[0] ?? '';
+  let checks: { name?: string; ok?: boolean; detail?: string; fix?: string }[] = [];
+  try {
+    checks = (JSON.parse(line) as { checks?: typeof checks }).checks ?? [];
+  } catch {
+    throw new Error(`eyedbg adapters doctor dotnet printed no JSON: ${doctor.stdout}${doctor.stderr}`);
+  }
+  const bad = checks.filter((c) => c.ok !== true);
+  if (bad.length > 0 || checks.length === 0) {
+    throw new Error(
+      `the .NET tests need: ${bad.map((c) => `${c.name}: ${c.detail} (${c.fix ?? ''})`).join('; ') || 'a netcoredbg'} — or set EYEDBG_TEST_DOTNET=0`,
+    );
+  }
+  const src = path.join(fs.realpathSync.native(scratch), 'breadth');
+  fs.cpSync(path.join(repoRoot, 'testdata', 'apps', 'dotnet', 'breadth'), src, {
+    recursive: true,
+    filter: (f) => !['bin', 'obj'].includes(path.basename(f)),
+  });
+  log(`building breadth in ${src}`);
+  execFileSync(dotnet, ['build', '-c', 'Debug', '-nodeReuse:false', '-p:UseSharedCompilation=false'], {
+    cwd: src,
+    stdio: 'inherit',
+    env: { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_NOLOGO: '1' },
+  });
+  const debug = path.join(src, 'bin', 'Debug');
+  const tfm = fs.readdirSync(debug).find((d) => fs.existsSync(path.join(debug, d, 'breadth.dll')));
+  if (tfm === undefined) {
+    throw new Error(`no breadth.dll under ${debug}`);
+  }
+  return { dll: path.join(debug, tfm, 'breadth.dll'), src };
+}
+
+/** eyedbgEnv is the environment of one run's eyedbg: its own runtime, config and home (dumps, traces) directories. */
 function eyedbgEnv(root: string): Record<string, string | undefined> {
   return {
     EYEDBG_RUNTIME_DIR: path.join(root, 'rt'),
     EYEDBG_CONFIG_DIR: path.join(root, 'cfg'),
+    EYEDBG_HOME: path.join(root, 'home'),
+    EYEDBG_DATA_DIR: dataDir(),
     EYEDBG_CLIENT: undefined,
     EYEDBG_SESSION: undefined,
     EYEDBG_NO_AUTOSTART: undefined,
@@ -202,7 +299,7 @@ function stopDaemon(eyedbg: string, root: string): void {
   }
 }
 
-async function runOnce(run: number, version: string, bin: string): Promise<void> {
+async function runOnce(run: number, version: string, bin: string, breadth: Breadth | undefined): Promise<void> {
   const eyedbg = path.join(bin, `eyedbg${exe}`);
   // Short (the daemon's socket path budget) and canonical (macOS's /var is
   // a symlink; Windows' temp may be an 8.3 short name): ws-link is the only
@@ -224,6 +321,10 @@ async function runOnce(run: number, version: string, bin: string): Promise<void>
         EYEDBG_TEST_EYEDBG: eyedbg,
         EYEDBG_TEST_WS: ws,
         EYEDBG_TEST_WS_LINK: link,
+        EYEDBG_TEST_DOTNET: breadth !== undefined ? '1' : '0',
+        EYEDBG_TEST_BREADTH: breadth?.dll ?? '',
+        EYEDBG_TEST_BREADTH_SRC: breadth?.src ?? '',
+        EYEDBG_TEST_DOTNET_HOST: onPath(`dotnet${exe}`) ?? '',
         // Window focus is unreliable under xvfb and on a busy desktop.
         EYEDBG_TEST_ASSUME_FOCUSED: '1',
       },
@@ -247,11 +348,13 @@ async function main(): Promise<number> {
     .filter((v) => v !== '');
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'edbx-bin-'));
   try {
-    const bin = binaries(scratch);
+    const dotnet = dotnetTests ? onPath(`dotnet${exe}`) : undefined;
+    const bin = binaries(scratch, dotnet);
+    const breadth = dotnetSetup(scratch, path.join(bin, `eyedbg${exe}`), dotnet);
     for (let run = 1; run <= n; run++) {
       const started = Date.now();
       for (const version of versions) {
-        await runOnce(run, version, bin);
+        await runOnce(run, version, bin, breadth);
       }
       log(`run ${run}/${n} passed in ${((Date.now() - started) / 1000).toFixed(1)} s`);
     }

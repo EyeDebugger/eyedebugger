@@ -5,7 +5,7 @@
 // checks), a recorder of every DAP message VS Code exchanges with eyedbg's
 // facade, event-driven waits with deadlines, and the extension's API.
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as vscode from 'vscode';
@@ -492,3 +492,170 @@ export const editorEvents: vscode.Event<unknown>[] = [
   vscode.window.onDidChangeActiveTextEditor,
   vscode.window.onDidChangeTextEditorSelection,
 ];
+
+// --- .NET (breadth, the runner's build of testdata/apps/dotnet/breadth) ---
+
+/** dotnetTests: the runner built breadth and checked dotnet, the helper and netcoredbg (EYEDBG_TEST_DOTNET != 0). */
+export const dotnetTests = process.env.EYEDBG_TEST_DOTNET === '1';
+export const breadth = process.env.EYEDBG_TEST_BREADTH ?? '';
+export const breadthSrc = process.env.EYEDBG_TEST_BREADTH_SRC ?? '';
+const dotnetHost = process.env.EYEDBG_TEST_DOTNET_HOST ?? '';
+/** The run's EYEDBG_HOME: dumps and traces land in it. */
+export const eyedbgHome = process.env.EYEDBG_HOME ?? '';
+
+/** skipDotnet logs a skip and reports true when the .NET tests are off. */
+export function skipDotnet(ctx: Ctx, name: string): boolean {
+  if (!dotnetTests) {
+    ctx.log(`SKIP ${name}: EYEDBG_TEST_DOTNET=0`);
+  }
+  return !dotnetTests;
+}
+
+/** breadthLine is the line of breadth's source file with "// marker: NAME". */
+export function breadthLine(file: string, name: string): number {
+  const lines = fs.readFileSync(path.join(breadthSrc, file), 'utf8').split(/\r?\n/);
+  const i = lines.findIndex((l) => l.includes(`// marker: ${name}`));
+  if (i < 0) {
+    throw new Error(`${file} has no marker ${name}`);
+  }
+  return i + 1;
+}
+
+let markers = 0;
+
+/** marker is a new path whose creation ends a breadth scenario (in the run's temporary root). */
+function newMarker(): string {
+  return path.join(path.dirname(ws), `mk-${process.pid}-${++markers}`);
+}
+
+/**
+ * startDotnetAgent starts breadth SCENARIO as the agent under netcoredbg
+ * (breakpoints first) and waits for its 'ready PID'; the cleanup creates
+ * its marker (the program ends) and stops the session.
+ */
+export async function startDotnetAgent(
+  ctx: Ctx,
+  scenario: string,
+  bps: string[] = [],
+): Promise<{ id: string; pid: number; marker: string }> {
+  const marker = newMarker();
+  const r = await cli([
+    'start',
+    'dotnet',
+    `--program=${breadth}`,
+    ...bps.map((b) => `--bp=${b}`),
+    '--timeout=90s',
+    '--json',
+    '--',
+    scenario,
+    marker,
+  ]);
+  const id: string = r.json.session.id;
+  ctx.cleanup(async () => {
+    fs.writeFileSync(marker, '');
+    await stopSession(id);
+  });
+  const ready = await waitEvents(id, 'output', 0, (e) => /^ready \d+/.test(e.text ?? ''));
+  const pid = Number(/^ready (\d+)/.exec(ready.text)?.[1]);
+  ctx.log(`agent started ${id}: breadth ${scenario}, pid ${pid}`);
+  return { id, pid, marker };
+}
+
+/**
+ * startBareBreadth runs breadth SCENARIO without a debugger and waits for
+ * its 'ready PID'; the cleanup creates its marker and waits for its exit
+ * (killing it after 20 s).
+ */
+export async function startBareBreadth(
+  ctx: Ctx,
+  scenario: string,
+): Promise<{ pid: number; exited: Promise<void>; end: () => void }> {
+  const marker = newMarker();
+  const child = spawn(dotnetHost, [breadth, scenario, marker], {
+    cwd: breadthSrc,
+    stdio: ['ignore', 'pipe', 'inherit'],
+    windowsHide: true,
+    env: { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_NOLOGO: '1' },
+  });
+  const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+  ctx.cleanup(async () => {
+    fs.writeFileSync(marker, '');
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([exited, new Promise<void>((resolve) => (timer = setTimeout(resolve, 20_000)))]);
+    clearTimeout(timer);
+    if (child.exitCode === null && child.signalCode === null) {
+      ctx.log(`breadth ${scenario} (pid ${child.pid}) didn't exit 20 s after its marker: killing it`);
+      child.kill('SIGKILL');
+      await exited;
+    }
+  });
+  const pid = await new Promise<number>((resolve, reject) => {
+    let out = '';
+    const timer = setTimeout(() => reject(new Error(`breadth ${scenario} printed no 'ready' in 60 s: ${out}`)), 60_000);
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (s: string) => {
+      out += s;
+      const m = /ready (\d+)/.exec(out);
+      if (m?.[1] !== undefined) {
+        clearTimeout(timer);
+        resolve(Number(m[1]));
+      }
+    });
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      reject(new Error(`breadth ${scenario} exited (${code}) before it was ready: ${out}`));
+    });
+  });
+  ctx.log(`bare breadth ${scenario}: pid ${pid}`);
+  return { pid, exited, end: () => fs.writeFileSync(marker, '') };
+}
+
+/** joinRunning joins a running session (no first stop to wait for): once VS Code's configurationDone is answered. */
+export async function joinRunning(rec: Recorder, id: string): Promise<Conn> {
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  const ok = await vscode.debug.startDebugging(folder, {
+    type: 'eyedbg',
+    request: 'attach',
+    name: `join ${id}`,
+    session: id,
+  });
+  if (!ok) {
+    throw new Error(`startDebugging for ${id} returned false`);
+  }
+  const conn = await rec.conn(id);
+  await rec.find(
+    conn,
+    `configurationDone answered for ${id}`,
+    (r) => r.dir === 'in' && r.m.type === 'response' && r.m.command === 'configurationDone',
+  );
+  return conn;
+}
+
+/** files lists a directory's files ([] if it doesn't exist). */
+export function files(dir: string): string[] {
+  try {
+    return fs.readdirSync(dir).sort();
+  } catch {
+    return [];
+  }
+}
+
+/** underDir reports whether p is inside dir (real paths; Windows: case-insensitively). */
+export function underDir(p: string, dir: string): boolean {
+  const real = (x: string) => fs.realpathSync.native(x);
+  const rel = path.relative(real(dir), real(p));
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/** watchDir is an event for any change under dir (recursive; the directory must exist). */
+export function watchDir(dir: string): vscode.Disposable & { event: vscode.Event<void> } {
+  const emitter = new vscode.EventEmitter<void>();
+  const w = fs.watch(dir, { recursive: true }, () => emitter.fire());
+  return {
+    event: emitter.event,
+    dispose: () => {
+      w.close();
+      emitter.dispose();
+    },
+  };
+}

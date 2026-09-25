@@ -19,6 +19,7 @@ import './activity.test';
 import './follow.test';
 import './clients.test';
 import './autojoin.test';
+import './dotnet.test';
 
 export async function run(): Promise<void> {
   rec();
