@@ -5,6 +5,7 @@
 //   dotnet breadth.dll throw          throws and catches an exception
 //   dotnet breadth.dll crash          throws an exception nothing catches
 //   dotnet breadth.dll wait MARKER    ticks until the file MARKER exists
+//   dotnet breadth.dll hold MARKER    like wait, keeping 5000 objects and a contended lock (Hold.cs)
 var scenario = args.Length > 0 ? args[0] : "loop";
 
 switch (scenario)
@@ -20,6 +21,9 @@ switch (scenario)
         break;
     case "wait":
         Wait(args[1]);
+        break;
+    case "hold":
+        Hold.Run(args[1]);
         break;
     default:
         Console.Error.WriteLine($"unknown scenario {scenario}");

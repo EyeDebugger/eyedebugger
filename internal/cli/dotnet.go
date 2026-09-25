@@ -65,8 +65,9 @@ const dotnetHelp = `
 
 Runs the .NET side helper (helpers/dotnet next to eyedbg, or $EYEDBG_DOTNET_HELPER) with the
 dotnet host (.NET 8 or later), one process per command; it talks to the target's diagnostics
-endpoint read-only. Only your own processes: another user's is refused. Not a debug-session
-action: no control lease, nothing in the session's events; it works with or without a session.
+endpoint, inspecting the process without changing it. Only your own processes: another user's is
+refused. Not a debug-session action: no control lease, nothing in the session's events; it works
+with or without a session.
 
 On a shared machine that check covers the process, not its endpoint: the .NET diagnostics client
 finds the endpoint by name (a socket in the program's TMPDIR on Linux, in eyedbg's on macOS; a pipe
@@ -85,23 +86,29 @@ HELPER_FAILED (the helper crashed or timed out; its stderr is shown).`
 func newDotnetCommand(info version.Info, g *globals) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "dotnet",
-		Short: "Inspect .NET processes without pausing them: list them, sample runtime counters",
-		Long: `Inspect running .NET (Core 3.0 or later) processes without pausing or debugging them, through
-the runtime's diagnostics endpoint (EventPipe): 'eyedbg dotnet ps' lists the processes you can
-inspect, 'eyedbg dotnet counters' samples one's CPU, memory, GC, thread pool, exceptions and JIT
-counters. Use them to see how a program behaves (is it allocating, collecting, throwing, starving
-its thread pool?) while it runs — e.g. the debuggee of a running session, or any .NET process of
-yours by pid.
+		Short: "Inspect .NET processes without debugging them: counters, dumps, heap, threads",
+		Long: `Inspect running .NET (Core 3.0 or later) processes without debugging them, through the
+runtime's diagnostics endpoint: 'eyedbg dotnet ps' lists the processes you can inspect, 'eyedbg
+dotnet counters' samples one's CPU, memory, GC, thread pool, exceptions and JIT counters without
+pausing it. When memory grows or a program hangs, 'eyedbg dotnet heap' shows what fills its heap
+and why objects are alive, 'eyedbg dotnet threads' what its threads are doing and who holds a lock;
+both read a dump ('eyedbg dotnet dump'), which suspends the process for the moment it is written.
+Use them on the debuggee of a session (even one stopped at a breakpoint, except counters) or any
+.NET process of yours by pid. dump, heap and threads have more exit codes (DUMP_*): see their
+help.
 
 Without a subcommand, prints this help and exits 0; an unknown subcommand exits 1.` + dotnetHelp,
 		Example: `  eyedbg dotnet ps
   eyedbg dotnet counters                          # the only session's program, 5s
-  eyedbg dotnet counters --pid 4321 --watch`,
+  eyedbg dotnet counters --pid 4321 --watch
+  eyedbg dotnet heap --pid 4321 --gcroot MyApp.Order
+  eyedbg dotnet threads                           # the only session's program`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 
-	cmd.AddCommand(newDotnetPsCommand(info, g), newDotnetCountersCommand(info, g))
+	cmd.AddCommand(newDotnetPsCommand(info, g), newDotnetCountersCommand(info, g), newDotnetDumpCommand(info, g),
+		newDotnetHeapCommand(info, g), newDotnetThreadsCommand(info, g))
 
 	return cmd
 }
@@ -382,7 +389,7 @@ overhead; the program keeps running. --json: {"schema": 1, "target": {pid, name,
 func runCounters(cmd *cobra.Command, info version.Info, g *globals, p countersPlan) error {
 	ctx := cmd.Context()
 
-	target, err := counterTarget(cmd, info, g, p.params.PID)
+	target, err := resolveTarget(cmd, info, g, p.params.PID, false)
 	if err != nil {
 		return err
 	}
@@ -423,8 +430,10 @@ func runCounters(cmd *cobra.Command, info version.Info, g *globals, p countersPl
 	return writeCountersSummary(out, aggregate(target, p.params, c.samples, res), g.json)
 }
 
-// counterTarget resolves --pid, else the session, to a process.
-func counterTarget(cmd *cobra.Command, info version.Info, g *globals, pid int) (dotnetTarget, error) {
+// resolveTarget resolves --pid, else the session, to a process;
+// allowStopped admits a session stopped at a breakpoint (dumps: the
+// runtime writes them from a native thread).
+func resolveTarget(cmd *cobra.Command, info version.Info, g *globals, pid int, allowStopped bool) (dotnetTarget, error) {
 	ctx := cmd.Context()
 	if pid > 0 {
 		return resolvePIDTarget(ctx, pid, proc.Lookup)
@@ -446,7 +455,7 @@ func counterTarget(cmd *cobra.Command, info version.Info, g *globals, pid int) (
 		return dotnetTarget{}, err
 	}
 
-	return resolveSessionTarget(ctx, snap, proc.Lookup)
+	return resolveSessionTarget(ctx, snap, proc.Lookup, allowStopped)
 }
 
 // resolvePIDTarget checks pid is a process of the caller's (D10).
@@ -471,8 +480,9 @@ func resolvePIDTarget(ctx context.Context, pid int, lookup lookupFunc) (dotnetTa
 	return dotnetTarget{PID: pid, Name: p.Name}, nil
 }
 
-// resolveSessionTarget picks a session's debuggee: a running .NET program.
-func resolveSessionTarget(ctx context.Context, snap api.Snapshot, lookup lookupFunc) (dotnetTarget, error) {
+// resolveSessionTarget picks a session's debuggee: a running .NET program,
+// or with allowStopped one stopped at a breakpoint too.
+func resolveSessionTarget(ctx context.Context, snap api.Snapshot, lookup lookupFunc, allowStopped bool) (dotnetTarget, error) {
 	s := snap.Session
 	orPID := "or pass --pid N (see 'eyedbg dotnet ps')"
 
@@ -483,7 +493,7 @@ func resolveSessionTarget(ctx context.Context, snap api.Snapshot, lookup lookupF
 	case s.State == api.StateExited || s.State == api.StateLost:
 		return dotnetTarget{}, api.NewError(api.CodeSessionExited, fmt.Sprintf("session %s has ended (%s)", s.ID, s.State),
 			"start it again, "+orPID)
-	case s.State == api.StateStopped:
+	case s.State == api.StateStopped && !allowStopped:
 		reason := "stopped"
 		if s.Stop != nil && s.Stop.Reason != "" {
 			reason += " (" + s.Stop.Reason + ")"
@@ -492,7 +502,7 @@ func resolveSessionTarget(ctx context.Context, snap api.Snapshot, lookup lookupF
 		return dotnetTarget{}, api.NewError(api.CodeNotRunning,
 			fmt.Sprintf("session %s is %s: a stopped .NET runtime can't start a diagnostics session", s.ID, reason),
 			"continue it ('eyedbg continue'), or read state with 'eyedbg vars'/'eyedbg stack'")
-	case s.State != api.StateRunning || s.PID <= 0:
+	case (s.State != api.StateRunning && s.State != api.StateStopped) || s.PID <= 0:
 		return dotnetTarget{}, api.NewError(api.CodeNotRunning, fmt.Sprintf("session %s is still starting (no process yet)", s.ID),
 			"wait for it ('eyedbg wait'), then try again")
 	}

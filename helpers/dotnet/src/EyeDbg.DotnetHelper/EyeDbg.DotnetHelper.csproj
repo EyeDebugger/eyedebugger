@@ -19,6 +19,8 @@
 
     <ItemGroup>
         <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" />
+        <!-- ClrMD: reads dumps for 'eyedbg dotnet heap|threads' (ADR 0016 addendum, P2-M7). -->
+        <PackageReference Include="Microsoft.Diagnostics.Runtime" />
         <!-- build/buildTransitive would copy Windows-only native ETW/DIA libraries (~10 MB)
              that EventPipe parsing doesn't use. -->
         <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" ExcludeAssets="build;buildTransitive" />

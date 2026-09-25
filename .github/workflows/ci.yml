@@ -552,7 +552,8 @@ jobs:
           [ "${#archives[@]}" -eq 6 ] || { echo "::error::expected 6 archives, found ${#archives[@]}"; exit 1; }
           for a in "${archives[@]}"; do
             if [[ "$a" == *.zip ]]; then list=$(unzip -Z1 "$a"); else list=$(tar -tzf "$a"); fi
-            for f in eyedbg-dotnet-helper.dll eyedbg-dotnet-helper.runtimeconfig.json eyedbg-dotnet-helper.deps.json THIRD-PARTY-NOTICES.txt; do
+            for f in eyedbg-dotnet-helper.dll eyedbg-dotnet-helper.runtimeconfig.json eyedbg-dotnet-helper.deps.json THIRD-PARTY-NOTICES.txt \
+              Microsoft.Diagnostics.Runtime.dll; do
               grep -qx "helpers/dotnet/$f" <<<"$list" || { echo "::error::$a lacks helpers/dotnet/$f"; exit 1; }
             done
           done

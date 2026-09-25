@@ -7,6 +7,7 @@
     </PropertyGroup>
     <ItemGroup>
         <PackageVersion Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.745401" />
+        <PackageVersion Include="Microsoft.Diagnostics.Runtime" Version="4.1.745802" />
         <PackageVersion Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.6" />
         <PackageVersion Include="xunit.v3.mtp-off" Version="4.0.1" />
     </ItemGroup>

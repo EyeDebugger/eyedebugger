@@ -23,7 +23,7 @@ import (
 // The .NET side helper's end-to-end tests (docs/adr/0016): the real helper,
 // published next to the eyedbg binariesFor built (the default lookup, not
 // $EYEDBG_DOTNET_HELPER), against real .NET processes: testdata/apps/dotnet/breadth
-// in its 'wait' mode.
+// in its 'wait' and 'hold' modes.
 
 // helperOnce guards the one helper publish and breadth build every test
 // shares; both land in binDir, removed by TestMain.
@@ -110,7 +110,16 @@ func prepareHelper(host string) error {
 func startWaiting(t *testing.T, host string, env ...string) int {
 	t.Helper()
 
-	cmd := exec.CommandContext(t.Context(), host, breadthDLL, "wait", filepath.Join(t.TempDir(), "never"))
+	return startBreadth(t, host, "wait", env...)
+}
+
+// startBreadth runs 'dotnet breadth.dll SCENARIO MARKER' (wait, hold) with
+// extra env and returns its pid once it said "ready"; it is killed when the
+// test ends.
+func startBreadth(t *testing.T, host, scenario string, env ...string) int {
+	t.Helper()
+
+	cmd := exec.CommandContext(t.Context(), host, breadthDLL, scenario, filepath.Join(t.TempDir(), "never"))
 	cmd.Env = append(os.Environ(), env...)
 
 	out, err := cmd.StdoutPipe()

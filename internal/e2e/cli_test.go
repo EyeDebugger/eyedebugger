@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eyedebugger/eyedebugger/internal/adapters"
 	"github.com/eyedebugger/eyedebugger/internal/api"
 )
 
@@ -46,6 +47,13 @@ type harness struct {
 	eyedbg     string
 	runtimeDir string
 	configDir  string
+	// homeDir is $EYEDBG_HOME: dumps land in its dumps/, never in the
+	// developer's ~/.eyedbg.
+	homeDir string
+	// dataDir is where adapters are found: $EYEDBG_DATA_DIR, else the
+	// default resolved from this process's environment (~/.eyedbg/tools),
+	// kept although EYEDBG_HOME moves.
+	dataDir string
 }
 
 // newHarness builds eyedbg/eyedbgd (once for the package, binariesFor) and
@@ -65,7 +73,12 @@ func newHarness(t *testing.T) *harness {
 
 	t.Cleanup(func() { _ = os.RemoveAll(runtimeDir) })
 
-	h := &harness{t: t, eyedbg: eyedbg, runtimeDir: runtimeDir, configDir: t.TempDir()}
+	dataDir, err := adapters.DataDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := &harness{t: t, eyedbg: eyedbg, runtimeDir: runtimeDir, configDir: t.TempDir(), homeDir: t.TempDir(), dataDir: dataDir}
 
 	t.Cleanup(func() {
 		h.run("daemon", "stop", "--force")
@@ -85,7 +98,8 @@ func newHarness(t *testing.T) *harness {
 }
 
 // env returns os.Environ() with the given keys overridden ("": removed):
-// every eyedbg call gets its own runtime and config directory and a clean
+// every eyedbg call gets its own runtime, config and home directory (the
+// adapters' data directory stays where it was) and a clean
 // client/session/autostart state, but otherwise inherits this process's
 // environment unchanged, so a developer's or CI's EYEDBG_DATA_DIR,
 // EYEDBG_NETCOREDBG or EYEDBG_PYTHON (real-adapter discovery) still reach
@@ -101,6 +115,8 @@ func (h *harness) env(overrides map[string]string) []string {
 		"EYEDBG_DAEMON_PATH":  "",
 		// The .NET helper e2e tests the default lookup (next to eyedbg).
 		"EYEDBG_DOTNET_HELPER": "",
+		adapters.EnvHome:       h.homeDir,
+		adapters.EnvDataDir:    h.dataDir,
 	}
 
 	maps.Copy(all, overrides)

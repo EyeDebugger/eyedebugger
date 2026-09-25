@@ -19,6 +19,9 @@ internal static class Program
         {
             [ProcessesMethod.Method] = ProcessesMethod.Handler(new DiagnosticsProcessSource(), Environment.ProcessId),
             [CountersMethod.Method] = CountersMethod.Handler(),
+            [DumpMethod.Method] = DumpMethod.Handler(),
+            [HeapMethod.Method] = HeapMethod.Handler(),
+            [ThreadsMethod.Method] = ThreadsMethod.Handler(),
         };
         var server = new Server(new LineReader(input), new MessageWriter(output), methods);
         return await server.RunAsync().ConfigureAwait(false);

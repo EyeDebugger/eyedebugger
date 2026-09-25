@@ -36,20 +36,7 @@ internal static class CounterSession
     public static async Task<CountersResult> RunAsync(CountersParams p, Action<CounterSample> emit, CancellationToken cancellationToken)
     {
         using var process = TargetProbe.Find(p.Pid);
-        if (OperatingSystem.IsWindows())
-        {
-            // The router pipe first: NETCore.Client would use it even without the real one.
-            var pipes = TargetProbe.FindWindowsPipes(p.Pid);
-            if (pipes.Router)
-            {
-                throw TargetProbe.RouterPipe(p.Pid, NameOf(process));
-            }
-
-            if (!pipes.Endpoint)
-            {
-                throw TargetProbe.NoEndpoint(p.Pid, TargetProbe.Facts(process));
-            }
-        }
+        TargetProbe.CheckEndpoint(p.Pid, process);
 
         var session = await StartAsync(p, process, cancellationToken).ConfigureAwait(false);
         using (session)
@@ -94,7 +81,7 @@ internal static class CounterSession
             {
                 throw new HelperException(
                     ErrorCodes.DiagnosticsTimeout,
-                    "no samples from " + TargetProbe.Describe(p.Pid, NameOf(process)) + " in " + Seconds(p.DurationMs) + ": it is paused (stopped under a debugger, or suspended) or hung",
+                    "no samples from " + TargetProbe.Describe(p.Pid, TargetProbe.NameOf(process)) + " in " + Seconds(p.DurationMs) + ": it is paused (stopped under a debugger, or suspended) or hung",
                     "continue it if a debugger holds it, then try again");
             }
 
@@ -120,19 +107,19 @@ internal static class CounterSession
         start.CancelAfter(StartTimeout);
         try
         {
-            // Read-only diagnostics only (docs/adr/0016): StartEventPipeSession[Async] and
-            // GetPublishedProcesses are the only DiagnosticsClient calls this helper makes.
+            // Permitted DiagnosticsClient calls only (docs/adr/0016): GetPublishedProcesses,
+            // StartEventPipeSession[Async] and, for dumps, WriteDumpAsync.
             return await new DiagnosticsClient(p.Pid)
                 .StartEventPipeSessionAsync(providers, requestRundown: false, circularBufferMB: 4, start.Token)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw StartTimedOut(p.Pid, NameOf(process));
+            throw StartTimedOut(p.Pid, TargetProbe.NameOf(process));
         }
         catch (TimeoutException)
         {
-            throw StartTimedOut(p.Pid, NameOf(process));
+            throw StartTimedOut(p.Pid, TargetProbe.NameOf(process));
         }
         catch (ServerNotAvailableException)
         {
@@ -191,18 +178,6 @@ internal static class CounterSession
         ErrorCodes.DiagnosticsTimeout,
         TargetProbe.Describe(pid, name) + " didn't start a diagnostics session within " + Seconds((long)StartTimeout.TotalMilliseconds) + ": it is paused (stopped under a debugger, or suspended) or hung",
         "if a debugger holds it, continue it first ('eyedbg continue'); a stopped .NET runtime can't start a diagnostics session");
-
-    private static string? NameOf(Process process)
-    {
-        try
-        {
-            return process.ProcessName;
-        }
-        catch (Exception e) when (e is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
-        {
-            return null;
-        }
-    }
 
     private static string Seconds(long ms) => (ms / 1000.0).ToString("0.###", CultureInfo.InvariantCulture) + "s";
 }

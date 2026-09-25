@@ -1,0 +1,45 @@
+threads of pid 4321 (dotnet), session s-k3f9 · dump /home/u/.eyedbg/dumps/4321-20260925T150300Z-heap-1f3a9c0e.dmp (.NET 10.0.12, workstation GC)
+7 threads
+locks:
+  System.Object 0x13de6eb78 held by thread 4, 1 waiting
+  App.Evil?[2J? 0x13de6ec00 not held, 2 waiting
+thread 4 (holds a lock):
+  [runtime frame InlinedCallFrame] ×2
+  System.Threading.Thread.Sleep(Int32) +0x0
+  Hold.Own(System.Object) +0x1b (Hold.cs:47)
+  …2 more frames (--frames N)
+thread 5 (exception System.InvalidOperationException):
+  System.Threading.Monitor.Enter(System.Object) +0x18
+  App.Evil?]0;x?.Run() +0x8
+  …1 more frame (--frames N)
+threads 7, 8, 9 (3 threads, background, threadpool):
+  [runtime frame InlinedCallFrame]
+  System.Threading.PortableThreadPool+WorkerThread.WorkerThreadStart() +0x28
+thread 1:
+  System.Threading.Thread.Sleep(Int32) +0x0
+  Hold.Run(System.String) +0x122 (Hold.cs:32)
+  Program.<Main>$(System.String[]) +0x81 (Program.cs:26)
+thread 2 (background, finalizer):
+  [runtime frame DebuggerU2MCatchHandlerFrame]
+same dump: eyedbg dotnet heap /home/u/.eyedbg/dumps/4321-20260925T150300Z-heap-1f3a9c0e.dmp
+threads of dump /tmp/app.dmp (.NET 10.0.12, workstation GC)
+7 threads
+locks: not in a mini or triage dump (take a heap dump)
+thread 5 (exception System.InvalidOperationException):
+  System.Threading.Monitor.Enter(System.Object) +0x18
+  App.Evil?]0;x?.Run() +0x8
+  …1 more frame (--frames N)
+threads 7, 8, 9 (3 threads, background, threadpool):
+  [runtime frame InlinedCallFrame]
+  System.Threading.PortableThreadPool+WorkerThread.WorkerThreadStart() +0x28
+thread 1:
+  System.Threading.Thread.Sleep(Int32) +0x0
+  Hold.Run(System.String) +0x122 (Hold.cs:32)
+  Program.<Main>$(System.String[]) +0x81 (Program.cs:26)
+thread 2 (background, finalizer):
+  [runtime frame DebuggerU2MCatchHandlerFrame]
+thread 4:
+  [runtime frame InlinedCallFrame] ×2
+  System.Threading.Thread.Sleep(Int32) +0x0
+  Hold.Own(System.Object) +0x1b (Hold.cs:47)
+  …2 more frames (--frames N)

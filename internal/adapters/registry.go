@@ -57,7 +57,7 @@ func UserDir() (string, error) {
 		return filepath.Join(dir, "adapters"), nil
 	}
 
-	home, err := homeDir()
+	home, err := HomeDir()
 	if err != nil {
 		return "", fmt.Errorf("locate the manifest directory (set %s or %s): %w", EnvConfigDir, EnvHome, err)
 	}

@@ -14,4 +14,7 @@ internal static class ErrorCodes
     public const string NotDotnet = "NOT_DOTNET";
     public const string DiagnosticsDisabled = "DIAGNOSTICS_DISABLED";
     public const string DiagnosticsTimeout = "DIAGNOSTICS_TIMEOUT";
+    public const string DumpUnsupported = "DUMP_UNSUPPORTED";
+    public const string DumpRuntimeMissing = "DUMP_RUNTIME_MISSING";
+    public const string DumpFailed = "DUMP_FAILED";
 }

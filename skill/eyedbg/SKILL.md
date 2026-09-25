@@ -70,6 +70,9 @@ eyedbg stop                                       # always, when done
 - `eyedbg attach dotnet --pid N` (your own processes); `eyedbg stop` then detaches.
 - Without pausing: `eyedbg dotnet counters` samples CPU, memory, GC, thread pool and exceptions
   for 5s (`-s ID`, or `--pid N` from `eyedbg dotnet ps`). Not while stopped: continue first.
+- Memory grows: `eyedbg dotnet heap` (top types; `--gcroot TYPE` says why alive). Hang or deadlock:
+  `eyedbg dotnet threads` (stacks, lock owners). Both dump first, even while stopped; dumps hold the
+  program's memory: private, never share them.
 - Eval can't run lambdas or LINQ; property getters run anyway. `$exception` at an exception stop.
   An unhandled exception always stops. No .NET on Intel Macs or Windows on Arm.
 
@@ -106,8 +109,8 @@ eyedbg stop                                       # always, when done
 
 - 0 — success, including a wait that timed out (read the output)
 - 1 — INVALID_REQUEST, SIDE_EFFECTS, ANCHOR_NOT_FOUND, ANCHOR_AMBIGUOUS
-- 2 — NO_SESSION, NOT_STOPPED, NOT_RUNNING, SESSION_EXITED, LEASE_HELD, NOT_OWNER, NOT_DOTNET, DIAGNOSTICS_DISABLED, DIAGNOSTICS_TIMEOUT
-- 3 — ADAPTER_NOT_INSTALLED, BUILD_FAILED, ATTACH_FAILED, NO_TEST_HOST, HELPER_NOT_FOUND, HELPER_MISMATCH (run the hint)
-- 4 — ADAPTER_ERROR (the expression didn't evaluate), UNSUPPORTED_BY_ADAPTER, HELPER_FAILED
+- 2 — NO_SESSION, NOT_STOPPED, NOT_RUNNING, SESSION_EXITED, LEASE_HELD, NOT_OWNER, NOT_DOTNET, DIAGNOSTICS_DISABLED, DIAGNOSTICS_TIMEOUT, DUMP_UNSUPPORTED
+- 3 — ADAPTER_NOT_INSTALLED, BUILD_FAILED, ATTACH_FAILED, NO_TEST_HOST, HELPER_NOT_FOUND, HELPER_MISMATCH, DUMP_RUNTIME_MISSING (run the hint)
+- 4 — ADAPTER_ERROR (the expression didn't evaluate), UNSUPPORTED_BY_ADAPTER, HELPER_FAILED, DUMP_FAILED
 
 Errors print `[CODE]` and a `hint:` line — follow the hint. Finally: `eyedbg stop`.

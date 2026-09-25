@@ -96,8 +96,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in every release archive under `helpers/dotnet/`, with `THIRD-PARTY-NOTICES.txt` for the MIT
   licensed Microsoft assemblies it carries; `$EYEDBG_DOTNET_HELPER` overrides where eyedbg looks
   for it.
+- `eyedbg dotnet dump`, `eyedbg dotnet heap` and `eyedbg dotnet threads` (phase 2, ADR 0016
+  addendum): `dump [-s ID | --pid N] [--type heap|mini|triage|full] [--out PATH]` has the runtime
+  write a dump of the process (suspending it meanwhile) into eyedbg's private directory
+  (`<EYEDBG_HOME or ~/.eyedbg>/dumps`, 0700, files 0600; eyedbg's dumps are removed after 7 days and
+  beyond the newest 10) or to `--out`, which is never overwritten. `heap [DUMP | -s | --pid]` shows
+  objects and bytes per generation and the top types by size (`--top`, `--type PATTERN`);
+  `--gcroot TYPE|0xADDRESS` shows root paths — a static field, a thread's stack, a handle — that keep
+  them alive (`--paths`). `threads [DUMP | -s | --pid]` shows each managed thread's top frames with
+  source file:line (threads with the same stack grouped), and the contended locks with their owner
+  and waiters. Given a process, heap and threads dump it first; a session stopped at a breakpoint
+  can be dumped (unlike counters). Output never shows field values, strings, thread names or
+  exception messages. New error codes: `DUMP_UNSUPPORTED` (exit 2), `DUMP_RUNTIME_MISSING` (exit 3),
+  `DUMP_FAILED` (exit 4). `version --json` features add `"dotnet.dump"`.
 
 ### Changed
+
+- The .NET helper ships ClrMD 4.1 (`Microsoft.Diagnostics.Runtime`) and its dependencies — among
+  them Azure.Core, Azure.Identity and MSAL, which it never uses (ClrMD's symbol server, which the
+  helper doesn't construct: dumps are analyzed without downloading anything); 35 files, 8.9 MB,
+  all MIT, listed in `THIRD-PARTY-NOTICES.txt`. Some shared dependencies moved to 10.0.x. CI checks
+  every archive carries `Microsoft.Diagnostics.Runtime.dll`.
 
 - CI builds, tests (on .NET 8 and 10, Linux/macOS/Windows) and audits the .NET helper (`helper`
   job), publishes it in an unprivileged `helper-dist` job and checks every snapshot archive carries

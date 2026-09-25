@@ -190,11 +190,15 @@ The .NET side helper (ADR 0016) follows the same rules where they apply; these a
   its reason. `task helper:fmt` formats; `task helper:lint` checks.
 - stdout is the protocol only: `Program` calls `Console.SetOut(Console.Error)` first and writes
   messages through `Console.OpenStandardOutput()`, one line each, under 1 MiB.
-- Nothing read from a target process (values, memory, environment, command lines) goes into
-  stderr, exception messages or results beyond what a method's contract names (counter values);
-  messages may name a pid, a process name and an exception type.
-- `DiagnosticsClient`: only `GetPublishedProcesses` and `StartEventPipeSession[Async]` (read-only
-  diagnostics); a new call needs its own review.
+- Nothing read from a target process or a dump (values, memory, strings, thread names, exception
+  messages, environment, command lines) goes into stderr, exception messages or results beyond what
+  a method's contract names (counter values; type, method, static field and file names, counts,
+  sizes, addresses); messages may name a pid, a process name, a path and an exception type.
+- `DiagnosticsClient`: only `GetPublishedProcesses`, `StartEventPipeSession[Async]` and
+  `WriteDumpAsync` with no flags (ADR 0016 and its P2-M7 addendum); a new call needs its own review.
+- ClrMD: dumps only (never `AttachToProcess` or `CreateSnapshotAndAttach`), always with
+  `Analysis/NoFileLocator` (no symbol servers or shared caches), the DAC path chosen by
+  `Analysis/DumpLoader`; the Windows signature check stays on.
 - An EventPipe stream is always drained on its own thread until the session ends; every wait on
   the target (session start, stop) is bounded.
 - Packages: exact versions in `Directory.Packages.props`, lock files committed, restores locked
