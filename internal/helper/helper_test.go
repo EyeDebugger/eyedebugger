@@ -15,7 +15,6 @@ import (
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/helper/helpertest"
-	"github.com/eyedebugger/eyedebugger/internal/proc"
 )
 
 // TestMain lets the test binary double as the fake helper.
@@ -66,11 +65,12 @@ func start(t *testing.T, mode string) *Helper {
 	return h
 }
 
+// requireGone checks that the helper's process has ended (processGone).
 func requireGone(t *testing.T, pid int) {
 	t.Helper()
 
-	if _, err := proc.Lookup(context.Background(), pid); !errors.Is(err, proc.ErrNoProcess) {
-		t.Errorf("helper pid %d still there after Close: lookup err = %v", pid, err)
+	if err := processGone(pid); err != nil {
+		t.Errorf("helper pid %d still there after Close: %v", pid, err)
 	}
 }
 
