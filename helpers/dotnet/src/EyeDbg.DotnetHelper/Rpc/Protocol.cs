@@ -178,6 +178,92 @@ internal sealed record FrameInfo(string Kind, string Method, string? Module, int
 /// <summary>A lock (a monitor with a sync block) held or waited on: object, its type, owner's managed id, waiters.</summary>
 internal sealed record LockInfo(string Object, string Type, int? Owner, int Waiting);
 
+/// <summary>Parameters of trace.</summary>
+internal sealed record TraceParams
+{
+    [JsonRequired]
+    public int Pid { get; init; }
+
+    /// <summary>cpu or gc.</summary>
+    [JsonRequired]
+    public string Profile { get; init; } = "";
+
+    [JsonRequired]
+    public long DurationMs { get; init; }
+
+    /// <summary>Where the trace is written: absolute, and nothing there yet.</summary>
+    [JsonRequired]
+    public string Path { get; init; } = "";
+}
+
+/// <summary>Result of trace: the file's size, how long it recorded, why it ended (duration, exited, size).</summary>
+internal sealed record TraceResult(long Bytes, long ElapsedMs, string EndReason);
+
+/// <summary>Parameters of traceSummary.</summary>
+internal sealed record TraceSummaryParams
+{
+    /// <summary>The .nettrace file: absolute.</summary>
+    [JsonRequired]
+    public string Path { get; init; } = "";
+
+    /// <summary>Where the summary's temporary file goes: absolute, nothing there nor at scratch + ".new".</summary>
+    [JsonRequired]
+    public string Scratch { get; init; } = "";
+
+    /// <summary>Rows per list.</summary>
+    [JsonRequired]
+    public int Top { get; init; }
+
+    [JsonRequired]
+    public long TimeoutMs { get; init; }
+}
+
+/// <summary>Result of traceSummary; cpu is there when the trace has samples, gc with a GC, allocations with an allocation tick.</summary>
+internal sealed record TraceSummaryResult(
+    long DurationMs,
+    long EventsLost,
+    CpuSummary? Cpu,
+    GcSummary? Gc,
+    AllocationSummary? Allocations);
+
+/// <summary>
+/// CPU samples: all of them, those in managed code, the others (waiting, or in native or runtime
+/// code); methods by samples at the top of the stack (exclusive), anywhere in it (inclusive),
+/// and where the others left managed code (waiting).
+/// </summary>
+internal sealed record CpuSummary(
+    long Samples,
+    long Managed,
+    long Other,
+    int Threads,
+    long UnresolvedFrames,
+    IReadOnlyList<MethodSamples> Exclusive,
+    int ExclusiveOmitted,
+    IReadOnlyList<MethodSamples> Inclusive,
+    int InclusiveOmitted,
+    IReadOnlyList<MethodSamples> Waiting,
+    int WaitingOmitted);
+
+/// <summary>A method (its module without extension, when known) and its samples.</summary>
+internal sealed record MethodSamples(string Method, string? Module, long Samples);
+
+/// <summary>Garbage collections: per generation, background, induced; pauses in milliseconds.</summary>
+internal sealed record GcSummary(
+    int Collections,
+    int Gen0,
+    int Gen1,
+    int Gen2,
+    int Background,
+    int Induced,
+    double PauseTotalMs,
+    double PauseMaxMs);
+
+/// <summary>Allocation ticks (about one per 100 KB allocated) by type.</summary>
+internal sealed record AllocationSummary(long Ticks, long Bytes, int TypeCount, IReadOnlyList<AllocatedType> Types, int TypesOmitted);
+
+/// <summary>A type's allocation ticks and the bytes they account for.</summary>
+internal sealed record AllocatedType(string Name, long Ticks, long Bytes);
+
 /// <summary>The data of an error response, as eyedbg's api.Error.</summary>
 internal sealed record ErrorData(string Code, string Message, string? Hint);
 
@@ -204,6 +290,12 @@ internal readonly record struct Reply(object Value, JsonTypeInfo TypeInfo);
 [JsonSerializable(typeof(ThreadsResult))]
 [JsonSerializable(typeof(ThreadInfo))]
 [JsonSerializable(typeof(LockInfo))]
+[JsonSerializable(typeof(TraceParams))]
+[JsonSerializable(typeof(TraceResult))]
+[JsonSerializable(typeof(TraceSummaryParams))]
+[JsonSerializable(typeof(TraceSummaryResult))]
+[JsonSerializable(typeof(MethodSamples))]
+[JsonSerializable(typeof(AllocatedType))]
 [JsonSerializable(typeof(ErrorData))]
 [JsonSerializable(typeof(string))]
 internal sealed partial class ProtocolJson : JsonSerializerContext

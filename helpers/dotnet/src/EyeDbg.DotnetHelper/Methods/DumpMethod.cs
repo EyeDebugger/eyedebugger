@@ -44,7 +44,7 @@ internal static class DumpMethod
         }
 
         // createdump truncates an existing file and follows a symlink: the name must be fresh.
-        if (Exists(p.Path))
+        if (PathChecks.Exists(p.Path))
         {
             throw new HelperException(ErrorCodes.InvalidRequest, "path exists: " + p.Path);
         }
@@ -55,12 +55,5 @@ internal static class DumpMethod
         }
 
         return p;
-    }
-
-    /// <summary>Whether anything is at path, a dangling symlink included.</summary>
-    private static bool Exists(string path)
-    {
-        var info = new FileInfo(path);
-        return info.Exists || info.LinkTarget is not null || Directory.Exists(path);
     }
 }

@@ -17,9 +17,6 @@ namespace EyeDbg.DotnetHelper.Counters;
 /// </summary>
 internal static class CounterSession
 {
-    /// <summary>A runtime that can't run managed code (stopped at a breakpoint) never answers the start.</summary>
-    public static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(5);
-
     /// <summary>Bounds stopping the session and reading what the runtime still sends.</summary>
     public static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(3);
 
@@ -89,7 +86,7 @@ internal static class CounterSession
         }
     }
 
-    private static async Task<EventPipeSession> StartAsync(CountersParams p, Process process, CancellationToken cancellationToken)
+    private static Task<EventPipeSession> StartAsync(CountersParams p, Process process, CancellationToken cancellationToken)
     {
         var providers = new[]
         {
@@ -103,28 +100,7 @@ internal static class CounterSession
                 }),
         };
 
-        using var start = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        start.CancelAfter(StartTimeout);
-        try
-        {
-            // Permitted DiagnosticsClient calls only (docs/adr/0016): GetPublishedProcesses,
-            // StartEventPipeSession[Async] and, for dumps, WriteDumpAsync.
-            return await new DiagnosticsClient(p.Pid)
-                .StartEventPipeSessionAsync(providers, requestRundown: false, circularBufferMB: 4, start.Token)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw StartTimedOut(p.Pid, TargetProbe.NameOf(process));
-        }
-        catch (TimeoutException)
-        {
-            throw StartTimedOut(p.Pid, TargetProbe.NameOf(process));
-        }
-        catch (ServerNotAvailableException)
-        {
-            throw TargetProbe.NoEndpoint(p.Pid, TargetProbe.Facts(process));
-        }
+        return EventPipeStart.StartAsync(p.Pid, process, providers, requestRundown: false, circularBufferMB: 4, cancellationToken);
     }
 
     /// <summary>
@@ -174,10 +150,5 @@ internal static class CounterSession
         }
     }
 
-    private static HelperException StartTimedOut(int pid, string? name) => new(
-        ErrorCodes.DiagnosticsTimeout,
-        TargetProbe.Describe(pid, name) + " didn't start a diagnostics session within " + Seconds((long)StartTimeout.TotalMilliseconds) + ": it is paused (stopped under a debugger, or suspended) or hung",
-        "if a debugger holds it, continue it first ('eyedbg continue'); a stopped .NET runtime can't start a diagnostics session");
-
-    private static string Seconds(long ms) => (ms / 1000.0).ToString("0.###", CultureInfo.InvariantCulture) + "s";
+    private static string Seconds(long ms) => EventPipeStart.Seconds(ms);
 }

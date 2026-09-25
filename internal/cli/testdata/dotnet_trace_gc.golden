@@ -1,0 +1,21 @@
+gc trace of pid 77 (evil?[2J): 10s
+/tmp/my traces/gc.nettrace (25.0 MiB)
+open it in PerfView or with 'dotnet-trace convert'
+GC: 3,048 collections (gen0 3,048, gen1 0, gen2 0), pauses 559.0 ms total (5.6% of the time), 0.5 ms max
+allocated ≈ 17.8 GiB (sampled: an event about every 100 KB); top 3 of 4 allocated types:
+    BYTES≈    TICKS  TYPE
+  17.7 GiB  185,000  System.Byte[]
+  90.6 MiB      900  App.Evil?]0;x?Type
+   4.8 MiB      100  System.String
+…1 more type (--top N)
+the process exited after 10s: the trace is shorter than --duration
+5 events were lost (the trace buffer overflowed): counts are low
+gc trace of pid 4321 (dotnet), session s-k3f9: 3s
+/home/u/.eyedbg/traces/4321-20260925T150300Z-gc-1f3a9c0e.nettrace (2.0 KiB)
+private to you, removed after 7 days (at most 10 kept); open it in PerfView or with 'dotnet-trace convert'
+no garbage collections and no allocation ticks in 3s (less than about 100 KB allocated)
+gc trace of pid 4321 (dotnet), session s-k3f9: 3s
+/home/u/.eyedbg/traces/4321-20260925T150300Z-gc-1f3a9c0e.nettrace (2.0 KiB)
+private to you, removed after 7 days (at most 10 kept); open it in PerfView or with 'dotnet-trace convert'
+no allocation ticks in 3s (less than about 100 KB allocated)
+GC: 3,048 collections (gen0 3,048, gen1 0, gen2 0), pauses 559.0 ms total (18.6% of the time), 0.5 ms max

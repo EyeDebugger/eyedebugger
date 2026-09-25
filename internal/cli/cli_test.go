@@ -411,6 +411,7 @@ func TestExitCodeClasses(t *testing.T) {
 		{api.NewError(api.CodeDiagnosticsDisabled, "", ""), exitState},
 		{api.NewError(api.CodeDiagnosticsTimeout, "", ""), exitState},
 		{api.NewError(api.CodeDumpUnsupported, "", ""), exitState},
+		{api.NewError(api.CodeTraceUnsupported, "", ""), exitState},
 		{api.NewError(api.CodeDumpRuntimeMissing, "", ""), exitEnvironment},
 		{api.NewError(api.CodeDumpFailed, "", ""), exitAdapter},
 	}

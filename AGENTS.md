@@ -27,8 +27,9 @@ decisions are recorded in `docs/adr/`.
   groups (test runs, side helpers).
 - `internal/helper/` — side-helper runner (spawn, hello, one call with notifications, cancel and
   kill); `internal/helper/helpertest/` is the fake helper (the test binary re-executes itself).
-- `internal/artifacts/` — the private dumps directory (`<EYEDBG_HOME>/dumps`, 0700/0600): fresh
-  names, pruning (7 days, newest 10), `--out` placement that never overwrites.
+- `internal/artifacts/` — the private dumps and traces directories (`<EYEDBG_HOME>/dumps`,
+  `<EYEDBG_HOME>/traces`, 0700/0600): fresh names, pruning (7 days, newest 10; stale trace-summary
+  scratch files after 1 h), `--out` placement that never overwrites.
 - `internal/adapters/` — adapter manifests (schema, loader, trust check, templates), installer,
   Python runtime; bundled manifests in `internal/adapters/manifests/` (`docs/adapter-manifests.md`).
 - `drivers/dotnet/` — the .NET driver (Go); `drivers/generic/` — the manifest-only driver (Python).

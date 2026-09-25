@@ -109,6 +109,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can be dumped (unlike counters). Output never shows field values, strings, thread names or
   exception messages. New error codes: `DUMP_UNSUPPORTED` (exit 2), `DUMP_RUNTIME_MISSING` (exit 3),
   `DUMP_FAILED` (exit 4). `version --json` features add `"dotnet.dump"`.
+- `eyedbg dotnet trace [FILE | -s ID | --pid N] [--profile cpu|gc] [--duration 10s] [--top 10]
+  [--out PATH]` (phase 2, ADR 0016 addendum): records a short EventPipe trace of a running .NET
+  process and summarizes it. `--profile cpu` (default) lists the hottest methods by samples at the
+  top of the stack (exclusive) and anywhere in it (inclusive), where the other threads were waiting
+  or in native code, and GC counts and pauses; `--profile gc` shows collections per generation,
+  pauses and the top allocating types. The `.nettrace` file goes to eyedbg's private traces
+  directory (`<EYEDBG_HOME or ~/.eyedbg>/traces`, 0700, files 0600, removed after 7 days and beyond
+  the newest 10) or to `--out`, never overwritten, for PerfView or `dotnet-trace convert`; `trace
+  FILE` summarizes an existing `.nettrace`. A program stopped at a breakpoint is refused
+  (`NOT_RUNNING`); one paused mid-trace fails after 30 s (`DIAGNOSTICS_TIMEOUT`); Ctrl-C discards
+  the trace. Output shows names and counts, never values. New error code: `TRACE_UNSUPPORTED`
+  (exit 2). `version --json` features add `"dotnet.trace"`.
 
 ### Changed
 

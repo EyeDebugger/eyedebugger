@@ -22,6 +22,8 @@ internal static class Program
             [DumpMethod.Method] = DumpMethod.Handler(),
             [HeapMethod.Method] = HeapMethod.Handler(),
             [ThreadsMethod.Method] = ThreadsMethod.Handler(),
+            [TraceMethod.Method] = TraceMethod.Handler(),
+            [TraceSummaryMethod.Method] = TraceSummaryMethod.Handler(),
         };
         var server = new Server(new LineReader(input), new MessageWriter(output), methods);
         return await server.RunAsync().ConfigureAwait(false);

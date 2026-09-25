@@ -43,7 +43,7 @@ func errorID(code api.Code) int {
 		// Side-helper codes ('eyedbg dotnet'): never a facade answer.
 		api.CodeHelperNotFound, api.CodeHelperMismatch, api.CodeHelperFailed, api.CodeNotDotnet,
 		api.CodeDiagnosticsDisabled, api.CodeDiagnosticsTimeout, api.CodeDumpUnsupported,
-		api.CodeDumpRuntimeMissing, api.CodeDumpFailed:
+		api.CodeDumpRuntimeMissing, api.CodeDumpFailed, api.CodeTraceUnsupported:
 		return 7000
 	default:
 		return 7000

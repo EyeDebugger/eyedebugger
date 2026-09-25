@@ -99,18 +99,19 @@ func badDump(cmdName, format string, a ...any) error {
 	return api.NewError(api.CodeInvalidRequest, fmt.Sprintf(format, a...), "see 'eyedbg help dotnet "+cmdName+"'")
 }
 
-// dumpFileArg makes DUMP absolute and checks it is a regular file
-// (following symlinks).
-func dumpFileArg(arg string) (string, error) {
+// fileArg makes a FILE argument absolute and checks it is a regular file
+// (following symlinks); noun ("dump", "trace") and hint word the errors.
+func fileArg(arg, noun, hint string) (string, error) {
 	abs, err := filepath.Abs(arg)
 	if err != nil {
-		return "", api.NewError(api.CodeInvalidRequest, fmt.Sprintf("dump %s: %v", arg, err), "")
+		return "", api.NewError(api.CodeInvalidRequest, fmt.Sprintf("%s %s: %v", noun, arg, err), "")
 	}
 
 	info, err := os.Stat(abs)
+
 	switch {
 	case err != nil:
-		return "", api.NewError(api.CodeInvalidRequest, "no dump file at "+abs, "take one with 'eyedbg dotnet dump'")
+		return "", api.NewError(api.CodeInvalidRequest, "no "+noun+" file at "+abs, hint)
 	case !info.Mode().IsRegular():
 		return "", api.NewError(api.CodeInvalidRequest, abs+" isn't a file", "")
 	}
@@ -295,7 +296,7 @@ func runDump(cmd *cobra.Command, info version.Info, g *globals, p dumpPlan) erro
 	}
 
 	if p.out != "" {
-		if err := placeDump(path, p.out); err != nil {
+		if err := place("dump", path, p.out); err != nil {
 			return err
 		}
 
@@ -320,14 +321,14 @@ func privateDumps() (string, error) {
 // artifacts.Keep; protect (a dump just taken, or about to be analyzed)
 // counts among them and is never removed.
 func prune(dir, protect string) {
-	artifacts.Prune(dir, time.Now(), artifacts.MaxAge, artifacts.Keep, protect)
+	artifacts.Prune(dir, artifacts.Dumps, time.Now(), artifacts.MaxAge, artifacts.Keep, protect)
 }
 
 // takeDump has the target's runtime write a dump under a fresh name in dir,
 // checks it arrived (a regular file, not empty, 0600), then prunes dir with
 // it protected. On failure no dump of this call is left behind.
 func takeDump(ctx context.Context, dir string, target dotnetTarget, typ string, timeout time.Duration) (string, dotnet.DumpResult, error) {
-	name, err := artifacts.Name(dir, target.PID, typ, time.Now(), rand.Reader)
+	name, err := artifacts.Name(dir, artifacts.Dumps, target.PID, typ, time.Now(), rand.Reader)
 	if err != nil {
 		return "", dotnet.DumpResult{}, err
 	}
@@ -383,8 +384,9 @@ func removeStray(path string) {
 	}
 }
 
-// placeDump moves a private dump to --out without replacing anything.
-func placeDump(path, out string) error {
+// place moves a private artifact (what: "dump", "trace") to --out without
+// replacing anything.
+func place(what, path, out string) error {
 	err := artifacts.Place(path, out)
 
 	switch {
@@ -392,9 +394,9 @@ func placeDump(path, out string) error {
 		return nil
 	case errors.Is(err, artifacts.ErrExists):
 		return api.NewError(api.CodeInvalidRequest, out+" exists; eyedbg never overwrites",
-			"the dump is kept at "+path+"; pick a new name for --out")
+			"the "+what+" is kept at "+path+"; pick a new name for --out")
 	default:
-		return api.NewError(api.CodeInvalidRequest, "put the dump at "+out+": "+err.Error(), "the dump is kept at "+path)
+		return api.NewError(api.CodeInvalidRequest, "put the "+what+" at "+out+": "+err.Error(), "the "+what+" is kept at "+path)
 	}
 }
 
@@ -421,7 +423,7 @@ func (o analysisOptions) plan(cmdName string, allowed ...string) (analysisPlan, 
 	t := dumpTarget{pid: o.pid, session: o.sessionSet}
 
 	if o.file != "" {
-		file, err := dumpFileArg(o.file)
+		file, err := fileArg(o.file, "dump", "take one with 'eyedbg dotnet dump'")
 		if err != nil {
 			return analysisPlan{}, err
 		}
@@ -469,7 +471,7 @@ type analysisInput struct {
 	target *dotnetTarget // nil for a DUMP file
 	ref    dumpRef
 	// path is what the helper opens: for eyedbg's own dump, the private
-	// file artifacts.OwnDump checked, so that the file checked is the one
+	// file artifacts.Own checked, so that the file checked is the one
 	// read.
 	path    string
 	trusted bool
@@ -524,16 +526,16 @@ func prepareAnalysis(ctx context.Context, target *dotnetTarget, p analysisPlan, 
 }
 
 // fileInput decides how a DUMP file is analyzed. Trust and the path the
-// helper opens come from one check (artifacts.OwnDump on the path already
+// helper opens come from one check (artifacts.Own on the path already
 // resolved): an eyedbg dump is sent as the private file that check found,
 // so a symlink changed in between can't pair trust with another file.
 func fileInput(dir, file, resolved string, refuse func(typ string) error) (analysisInput, error) {
 	in := analysisInput{ref: dumpRef{Path: file}, path: file}
 
-	if own, ok := artifacts.OwnDump(dir, resolved); ok {
+	if own, ok := artifacts.Own(dir, artifacts.Dumps, resolved); ok {
 		in.ref.Private, in.trusted, in.path = true, true, own
 
-		if err := refuse(artifacts.DumpType(filepath.Base(own))); err != nil {
+		if err := refuse(artifacts.TypeOf(artifacts.Dumps, filepath.Base(own))); err != nil {
 			return analysisInput{}, err
 		}
 	}
