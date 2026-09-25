@@ -16,7 +16,10 @@ import (
 const envHelper = "EYEDBG_TEST_PROC_HELPER"
 
 func TestMain(m *testing.M) {
-	if os.Getenv(envHelper) == "wait" {
+	switch os.Getenv(envHelper) {
+	case "exit":
+		return
+	case "wait":
 		ch := make(chan os.Signal, 1)
 		signal.Notify(ch, os.Interrupt)
 

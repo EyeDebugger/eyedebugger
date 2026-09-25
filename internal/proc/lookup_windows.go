@@ -17,6 +17,9 @@ const (
 	// errInvalidParameter is what OpenProcess fails with for a pid no
 	// process has.
 	errInvalidParameter syscall.Errno = 87
+	// stillActive is STILL_ACTIVE, GetExitCodeProcess's code for a process
+	// that hasn't exited.
+	stillActive = 259
 )
 
 // lookup compares the process token's user with ours. A process we may not
@@ -35,6 +38,13 @@ func lookup(_ context.Context, pid int) (Info, error) {
 		return Info{}, fmt.Errorf("look up pid %d: %w", pid, err)
 	}
 	defer syscall.CloseHandle(h) //nolint:errcheck // Closing a query handle; nothing to do on failure.
+
+	// A process that has exited can still be opened while any handle to it
+	// is open; it is gone all the same.
+	var code uint32
+	if err := syscall.GetExitCodeProcess(h, &code); err == nil && code != stillActive {
+		return Info{}, fmt.Errorf("pid %d: %w", pid, ErrNoProcess)
+	}
 
 	var token syscall.Token
 	if err := syscall.OpenProcessToken(h, syscall.TOKEN_QUERY, &token); err != nil {
