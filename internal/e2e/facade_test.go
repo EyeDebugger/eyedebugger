@@ -84,7 +84,7 @@ func joinStopped(t *testing.T, p *dapProc, lc langCase, line int) int {
 	p.ok(&godap.ConfigurationDoneRequest{Request: request("configurationDone")})
 
 	stop, ok := p.waitEvent("stopped").(*godap.StoppedEvent)
-	if !ok || stop.Body.ThreadId == 0 {
+	if !ok || stop.Body.ThreadId == 0 || stop.Body.PreserveFocusHint {
 		t.Fatalf("replayed stop = %+v", stop)
 	}
 
@@ -442,7 +442,7 @@ func collabEcho(t *testing.T, h *harness, p *dapProc, anchor, target godap.Break
 }
 
 // collabAgentSteps: the agent's step reaches the human as an activity, a
-// resume and a stop.
+// resume and a stop that keeps the editor's focus.
 func collabAgentSteps(t *testing.T, h *harness, p *dapProc) {
 	t.Helper()
 
@@ -455,7 +455,10 @@ func collabAgentSteps(t *testing.T, h *harness, p *dapProc) {
 
 		return ok && a.Body.Event.Kind == api.EventExec && a.Body.Event.Action == "next" && a.Body.Event.Client == "agent"
 	})
-	p.waitEvent("stopped")
+
+	if stop, ok := p.waitEvent("stopped").(*godap.StoppedEvent); !ok || !stop.Body.PreserveFocusHint {
+		t.Errorf("stop after the agent's step = %+v, want preserveFocusHint", stop)
+	}
 }
 
 // collabLeaseRequest: the human asks for the lease; the agent sees the
@@ -490,7 +493,10 @@ func collabLeaseRequest(t *testing.T, h *harness, p *dapProc, thread int) {
 	})
 
 	p.ok(threadReq("next", thread))
-	p.waitEvent("stopped")
+
+	if stop, ok := p.waitEvent("stopped").(*godap.StoppedEvent); !ok || stop.Body.PreserveFocusHint {
+		t.Errorf("stop after the human's own step = %+v, want no preserveFocusHint", stop)
+	}
 }
 
 // collabLeave: the disconnect retracts the copies before its response;

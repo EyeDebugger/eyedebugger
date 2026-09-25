@@ -200,8 +200,20 @@ test('sessions and start results', () => {
         requests: [{ client: 'agent', message: 'I need to step into Total()', at: '2026-09-23T12:02:00Z' }],
       },
       clients: [
-        { id: 'agent', kind: 'agent', connected: 0 },
-        { id: 'human:ijat', kind: 'human', connected: 1 },
+        {
+          id: 'agent',
+          kind: 'agent',
+          connected: 0,
+          firstSeen: '2026-09-23T12:00:00Z',
+          lastSeen: '2026-09-23T12:00:00Z',
+        },
+        {
+          id: 'human:ijat',
+          kind: 'human',
+          connected: 1,
+          firstSeen: '2026-09-23T12:00:00Z',
+          lastSeen: '2026-09-23T12:01:00Z',
+        },
       ],
     },
   ]);

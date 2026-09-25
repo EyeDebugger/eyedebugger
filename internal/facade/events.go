@@ -40,6 +40,9 @@ type followState struct {
 	invalidated bool
 	// lastThread is the thread of the last stop seen.
 	lastThread int
+	// lastExec is the client of the latest execution request (a resume
+	// or a pause) since the last stop; empty when none was seen.
+	lastExec string
 }
 
 func event(name string) godap.Event { return godap.Event{Event: name} }
@@ -53,8 +56,17 @@ func event(name string) godap.Event { return godap.Event{Event: name} }
 func translate(ev *api.Event, st *followState) []godap.EventMessage {
 	switch ev.Kind {
 	case api.EventStopped:
-		return stoppedEvent(ev.Stop, st)
+		// A stop another client's execution request caused must not take
+		// the client's focus (docs/adr/0014).
+		hint := st.lastExec != "" && st.lastExec != st.self
+		st.lastExec = ""
+
+		return stoppedEvent(ev.Stop, st, hint)
 	case api.EventExec:
+		if runs(ev.Action) {
+			st.lastExec = ev.Client
+		}
+
 		return execEvent(ev, st)
 	case api.EventContinued:
 		return []godap.EventMessage{continuedEvent(ev.ThreadID, st)}
@@ -92,7 +104,9 @@ func consoleLine(text string) *godap.OutputEvent {
 	return outputEvent("console", "eyedbg: "+text+"\n")
 }
 
-func stoppedEvent(stop *api.StopInfo, st *followState) []godap.EventMessage {
+// stoppedEvent is the stop; hint marks one the client didn't cause (DAP's
+// preserveFocusHint).
+func stoppedEvent(stop *api.StopInfo, st *followState, hint bool) []godap.EventMessage {
 	if stop == nil {
 		return nil
 	}
@@ -101,8 +115,19 @@ func stoppedEvent(stop *api.StopInfo, st *followState) []godap.EventMessage {
 
 	return []godap.EventMessage{&godap.StoppedEvent{Event: event("stopped"), Body: godap.StoppedEventBody{
 		Reason: stop.Reason, ThreadId: stop.ThreadID, Description: stop.Description, Text: stop.Text,
-		AllThreadsStopped: stop.AllThreadsStopped,
+		AllThreadsStopped: stop.AllThreadsStopped, PreserveFocusHint: hint,
 	}}}
+}
+
+// runs reports whether an exec action makes the program run or stop (not
+// an eval or a set, which leave it stopped).
+func runs(action string) bool {
+	switch action {
+	case session.ExecContinue, session.ExecNext, session.ExecStepIn, session.ExecStepOut, session.ExecRunUntil, session.ExecPause:
+		return true
+	default:
+		return false
+	}
 }
 
 // execEvent is another client's execution request: a resume is continued,
@@ -140,13 +165,14 @@ func continuedEvent(thread int, st *followState) godap.EventMessage {
 }
 
 // resync is what a client that missed events gets: a console notice, then
-// the program's state now.
+// the program's state now. Its stop's cause is unknown, so it has no hint.
 func resync(dropped int, info api.SessionInfo, st *followState) []godap.EventMessage {
 	out := []godap.EventMessage{consoleLine(strconv.Itoa(dropped) + " session events were missed")}
+	st.lastExec = ""
 
 	switch info.State {
 	case api.StateStopped:
-		out = append(out, stoppedEvent(info.Stop, st)...)
+		out = append(out, stoppedEvent(info.Stop, st, false)...)
 	case api.StateRunning:
 		out = append(out, continuedEvent(0, st))
 	case api.StateStarting, api.StateExited, api.StateLost:

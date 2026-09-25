@@ -169,7 +169,9 @@ The VS Code extension (ADR 0015) follows the same rules where they apply; these 
 - Tests: `node:test` for `src/core`; the integration suite waits on events (DAP messages, the
   extension's API change event, `eyedbg events --wait`) with deadlines — never sleeps or retries —
   and always runs VS Code with a throwaway profile (the runner refuses a real one). Act on VS
-  Code's breakpoints after seeing an adapter event only once `synced()` returned.
+  Code's breakpoints after seeing an adapter event only once `synced()` returned. Product code
+  has one test hook, `EYEDBG_TEST_ASSUME_FOCUSED=1` (window focus is unreliable under xvfb); add
+  no other.
 - Biome formats and lints (`task ext:fmt`, `task ext:lint`); `// biome-ignore <rule>: <reason>` is
   the only suppression form.
 - Every `.ts` and `.mjs` file starts with the two-line SPDX header.

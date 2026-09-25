@@ -154,6 +154,10 @@ function prepare(
     'eyedbg.path': eyedbg,
     'eyedbg.clientName': 'test',
     'eyedbg.lease.afterTakeOver': 'keep',
+    // No prompts or reveals between the steps of tests that don't want them
+    // (activity/follow/autojoin tests switch them on).
+    'eyedbg.autoJoin': 'never',
+    'eyedbg.followAgent': false,
     'security.workspace.trust.enabled': false,
     'window.restoreWindows': 'none',
     'update.mode': 'none',
@@ -220,6 +224,8 @@ async function runOnce(run: number, version: string, bin: string): Promise<void>
         EYEDBG_TEST_EYEDBG: eyedbg,
         EYEDBG_TEST_WS: ws,
         EYEDBG_TEST_WS_LINK: link,
+        // Window focus is unreliable under xvfb and on a busy desktop.
+        EYEDBG_TEST_ASSUME_FOCUSED: '1',
       },
     });
   } finally {

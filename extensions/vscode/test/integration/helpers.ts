@@ -9,7 +9,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as vscode from 'vscode';
-import type { EyedbgApi } from '../../src/vscode/api';
+import type { EyedbgApi, TreeSnapshot } from '../../src/vscode/api';
 import type { Ctx } from './harness';
 
 function env(name: string): string {
@@ -447,3 +447,48 @@ export async function stackTop(session: vscode.DebugSession, threadId: number): 
   const st = await session.customRequest('stackTrace', { threadId, startFrame: 0, levels: 1 });
   return st.stackFrames[0].line as number;
 }
+
+// --- Settings and views ---
+
+/** setting sets an eyedbg setting in the user settings for the test, and restores it after. */
+export async function setting(ctx: Ctx, key: string, value: unknown): Promise<void> {
+  const cfg = () => vscode.workspace.getConfiguration();
+  const before = cfg().inspect(key)?.globalValue;
+  const apply = async (v: unknown) => {
+    await cfg().update(key, v, vscode.ConfigurationTarget.Global);
+    const want = JSON.stringify(v === undefined ? cfg().inspect(key)?.defaultValue : v);
+    await until(`${key} = ${want}`, () => JSON.stringify(cfg().get(key)) === want, [
+      vscode.workspace.onDidChangeConfiguration,
+    ]);
+  };
+  ctx.cleanup(() => apply(before));
+  await apply(value);
+}
+
+/** item finds the first item of a view (depth first) matching pred. */
+export function item(items: TreeSnapshot[], pred: (i: TreeSnapshot) => boolean): TreeSnapshot | undefined {
+  for (const i of items) {
+    if (pred(i)) {
+      return i;
+    }
+    const c = item(i.children, pred);
+    if (c !== undefined) {
+      return c;
+    }
+  }
+  return undefined;
+}
+
+/** shownAt reports whether a visible editor shows file with the cursor on line (1-based). */
+export function shownAt(file: string, l: number): boolean {
+  return vscode.window.visibleTextEditors.some(
+    (e) => samePath(e.document.uri.fsPath, file) && e.selection.active.line === l - 1,
+  );
+}
+
+/** editorEvents are the events after which shownAt may change. */
+export const editorEvents: vscode.Event<unknown>[] = [
+  vscode.window.onDidChangeVisibleTextEditors,
+  vscode.window.onDidChangeActiveTextEditor,
+  vscode.window.onDidChangeTextEditorSelection,
+];

@@ -318,8 +318,19 @@ Built (P2-M3, ADR 0015):
   notification can become a link.
 
 Releases carry the VSIX (checksummed, attested); a workflow publishes it to the Marketplace and
-Open VSX once the maintainer adds the secrets (ADR 0015 addendum). Next: views of the activity and
-the clients (P2-M5).
+Open VSX once the maintainer adds the secrets (ADR 0015 addendum).
+
+Built (P2-M5, ADR 0015 and 0014 addenda):
+
+- **Views in Run and Debug:** *EyeDebugger Activity* (other clients' actions; a step shows and
+  opens the line it stopped at, read from VS Code's own `stackTrace` after the stop) and
+  *EyeDebugger Clients* (who is in the session, who has control, last seen; lease actions per row).
+- **Follow the agent:** the facade marks a stop caused by another client's execution request with
+  `preserveFocusHint`, so VS Code no longer focuses the editor or raises its window for it; the
+  extension shows the line without taking focus (`eyedbg.followAgent`).
+- **Auto-join prompt:** in a trusted window with focus and nothing joined, `eyedbg sessions` every
+  5 s; an agent's session of a program in the workspace is offered once (`eyedbg.autoJoin`).
+- **launch.json snippets** and a *Get started* walkthrough.
 
 ## 10. Agent integration
 

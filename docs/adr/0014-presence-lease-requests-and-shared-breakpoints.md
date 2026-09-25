@@ -236,3 +236,24 @@ tests of VS Code's round trip (announce, adopt at column 1, disable/enable, rest
 
 Amends ADR 0012 (leaving releases the lease; its breakpoint and event rules); closes ADR 0009's
 "release the lease when its holder disappears". DESIGN §3, §4, §9 and §14.
+
+## Addendum (2026-09-25, P2-M5): stops caused by another client
+
+- **Rule.** A DAP `stopped` whose latest execution request before it (continue, next, stepIn,
+  stepOut, runUntil, pause — not eval or set) came from **another** client carries
+  `preserveFocusHint: true`. The stop replayed at the join, a resync's stop after dropped events,
+  and a stop with no execution request since the last one keep the plain body. ADR 0012's
+  `stopped` row carries the hint for such stops; nothing else in its table changes.
+- **Why.** VS Code focuses the editor on every stop without the hint and, by default
+  (`debug.focusWindowOnBreak`), raises its window: every agent step moved the human's keyboard
+  focus into the source (typing meant for a terminal landed in a file). The hint is DAP's own
+  meaning ("the client should not change the focus"), true for any client of a shared session,
+  so it goes to every connection. Following the agent without taking focus is then the extension's
+  choice (ADR 0015 addendum, P2-M5).
+- **Rejected.** An opt-in `attach` argument (keeps nvim-dap & co. unchanged, but one more contract
+  for a hint every client should get; revisit if a client objects); an `eyedbg/follow` custom
+  request (more facade surface for nothing the extension can't do); rewriting stops in an
+  extension-side proxy (a second DAP parser); changing the user's `debug.focus*OnBreak` settings
+  (global, they affect other debuggers).
+- **Compatibility.** An added field in an outgoing event body: no `version --json` feature. With
+  an older daemon, VS Code keeps focusing every stop, as before.

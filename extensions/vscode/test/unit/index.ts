@@ -11,3 +11,6 @@ import './cli.test';
 import './mirrors.test';
 import './lease.test';
 import './render.test';
+import './activity.test';
+import './autojoin.test';
+import './clients.test';

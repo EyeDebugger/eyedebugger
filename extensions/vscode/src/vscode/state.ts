@@ -6,6 +6,8 @@
 // read-only snapshots the exported API hands out.
 
 import * as vscode from 'vscode';
+import { ActivityLog } from '../core/activity';
+import { later, merged } from '../core/clients';
 import { LeaseHeldNotices, RequestNotices } from '../core/lease';
 import { type Mirror, MirrorModel } from '../core/mirrors';
 import { type Breakpoint, type ClientInfo, EyedbgError, type LeaseInfo } from '../core/protocol';
@@ -14,6 +16,8 @@ import { launchToken } from './config';
 
 const maxActivity = 200;
 const maxNotices = 50;
+const maxReveals = 50;
+const maxEnded = 3;
 
 export interface Annotation {
   uri: string;
@@ -22,7 +26,7 @@ export interface Annotation {
   text: string;
 }
 
-export type NoticeKind = 'leaseHeld' | 'leaseRequest' | 'afterTakeOver' | 'error' | 'warning' | 'info';
+export type NoticeKind = 'leaseHeld' | 'leaseRequest' | 'afterTakeOver' | 'autoJoin' | 'error' | 'warning' | 'info';
 
 export interface Notice {
   kind: NoticeKind;
@@ -41,6 +45,10 @@ export class Tracked {
   list: Breakpoint[] = [];
   listMore = 0;
   activity: string[] = [];
+  /** Other clients' actions, and where their steps stopped (the Activity view). */
+  readonly log = new ActivityLog();
+  /** The time of each client's latest activity event: lastSeen moves without an eyedbg/clients event. */
+  readonly seen = new Map<string, string>();
   askedAfterTakeOver = false;
   /** The facade predates the eyedbg/* messages (docs/adr/0014): no lease UI or annotations. */
   unsupported = false;
@@ -64,11 +72,48 @@ export class Tracked {
     }
   }
 
+  /** sawClient records a client's activity at time (ISO). */
+  sawClient(client: string, time: string): void {
+    if (client !== '') {
+      this.seen.set(client, later(this.seen.get(client) ?? '', time));
+    }
+  }
+
+  /** base is the session's workspace folder path ('' if none): paths under it are shown relative. */
+  get base(): string {
+    return this.session.workspaceFolder?.uri.fsPath ?? '';
+  }
+
   /** adapterStarted resets what belongs to one adapter connection (a Restart starts a new one). */
   adapterStarted(): void {
     this.mirrors.clear();
     this.failures.clear();
+    this.log.reset();
   }
+}
+
+/** The activity of a debug session that ended, kept until Clear (the last 3). */
+export interface EndedLog {
+  key: string;
+  session: string;
+  base: string;
+  log: ActivityLog;
+}
+
+/** A stop the extension revealed (followed). */
+export interface Reveal {
+  session: string;
+  path: string;
+  line: number;
+}
+
+export interface AutoJoinStats {
+  /** polling: a look for sessions is scheduled or running. */
+  state: 'idle' | 'polling';
+  polls: number;
+  lastError: string;
+  /** The sessions the prompt offered, in order. */
+  prompted: string[];
 }
 
 export interface SessionSnapshot {
@@ -96,6 +141,13 @@ export class State implements vscode.Disposable {
   annotations: Annotation[] = [];
   /** Sessions this window stopped when their launch ended; error is the code if it failed. */
   stops: { session: string; error: string }[] = [];
+  /** The activity of ended debug sessions, oldest first. */
+  ended: EndedLog[] = [];
+  private endedCount = 0;
+  reveals: Reveal[] = [];
+  autoJoin: AutoJoinStats = { state: 'idle', polls: 0, lastError: '', prompted: [] };
+  /** How many 'eyedbg start' runs are in progress. */
+  launching = 0;
 
   constructor(readonly log: vscode.LogOutputChannel) {}
 
@@ -120,8 +172,25 @@ export class State implements vscode.Disposable {
   }
 
   end(id: string): void {
-    if (this.tracked.delete(id)) {
-      this.fire();
+    const t = this.tracked.get(id);
+    if (t === undefined) {
+      return;
+    }
+    this.tracked.delete(id);
+    if (t.log.size > 0) {
+      this.ended.push({ key: `ended-${++this.endedCount}`, session: t.eyedbgId, base: t.base, log: t.log });
+      if (this.ended.length > maxEnded) {
+        this.ended.splice(0, this.ended.length - maxEnded);
+      }
+    }
+    this.fire();
+  }
+
+  /** revealed records a followed stop (before it is shown). */
+  revealed(r: Reveal): void {
+    this.reveals.push(r);
+    if (this.reveals.length > maxReveals) {
+      this.reveals.splice(0, this.reveals.length - maxReveals);
     }
   }
 
@@ -214,7 +283,8 @@ export class State implements vscode.Disposable {
       launched: this.isLaunched(t),
       unsupported: t.unsupported,
       lease: t.lease === undefined ? undefined : structuredClone(t.lease),
-      clients: structuredClone(t.clients),
+      // lastSeen raised by the clients' activity, as the Clients view shows it.
+      clients: merged(t.clients, t.seen),
       mirrors: t.mirrors.all().map((m) => ({ ...m })),
       breakpoints: structuredClone(t.list),
       activity: [...t.activity],

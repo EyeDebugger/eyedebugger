@@ -7,13 +7,16 @@
 import * as vscode from 'vscode';
 import { stopArgs } from './core/cli';
 import { errorNotice } from './core/render';
-import { isSessionId } from './core/validate';
+import { checkSessionId, isSessionId } from './core/validate';
 import { ActivityUi } from './vscode/activity';
 import { AdapterFactory } from './vscode/adapter';
 import { api, type EyedbgApi } from './vscode/api';
+import { AutoJoin } from './vscode/autojoin';
 import { BreakpointsUi } from './vscode/breakpoints';
+import { ClientsUi } from './vscode/clients';
 import { ConfigurationProvider, client, DynamicProvider, debugType, launchToken } from './vscode/config';
 import { Eyedbg, timeouts } from './vscode/exec';
+import { Follow } from './vscode/follow';
 import { LeaseUi } from './vscode/lease';
 import { State } from './vscode/state';
 import { TrackerFactory } from './vscode/tracker';
@@ -25,13 +28,48 @@ export function activate(context: vscode.ExtensionContext): EyedbgApi {
   const lease = new LeaseUi(state);
   const breakpoints = new BreakpointsUi(state);
   const activity = new ActivityUi(state);
+  const clients = new ClientsUi(state);
+  const follow = new Follow(state);
 
   const tracker = new TrackerFactory(state, {
     lease: (t, l) => lease.lease(t, l),
     leaseHeld: (t, m) => lease.leaseHeld(t, m),
     breakpointsChanged: () => breakpoints.refresh(),
     activity: (t, e) => activity.add(t, e),
+    activityChanged: () => state.fire(),
+    reveal: (t, at) => follow.reveal(t, at),
   });
+
+  /** join joins session (validated), or picks one; a session this window already has is left as it is. */
+  const join = async (session?: unknown): Promise<boolean> => {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (session === undefined) {
+      return vscode.debug.startDebugging(folder, { type: debugType, request: 'attach', name: 'Join eyedbg session' });
+    }
+    const bad = checkSessionId(session);
+    if (bad !== '') {
+      void state.show('error', errorNotice('INVALID_REQUEST', bad));
+      return false;
+    }
+    if (state.all().some((t) => t.eyedbgId === session)) {
+      return true;
+    }
+    return vscode.debug.startDebugging(folder, {
+      type: debugType,
+      request: 'attach',
+      name: `Join ${session}`,
+      session,
+    });
+  };
+
+  const checkInstallation = async (): Promise<void> => {
+    try {
+      const b = await eyedbg.check();
+      void state.show('info', `eyedbg ${b.version} at ${b.path}`);
+    } catch (e) {
+      state.showError(e);
+    }
+  };
 
   // A session this window launched is stopped when its debug session ends,
   // unless VS Code is restarting it (then it joins the same session again).
@@ -70,6 +108,9 @@ export function activate(context: vscode.ExtensionContext): EyedbgApi {
     lease,
     breakpoints,
     activity,
+    clients,
+    follow,
+    new AutoJoin(state, eyedbg, (id) => join(id), process.env.EYEDBG_TEST_ASSUME_FOCUSED === '1'),
     vscode.debug.registerDebugConfigurationProvider(debugType, new ConfigurationProvider(eyedbg, state)),
     vscode.debug.registerDebugConfigurationProvider(
       debugType,
@@ -79,16 +120,13 @@ export function activate(context: vscode.ExtensionContext): EyedbgApi {
     vscode.debug.registerDebugAdapterDescriptorFactory(debugType, new AdapterFactory(eyedbg)),
     vscode.debug.registerDebugAdapterTrackerFactory(debugType, tracker),
     vscode.debug.onDidTerminateDebugSession((s) => void terminated(s)),
-    vscode.commands.registerCommand('eyedbg.joinSession', () =>
-      vscode.debug.startDebugging(vscode.workspace.workspaceFolders?.[0], {
-        type: debugType,
-        request: 'attach',
-        name: 'Join eyedbg session',
-      }),
+    vscode.commands.registerCommand('eyedbg.joinSession', (a?: unknown) =>
+      join(typeof a === 'object' && a !== null ? (a as { session?: unknown }).session : undefined),
     ),
+    vscode.commands.registerCommand('eyedbg.checkInstallation', checkInstallation),
   );
 
-  return api(state);
+  return api(state, { activity, clients });
 }
 
 export function deactivate(): void {}

@@ -26,6 +26,9 @@ export interface ClientInfo {
   id: string;
   kind: string;
   connected: number;
+  /** ISO times; '' when not given. */
+  firstSeen: string;
+  lastSeen: string;
 }
 
 export interface Breakpoint {
@@ -159,7 +162,13 @@ export function parseClients(x: unknown): ClientInfo[] {
   const out: ClientInfo[] = [];
   for (const c of arr(x)) {
     if (isRecord(c) && str(c.id) !== '') {
-      out.push({ id: str(c.id), kind: str(c.kind), connected: int(c.connected) });
+      out.push({
+        id: str(c.id),
+        kind: str(c.kind),
+        connected: int(c.connected),
+        firstSeen: str(c.firstSeen),
+        lastSeen: str(c.lastSeen),
+      });
     }
   }
   return out;
@@ -278,4 +287,38 @@ export function errorHolder(m: DapMessage): string {
     return e.variables.holder;
   }
   return '';
+}
+
+/** A DAP stopped event's body, as far as the extension reads it. */
+export interface Stop {
+  threadId: number;
+  reason: string;
+  /** preserveFocusHint: another client caused the stop (docs/adr/0014). */
+  hint: boolean;
+}
+
+/** parseStop reads a stopped event's body. */
+export function parseStop(body: Record<string, unknown> | undefined): Stop {
+  const b = body ?? {};
+  return { threadId: int(b.threadId), reason: str(b.reason), hint: bool(b.preserveFocusHint) };
+}
+
+/** A source location: an absolute path and a 1-based line. */
+export interface SourceLine {
+  path: string;
+  line: number;
+}
+
+/** parseStackTop reads the top frame of a stackTrace response's body: undefined unless it has a source path and a line. */
+export function parseStackTop(body: Record<string, unknown> | undefined): SourceLine | undefined {
+  const frame = arr(body?.stackFrames)[0];
+  if (!isRecord(frame) || !isRecord(frame.source)) {
+    return undefined;
+  }
+  const path = str(frame.source.path);
+  const line = frame.line;
+  if (path === '' || !Number.isSafeInteger(line) || (line as number) < 1) {
+    return undefined;
+  }
+  return { path, line: line as number };
 }
