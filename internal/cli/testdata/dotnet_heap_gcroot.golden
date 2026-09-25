@@ -1,0 +1,22 @@
+heap of dump /tmp/app.dmp (.NET 10.0.12, workstation GC)
+5,332 objects, 435.8 KiB: gen0 420.1 KiB, gen1 0 B, gen2 0 B, LOH 0 B, POH 8.0 KiB, frozen 7.7 KiB
+top 4 of 93 types matching "Retained" by size:
+      BYTES  COUNT  TYPE
+  234.4 KiB  5,000  Retained
+  128.3 KiB     13  Retained[]
+    1.0 MiB      1  App.Evil?[2J?
+   48.4 KiB  1,144  System.String
+…89 more types (--top N, --type PATTERN)
+why alive: Retained (5,000 objects): 2 paths, more may exist (--paths N):
+  static Holder.Keep → System.Collections.Generic.List<Retained> 0x13de13da8 → Retained[] 0x13de54198 → Retained 0x13de6eab8
+  stack thread 1 App.Evil?]0;x?.Run() → …3 more… → App.Evil?[2J? 0x13de6eb48
+heap of dump /tmp/app.dmp (.NET 10.0.12, workstation GC)
+5,332 objects, 435.8 KiB: gen0 420.1 KiB, gen1 0 B, gen2 0 B, LOH 0 B, POH 8.0 KiB, frozen 7.7 KiB
+top 4 of 93 types matching "Retained" by size:
+      BYTES  COUNT  TYPE
+  234.4 KiB  5,000  Retained
+  128.3 KiB     13  Retained[]
+    1.0 MiB      1  App.Evil?[2J?
+   48.4 KiB  1,144  System.String
+…89 more types (--top N, --type PATTERN)
+why alive: System.Object 0x1234: no path from a GC root (garbage the next collection frees)

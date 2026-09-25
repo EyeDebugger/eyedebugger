@@ -133,7 +133,7 @@ func TestResolveSessionTarget(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := resolveSessionTarget(t.Context(), tt.snap, fakeLookup(testProcs))
+			got, err := resolveSessionTarget(t.Context(), tt.snap, fakeLookup(testProcs), false)
 			if tt.code != "" {
 				requireCode(t, err, tt.code, tt.contains...)
 

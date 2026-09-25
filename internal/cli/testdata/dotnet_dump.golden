@@ -1,0 +1,7 @@
+dump of pid 4321 (dotnet), session s-k3f9: heap, 341.7 MiB in 0.9s
+/home/u/.eyedbg/dumps/4321-20260925T150300Z-heap-1f3a9c0e.dmp
+private to you, removed after 7 days (at most 10 kept)
+analyze: eyedbg dotnet heap /home/u/.eyedbg/dumps/4321-20260925T150300Z-heap-1f3a9c0e.dmp; eyedbg dotnet threads /home/u/.eyedbg/dumps/4321-20260925T150300Z-heap-1f3a9c0e.dmp
+dump of pid 77 (evil?[2J): heap, 341.7 MiB in 0.9s
+/tmp/my dumps/app.dmp
+analyze: eyedbg dotnet heap '/tmp/my dumps/app.dmp'; eyedbg dotnet threads '/tmp/my dumps/app.dmp'

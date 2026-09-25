@@ -136,13 +136,13 @@ func exitCode(err error) int {
 	switch api.CodeOf(err) {
 	case api.CodeNoSession, api.CodeNotStopped, api.CodeNotRunning, api.CodeSessionExited, api.CodeSessionsActive,
 		api.CodeLeaseHeld, api.CodeNotOwner, api.CodeNotDotnet, api.CodeDiagnosticsDisabled,
-		api.CodeDiagnosticsTimeout:
+		api.CodeDiagnosticsTimeout, api.CodeDumpUnsupported:
 		return exitState
 	case api.CodeAdapterMissing, api.CodeBuildFailed, api.CodeDaemonNotRunning, api.CodeDaemonStart,
 		api.CodeVersionMismatch, api.CodeUnauthorized, api.CodeAttachFailed, api.CodeNoTestHost,
-		api.CodeHelperNotFound, api.CodeHelperMismatch:
+		api.CodeHelperNotFound, api.CodeHelperMismatch, api.CodeDumpRuntimeMissing:
 		return exitEnvironment
-	case api.CodeAdapterFailed, api.CodeUnsupported, api.CodeHelperFailed:
+	case api.CodeAdapterFailed, api.CodeUnsupported, api.CodeHelperFailed, api.CodeDumpFailed:
 		return exitAdapter
 	case api.CodeInvalidRequest, api.CodeUnknownMethod, api.CodeInternal, api.CodeSideEffects,
 		api.CodeAnchorNotFound, api.CodeAnchorAmbiguous:
@@ -203,11 +203,12 @@ Exit codes: 0 success (a wait that times out is a success that says so); 1 usage
 error (INVALID_REQUEST, SIDE_EFFECTS, ANCHOR_NOT_FOUND, ANCHOR_AMBIGUOUS); 2 no such session, it is
 in the wrong state, or another client holds it (NO_SESSION, NOT_STOPPED, NOT_RUNNING,
 SESSION_EXITED, SESSIONS_ACTIVE, LEASE_HELD, NOT_OWNER), or the target process can't be inspected
-(NOT_DOTNET, DIAGNOSTICS_DISABLED, DIAGNOSTICS_TIMEOUT); 3 setup problem (ADAPTER_NOT_INSTALLED,
-BUILD_FAILED, ATTACH_FAILED, NO_TEST_HOST, DAEMON_*, VERSION_MISMATCH, UNAUTHORIZED,
-HELPER_NOT_FOUND, HELPER_MISMATCH); 4 the debug adapter or a side helper refused a request or
-can't do it (ADAPTER_ERROR, e.g. an expression that doesn't evaluate; UNSUPPORTED_BY_ADAPTER;
-HELPER_FAILED). Errors print "eyedbg: message [CODE]" and a hint on
+(NOT_DOTNET, DIAGNOSTICS_DISABLED, DIAGNOSTICS_TIMEOUT) or the dump can't be analyzed here
+(DUMP_UNSUPPORTED); 3 setup problem (ADAPTER_NOT_INSTALLED, BUILD_FAILED, ATTACH_FAILED,
+NO_TEST_HOST, DAEMON_*, VERSION_MISMATCH, UNAUTHORIZED, HELPER_NOT_FOUND, HELPER_MISMATCH,
+DUMP_RUNTIME_MISSING); 4 the debug adapter or a side helper refused a request or can't do it
+(ADAPTER_ERROR, e.g. an expression that doesn't evaluate; UNSUPPORTED_BY_ADAPTER; HELPER_FAILED;
+DUMP_FAILED). Errors print "eyedbg: message [CODE]" and a hint on
 stderr; with --json, {"schema": 1, "error": {"code", "message", "hint"}} on stdout.`
 
 const eyedbgExample = `  eyedbg adapters install netcoredbg            # once per machine

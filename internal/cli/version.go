@@ -49,7 +49,9 @@ purpose, plus the native protocol version it speaks and its optional features ("
 dap' and the daemon's DAP facade; "presence": connected editors in sessions; "lease.request":
 'eyedbg lease request'; "dap.collab": the facade's eyedbg/* messages, other clients' breakpoints
 in the editor and output replay; "dotnet.helper": 'eyedbg dotnet ps' and 'eyedbg dotnet counters',
-run through the .NET side helper — which may still be missing at run time, HELPER_NOT_FOUND).`, binName),
+run through the .NET side helper — which may still be missing at run time, HELPER_NOT_FOUND;
+"dotnet.dump": 'eyedbg dotnet dump', 'eyedbg dotnet heap' and 'eyedbg dotnet threads', through the
+same helper).`, binName),
 		Example: fmt.Sprintf("  %[1]s version\n  %[1]s version --json", binName),
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -69,7 +71,7 @@ func writeVersion(w io.Writer, name string, info version.Info, asJSON bool) erro
 			GoVersion: info.GoVersion,
 			Platform:  info.Platform,
 			Protocol:  api.ProtocolVersion,
-			Features:  []string{"dap", "presence", "lease.request", "dap.collab", "dotnet.helper"},
+			Features:  []string{"dap", "presence", "lease.request", "dap.collab", "dotnet.helper", "dotnet.dump"},
 		}
 		if err := json.NewEncoder(w).Encode(out); err != nil {
 			return fmt.Errorf("write version: %w", err)

@@ -120,7 +120,7 @@ framing**, reading **System.Runtime EventCounters** and leaving **aggregation to
 * **Read-only diagnostics.** The helper calls only `GetPublishedProcesses` and
   `StartEventPipeSession[Async]`; never `ApplyStartupHook`, `AttachProfiler`, `SetStartupProfiler`,
   `SetEnvironmentVariable`, `EnablePerfMap`/`DisablePerfMap` or `ResumeRuntime`. `WriteDump` (M7)
-  comes with its own review. It reads no target memory, environment or command line; error messages
+  comes with its own review — added by the P2-M7 addendum below. It reads no target memory, environment or command line; error messages
   carry pids, process names and exception types, never target data.
 * **Aggregation in Go** (`internal/cli`): a gauge's last, min and max; a sum's total and total per
   second over the intervals it was seen in; missed intervals (a pause) counted against the duration;
@@ -158,6 +158,9 @@ Shipped (all MIT, © Microsoft Corporation; build assets none unless noted):
 | Microsoft.Extensions.DependencyInjection.Abstractions | 8.0.2 | transitive |
 | System.Collections.Immutable, System.Reflection.Metadata, System.IO.Pipelines, System.Text.Encodings.Web | 9.0.8 | TraceEvent/System.Text.Json dependencies |
 | System.Text.Json | 9.0.8 | TraceEvent dependency (source generator runs at build) |
+
+P2-M7 adds ClrMD and its closure, and moves some of the versions above; see the addendum's
+dependency table.
 
 Test only: `xunit.v3.mtp-off` 4.0.1 (Apache-2.0) and its closure (xunit.v3.*, xunit.analyzers
 2.1.0, Microsoft.Bcl.AsyncInterfaces 6.0.0; buildTransitive props/targets of
@@ -248,3 +251,107 @@ it is one path and golden-locked.
 MSTest 4.4.1's adapter pulls `Microsoft.Testing.Extensions.Telemetry` → Application Insights, and
 the `MSTest` metapackage a code-coverage extension under non-OSI Microsoft terms; xUnit v3's default
 flavour pulls the telemetry extension too. `mtp-off` has neither and runs as a plain executable.
+
+## Addendum (P2-M7, 2026-09-25): dumps, heap and threads
+
+`eyedbg dotnet dump` has a process's runtime write a dump; `eyedbg dotnet heap` and `eyedbg dotnet
+threads` analyze one — taken first when given a process — with ClrMD in the helper. Three helper
+methods join protocol 1 (additive: an older helper answers `UNKNOWN_METHOD`, which the CLI reports
+as `HELPER_MISMATCH`): `dump`, `heap`, `threads` (wire in `helpers/dotnet/README.md`), and three
+codes: `DUMP_UNSUPPORTED` (exit 2), `DUMP_RUNTIME_MISSING` (3), `DUMP_FAILED` (4).
+
+* **ClrMD 4.1.745802, not 3.1.512801.** Measured on .NET 10 (macOS arm64, Linux x64): both read
+  heap statistics and stacks, but 3.1 can't read .NET 9+ statics — a static field's address reads
+  0 and no `StaticVar` roots are reported (static-variable support came after 3.1) — so `--gcroot`
+  couldn't name a static root, and 3.1 lacks 2026's parser hardening for untrusted dumps
+  (`DataTargetLimits`, bounds checks). 3.1 adds one package (+0.7 MB); 4.1 adds 18 (+3.7 MB):
+  Azure.Identity, Azure.Core, System.ClientModel, MSAL, six Microsoft.Extensions.* and others, all
+  MIT, and moves six versions up. The Azure/MSAL closure is reached only through ClrMD's symbol
+  server, which the helper never constructs; `Azure.Core` types appear in `DataTarget`'s own
+  signatures, so it must ship. Trimming it with `ExcludeAssets` was tried and rejected: it drops
+  one assembly, the rest of the closure still ships, and excluding files one by one would break on
+  a Dependabot bump along a path no test covers. Re-run the statics check (a static root named in
+  `eyedbg dotnet heap --gcroot`) before a major bump.
+* **`WriteDump` joins the permitted `DiagnosticsClient` calls** (with `GetPublishedProcesses` and
+  `StartEventPipeSession[Async]`). The runtime suspends the process while it writes; the flags are
+  always `None` — never logging or crash-report flags, which write into the target's own output.
+  It works while a debugger holds the program at a breakpoint (R4; verified on macOS and Linux:
+  the runtime writes the dump from a native thread), so dump, heap and threads accept a stopped
+  session, unlike counters.
+* **Two helper processes, no snapshots, no temp cores.** For a live target the CLI runs the helper
+  twice: `dump` into eyedbg's directory, then `heap` or `threads` on that file — keeping one call
+  per helper process, and ClrMD (a large parser that loads native code) out of the process that
+  talks to the target. ClrMD's `CreateSnapshotAndAttach`/`AttachToProcess` are never used: every
+  core file is one eyedbg asked the runtime for.
+* **The private directory** (`internal/artifacts`): `<home>/dumps`, `<home>` = `$EYEDBG_HOME` or
+  `~/.eyedbg` (the adapters' own resolution), created 0700; refused when it is a symlink or, on
+  Unix, owned by another user; group and other access removed. Files are 0600 (createdump's mode,
+  re-applied). Windows relies on the user profile's ACL, as the runtime directory does; an
+  `EYEDBG_HOME` outside the profile is the user's choice. createdump truncates an existing file in
+  place, follows a symlink and resolves a relative path against the target's working directory
+  (measured), so the runtime only ever gets an absolute, fresh, random name in that directory
+  (`<pid>-<UTC time>-<type>-<8 hex>.dmp`); the helper refuses a relative or existing path too.
+  After it answers, the CLI checks a regular file is there (else `DUMP_FAILED`: a target in another
+  filesystem namespace) and removes a failed dump's leftovers.
+* **`--out`** never overwrites: checked early (nothing there, dangling symlinks included; the parent
+  an existing directory — none is created), then placed by a hard link (fails on any existing name
+  without following it) or, across filesystems, a copy into a file created with `O_EXCL`, 0600; the
+  private copy is removed only once the placement succeeded, and a lost race or failed copy leaves
+  it in place with its path in the hint.
+* **Pruning.** Each dump, heap or threads command removes eyedbg's own dumps (its name pattern,
+  regular files only — never symlinks, directories or other files) older than 7 days, then the
+  oldest beyond the newest 10 — after a new dump is written, so it counts and at most 10 remain;
+  the dump just taken or about to be analyzed is never removed. The cap of 10 goes
+  beyond the roadmap's 7 days: a heap dump of a small program is about 350 MB on macOS.
+* **Loading a dump safely.** The helper opens dumps with its own file locator that finds nothing: no
+  symbol-server download, no shared `$TMPDIR/symbols` cache (on Linux a DAC planted there by another
+  user would be loaded), no `_NT_SYMBOL_PATH`. It refuses a dump of another OS or architecture, one
+  without a .NET runtime, or one ClrMD can't parse (`DUMP_UNSUPPORTED`). The DAC — native code the
+  analysis loads — comes from (a) this machine's installed runtime of the dotnet running the helper,
+  in the version directory named like the dump's runtime directory (a version name, so no path
+  traversal), or (b) the dump's own recorded runtime directory, only for eyedbg's own dumps (in the
+  private directory, taken from a process of the user's) and only when neither the file nor its
+  directory is writable by its group or others (on macOS every local user shares the `staff`
+  group). Either must be a regular file. On Windows and macOS ClrMD checks
+  the DAC's file version against the dump's runtime before loading it (Windows also its signature,
+  left on); on Linux, where ClrMD reports version 0.0, the helper compares the GNU build id of the
+  candidate directory's `libcoreclr.so` with the dump's (a bounded ELF note reader). ClrMD loads the
+  exact path given (read in its 4.1 source). No candidate: `DUMP_RUNTIME_MISSING`, naming the
+  directories searched. A self-contained app's dump moved out of the private directory therefore
+  needs its runtime installed to be analyzed. Rejected: trusting any recorded directory that isn't
+  world-writable (another user's 0755 directory passes and would run code as you), ClrMD's default
+  locator, a `--dac` flag.
+* **What the analyses show — never values.** Types, counts, sizes, generations, addresses (hex
+  strings: a uint64 exceeds JSON numbers in JavaScript), root kinds and static field names, thread
+  ids and flags, the type of a thread's current exception, frame method signatures, module file
+  names, IL offsets and source file:line (from the module's portable PDB, embedded or next to it
+  with a matching id; only local absolute paths — no UNC or device paths, which on Windows would
+  reach a server named by the dump — and non-empty `.dll`/`.exe`/`.pdb` files of at most 64 MiB,
+  an open that blocks, as on a FIFO, given up after 2 s). Never field values,
+  string contents, thread names or exception messages. Every string is cut at 400 characters and a
+  result kept under 900 KiB (the protocol's 1 MiB line limit stays the backstop); the CLI's text
+  makes every helper string fit for a terminal.
+* **Tests never touch real data.** The CLI tests and the e2e harness set `EYEDBG_HOME` to a
+  temporary directory (a guard test checks it); tests assert types and counts, never print dump
+  contents.
+
+Known limits: only locks with a sync block are listed (a contended `lock`/`Monitor`); an uncontended
+one and .NET 9's `System.Threading.Lock` aren't, and which lock a waiting thread waits on isn't
+recorded. A Windows heap or mini dump lacks the JIT's IL-to-native maps of user methods (measured:
+ClrMD returns none), so frames there have no IL offset or source line; a full dump has them
+(`threads --dump-type full`). The helper never guesses an offset without a map. .NET 8 and 9 targets are claimed by ClrMD 4.1 but only .NET 10 targets were run.
+
+Dependencies added (shipped; all MIT, © Microsoft Corporation):
+
+| Package | Version | Why |
+|---|---|---|
+| Microsoft.Diagnostics.Runtime (ClrMD) | 4.1.745802 | reads dumps: heap, roots, threads, stacks, sync blocks |
+| Azure.Core, Azure.Identity, System.ClientModel | 1.53.0, 1.21.0, 1.10.0 | ClrMD dependencies (its symbol server's credentials; never used) |
+| Microsoft.Identity.Client, Microsoft.Identity.Client.Extensions.Msal, Microsoft.IdentityModel.Abstractions | 4.83.1, 4.83.1, 8.14.0 | Azure.Identity dependencies |
+| Microsoft.Extensions.{Configuration,Diagnostics,FileProviders,Hosting}.Abstractions, Microsoft.Extensions.Options, Microsoft.Extensions.Primitives | 10.0.3 | transitive |
+| Microsoft.Bcl.AsyncInterfaces, System.Diagnostics.DiagnosticSource, System.Memory.Data | 10.0.3 | transitive |
+| System.Security.Cryptography.ProtectedData | 4.5.0 | MSAL dependency (also `runtimes/win/lib/netstandard2.0/`) |
+
+Moved up: Microsoft.Extensions.Logging.Abstractions and DependencyInjection.Abstractions 10.0.3,
+System.Collections.Immutable 10.0.7, System.IO.Pipelines, System.Text.Encodings.Web and
+System.Text.Json 10.0.3. The helper publishes 35 files, 8.9 MB.

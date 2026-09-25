@@ -44,6 +44,11 @@ Everything else is a manual bump.
   commit both `packages.lock.json`. When the set of shipped assemblies changes (a new or dropped
   transitive package), update `helpers/dotnet/THIRD-PARTY-NOTICES.txt` — CI's notices check fails
   until it names every shipped `.dll`.
+  ClrMD (`Microsoft.Diagnostics.Runtime`, ADR 0016's P2-M7 addendum) is in the same Dependabot
+  group; before merging a major bump, check a static root is still named
+  (`EYEDBG_E2E=1 go test -run DotnetDump ./internal/e2e/` asserts `static Holder.Keep`) and that
+  nothing constructs its symbol server (`grep -rn SymbolServer helpers/dotnet/src` finds only
+  comments).
 
 ## CI cost
 

@@ -13,13 +13,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eyedebugger/eyedebugger/internal/adapters"
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/daemon"
 	"github.com/eyedebugger/eyedebugger/internal/session"
 )
 
-// isolate points the CLI at a fresh runtime directory, with no auto-start
-// and no inherited identity or session. Not for parallel tests.
+// isolate points the CLI at a fresh runtime directory and home ($EYEDBG_HOME),
+// with no auto-start and no inherited identity or session. Not for parallel
+// tests.
 func isolate(t *testing.T) daemon.Paths {
 	t.Helper()
 
@@ -36,6 +38,8 @@ func isolate(t *testing.T) daemon.Paths {
 	t.Setenv(envClient, "")
 	t.Setenv(envSession, "")
 	t.Setenv(envNoRecord, "")
+	// Dumps go under the test's directory, never the real ~/.eyedbg.
+	t.Setenv(adapters.EnvHome, filepath.Join(dir, "home"))
 
 	return daemon.PathsIn(rt)
 }

@@ -66,6 +66,45 @@ internal static class TargetProbe
         return new TargetFacts(name, modules);
     }
 
+    /// <summary>The process's name, or null when it can't be read.</summary>
+    public static string? NameOf(Process process)
+    {
+        try
+        {
+            return process.ProcessName;
+        }
+        catch (Exception e) when (e is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Refuses a process whose diagnostics endpoint can't be used, before connecting to it. Only
+    /// Windows can tell in advance: its pipes are listed (a missing one would make NETCore.Client
+    /// wait until its timeout), and a dotnet-dsrouter pipe is refused (see <see cref="RouterPipe"/>).
+    /// Elsewhere a missing endpoint shows when connecting (ServerNotAvailableException).
+    /// </summary>
+    public static void CheckEndpoint(int pid, Process process)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // The router pipe first: NETCore.Client would use it even without the real one.
+        var pipes = FindWindowsPipes(pid);
+        if (pipes.Router)
+        {
+            throw RouterPipe(pid, NameOf(process));
+        }
+
+        if (!pipes.Endpoint)
+        {
+            throw NoEndpoint(pid, Facts(process));
+        }
+    }
+
     /// <summary>"pid N (name)", or "pid N" without a name.</summary>
     public static string Describe(int pid, string? name) =>
         "pid " + pid.ToString(CultureInfo.InvariantCulture) + (string.IsNullOrEmpty(name) ? "" : " (" + name + ")");

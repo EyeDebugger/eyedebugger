@@ -23,9 +23,10 @@ const EnvDataDir = "EYEDBG_DATA_DIR"
 // goosWindows is runtime.GOOS on Windows.
 const goosWindows = "windows"
 
-// homeDir returns eyedbg's home directory: $EYEDBG_HOME, else
-// <user home dir>/.eyedbg.
-func homeDir() (string, error) {
+// HomeDir returns eyedbg's home directory: $EYEDBG_HOME, else
+// <user home dir>/.eyedbg. Adapters keep their manifests and tools under
+// it, and internal/artifacts its private dumps directory.
+func HomeDir() (string, error) {
 	if dir := os.Getenv(EnvHome); dir != "" {
 		return dir, nil
 	}
@@ -45,7 +46,7 @@ func DataDir() (string, error) {
 		return dir, nil
 	}
 
-	home, err := homeDir()
+	home, err := HomeDir()
 	if err != nil {
 		return "", fmt.Errorf("locate adapter directory (set %s or %s): %w", EnvDataDir, EnvHome, err)
 	}

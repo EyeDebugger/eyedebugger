@@ -42,7 +42,8 @@ func errorID(code api.Code) int {
 		api.CodeAttachFailed, api.CodeNoTestHost, api.CodeAnchorNotFound, api.CodeAnchorAmbiguous,
 		// Side-helper codes ('eyedbg dotnet'): never a facade answer.
 		api.CodeHelperNotFound, api.CodeHelperMismatch, api.CodeHelperFailed, api.CodeNotDotnet,
-		api.CodeDiagnosticsDisabled, api.CodeDiagnosticsTimeout:
+		api.CodeDiagnosticsDisabled, api.CodeDiagnosticsTimeout, api.CodeDumpUnsupported,
+		api.CodeDumpRuntimeMissing, api.CodeDumpFailed:
 		return 7000
 	default:
 		return 7000

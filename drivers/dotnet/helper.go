@@ -40,6 +40,27 @@ const (
 	MethodCounters = "counters"
 	// NotifyCounterSample carries one interval's counters: CounterSample.
 	NotifyCounterSample = "counters.sample"
+	// MethodDump makes a process's runtime write a dump of it: DumpParams,
+	// then DumpResult.
+	MethodDump = "dump"
+	// MethodHeap analyzes a dump's managed heap: HeapParams, then
+	// HeapResult.
+	MethodHeap = "heap"
+	// MethodThreads reads a dump's managed threads and locks:
+	// ThreadsParams, then ThreadsResult.
+	MethodThreads = "threads"
+)
+
+// Dump types (DumpParams.Type).
+const (
+	// DumpHeap has the managed heap: what heap and threads' locks need.
+	DumpHeap = "heap"
+	// DumpMini has threads and stacks, no heap.
+	DumpMini = "mini"
+	// DumpTriage is a mini dump with less memory (no heap).
+	DumpTriage = "triage"
+	// DumpFull has all of the process's memory.
+	DumpFull = "full"
 )
 
 // Counter kinds and the reasons a counters call ends.
@@ -97,6 +118,178 @@ type CounterValue struct {
 type CountersResult struct {
 	Samples   int    `json:"samples"`
 	EndReason string `json:"endReason"`
+}
+
+// DumpParams are the dump method's params.
+type DumpParams struct {
+	PID  int    `json:"pid"`
+	Type string `json:"type"`
+	// Path is where the runtime writes the dump: absolute, nothing there.
+	Path      string `json:"path"`
+	TimeoutMs int64  `json:"timeoutMs"`
+}
+
+// DumpResult is the dump method's result.
+type DumpResult struct {
+	Bytes     int64 `json:"bytes"`
+	ElapsedMs int64 `json:"elapsedMs"`
+}
+
+// HeapParams are the heap method's params.
+type HeapParams struct {
+	Path string `json:"path"`
+	// TrustRecordedRuntime lets the dump's recorded runtime directory
+	// supply the analysis library (DAC): only for eyedbg's own dumps.
+	TrustRecordedRuntime bool `json:"trustRecordedRuntime"`
+	Top                  int  `json:"top"`
+	// TypeFilter keeps types whose full name contains it (case-sensitive).
+	TypeFilter string        `json:"typeFilter,omitempty"`
+	Gcroot     *GcrootParams `json:"gcroot,omitempty"`
+	// Paths is how many root paths --gcroot finds.
+	Paths     int   `json:"paths"`
+	TimeoutMs int64 `json:"timeoutMs"`
+}
+
+// GcrootParams says what --gcroot asks about: a type (exact full name,
+// else a unique substring) or an object's address ("0x1a2b").
+type GcrootParams struct {
+	Type    string `json:"type,omitempty"`
+	Address string `json:"address,omitempty"`
+}
+
+// DumpRuntime is the .NET runtime a dump was taken with.
+type DumpRuntime struct {
+	Version string `json:"version"`
+	// GC is "workstation" or "server".
+	GC       string `json:"gc"`
+	Heaps    int    `json:"heaps"`
+	Platform string `json:"platform"`
+	Arch     string `json:"arch"`
+}
+
+// HeapResult is the heap method's result.
+type HeapResult struct {
+	Runtime      DumpRuntime      `json:"runtime"`
+	Objects      int64            `json:"objects"`
+	Bytes        int64            `json:"bytes"`
+	Generations  []GenerationStat `json:"generations"`
+	TypeCount    int              `json:"typeCount"`
+	Types        []TypeStat       `json:"types"`
+	TypesOmitted int              `json:"typesOmitted"`
+	Gcroot       *GcrootResult    `json:"gcroot,omitempty"`
+}
+
+// GenerationStat is one generation's objects and bytes: gen0, gen1, gen2,
+// loh, poh, frozen, and unknown when an object's generation couldn't be
+// told.
+type GenerationStat struct {
+	Name    string `json:"name"`
+	Objects int64  `json:"objects"`
+	Bytes   int64  `json:"bytes"`
+}
+
+// TypeStat is one type's objects and bytes.
+type TypeStat struct {
+	Name  string `json:"name"`
+	Count int64  `json:"count"`
+	Bytes int64  `json:"bytes"`
+}
+
+// GcrootResult says why the target is alive.
+type GcrootResult struct {
+	Target GcrootTarget `json:"target"`
+	Paths  []RootPath   `json:"paths"`
+	// PathsFound counts the paths found before the search stopped (at
+	// Paths, the result's size limit, or the timeout).
+	PathsFound int `json:"pathsFound"`
+	// Complete says every root was searched: no more paths exist.
+	Complete bool `json:"complete"`
+}
+
+// GcrootTarget is what --gcroot resolved to: a type and its instances, or
+// an object.
+type GcrootTarget struct {
+	Type      string `json:"type,omitempty"`
+	Address   string `json:"address,omitempty"`
+	Instances *int64 `json:"instances,omitempty"`
+}
+
+// RootPath is a chain of references from a root to the target.
+type RootPath struct {
+	Root  RootLabel   `json:"root"`
+	Chain []ChainLink `json:"chain"`
+	// ChainOmitted counts links left out of a long chain's middle.
+	ChainOmitted int `json:"chainOmitted,omitempty"`
+}
+
+// RootLabel is a GC root: Kind is static (Name: Type.field), stack
+// (Thread, Frame), strong, pinned, async-pinned, ref-counted, sized-ref,
+// finalizer, thread-static or other.
+type RootLabel struct {
+	Kind   string `json:"kind"`
+	Name   string `json:"name,omitempty"`
+	Thread *int   `json:"thread,omitempty"`
+	Frame  string `json:"frame,omitempty"`
+}
+
+// ChainLink is one object on a root path.
+type ChainLink struct {
+	Address string `json:"address"`
+	Type    string `json:"type"`
+}
+
+// ThreadsParams are the threads method's params.
+type ThreadsParams struct {
+	Path                 string `json:"path"`
+	TrustRecordedRuntime bool   `json:"trustRecordedRuntime"`
+	// Frames is how many frames per thread, from the top.
+	Frames    int   `json:"frames"`
+	TimeoutMs int64 `json:"timeoutMs"`
+}
+
+// ThreadsResult is the threads method's result.
+type ThreadsResult struct {
+	Runtime        DumpRuntime  `json:"runtime"`
+	Threads        []DumpThread `json:"threads"`
+	ThreadsOmitted int          `json:"threadsOmitted"`
+	Locks          []DumpLock   `json:"locks"`
+	// LocksAvailable is false for a dump without a heap (mini, triage).
+	LocksAvailable bool `json:"locksAvailable"`
+}
+
+// DumpThread is a managed thread in a dump.
+type DumpThread struct {
+	ManagedID  int    `json:"managedId"`
+	OSID       uint32 `json:"osId"`
+	Alive      bool   `json:"alive"`
+	Background bool   `json:"background"`
+	Threadpool bool   `json:"threadpool"`
+	Finalizer  bool   `json:"finalizer"`
+	GC         bool   `json:"gc"`
+	// Exception is the type name of the thread's current exception.
+	Exception     string      `json:"exception,omitempty"`
+	Frames        []DumpFrame `json:"frames"`
+	FramesOmitted int         `json:"framesOmitted"`
+}
+
+// DumpFrame is a stack frame: Kind "managed" (Method, Module, ILOffset,
+// File, Line) or "runtime" (Method is the runtime frame's name).
+type DumpFrame struct {
+	Kind     string `json:"kind"`
+	Method   string `json:"method"`
+	Module   string `json:"module,omitempty"`
+	ILOffset *int   `json:"ilOffset,omitempty"`
+	File     string `json:"file,omitempty"`
+	Line     int    `json:"line,omitempty"`
+}
+
+// DumpLock is a monitor that is held or waited on: the object, its type,
+// the owner's managed thread id and how many threads wait.
+type DumpLock struct {
+	Object  string `json:"object"`
+	Type    string `json:"type"`
+	Owner   *int   `json:"owner,omitempty"`
+	Waiting int    `json:"waiting"`
 }
 
 const goosWindows = "windows"

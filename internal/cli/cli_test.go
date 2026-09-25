@@ -410,6 +410,9 @@ func TestExitCodeClasses(t *testing.T) {
 		{api.NewError(api.CodeNotDotnet, "", ""), exitState},
 		{api.NewError(api.CodeDiagnosticsDisabled, "", ""), exitState},
 		{api.NewError(api.CodeDiagnosticsTimeout, "", ""), exitState},
+		{api.NewError(api.CodeDumpUnsupported, "", ""), exitState},
+		{api.NewError(api.CodeDumpRuntimeMissing, "", ""), exitEnvironment},
+		{api.NewError(api.CodeDumpFailed, "", ""), exitAdapter},
 	}
 
 	for _, tt := range tests {

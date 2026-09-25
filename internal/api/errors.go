@@ -65,6 +65,16 @@ const (
 	// CodeDiagnosticsTimeout: the target didn't start a diagnostics session,
 	// or sent no data, in time (paused, stopped under a debugger, or hung).
 	CodeDiagnosticsTimeout Code = "DIAGNOSTICS_TIMEOUT"
+	// CodeDumpUnsupported: the dump can't be analyzed here — not a dump,
+	// truncated, no .NET runtime in it, taken on another OS or architecture,
+	// or (for a heap analysis) no managed heap in it.
+	CodeDumpUnsupported Code = "DUMP_UNSUPPORTED"
+	// CodeDumpRuntimeMissing: the .NET runtime a dump was taken with isn't
+	// installed here, so its analysis library can't be loaded.
+	CodeDumpRuntimeMissing Code = "DUMP_RUNTIME_MISSING"
+	// CodeDumpFailed: the target's runtime couldn't write the dump, or the
+	// dump it reported isn't there.
+	CodeDumpFailed Code = "DUMP_FAILED"
 )
 
 // Error is a user-facing error: a stable code, a message and an optional hint

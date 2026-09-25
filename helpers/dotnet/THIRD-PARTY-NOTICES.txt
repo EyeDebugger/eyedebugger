@@ -10,35 +10,131 @@ Microsoft.Diagnostics.NETCore.Client 0.2.745401
   Copyright (c) Microsoft Corporation. All rights reserved.
   Source: https://github.com/dotnet/diagnostics
 
+Microsoft.Diagnostics.Runtime 4.1.745802
+  Files: Microsoft.Diagnostics.Runtime.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/microsoft/clrmd
+
 Microsoft.Diagnostics.Tracing.TraceEvent 3.2.6
   Files: Microsoft.Diagnostics.Tracing.TraceEvent.dll, Microsoft.Diagnostics.FastSerialization.dll, Dia2Lib.dll, TraceReloggerLib.dll
   License: MIT
   Copyright (c) Microsoft Corporation. All rights reserved.
   Source: https://github.com/microsoft/perfview
 
-Microsoft.Extensions.DependencyInjection.Abstractions 8.0.2
+Azure.Core 1.53.0
+  Files: Azure.Core.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/Azure/azure-sdk-for-net
+
+Azure.Identity 1.21.0
+  Files: Azure.Identity.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/Azure/azure-sdk-for-net
+
+System.ClientModel 1.10.0
+  Files: System.ClientModel.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/Azure/azure-sdk-for-net
+
+Microsoft.Identity.Client 4.83.1
+  Files: Microsoft.Identity.Client.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/AzureAD/microsoft-authentication-library-for-dotnet
+
+Microsoft.Identity.Client.Extensions.Msal 4.83.1
+  Files: Microsoft.Identity.Client.Extensions.Msal.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/AzureAD/microsoft-authentication-library-for-dotnet
+
+Microsoft.IdentityModel.Abstractions 8.14.0
+  Files: Microsoft.IdentityModel.Abstractions.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/AzureAD/azure-activedirectory-identitymodel-extensions-for-dotnet
+
+Microsoft.Bcl.AsyncInterfaces 10.0.3
+  Files: Microsoft.Bcl.AsyncInterfaces.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/dotnet/dotnet (built from https://github.com/dotnet/runtime)
+
+Microsoft.Extensions.Configuration.Abstractions 10.0.3
+  Files: Microsoft.Extensions.Configuration.Abstractions.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/dotnet/dotnet (built from https://github.com/dotnet/runtime)
+
+Microsoft.Extensions.DependencyInjection.Abstractions 10.0.3
   Files: Microsoft.Extensions.DependencyInjection.Abstractions.dll
   License: MIT
   Copyright (c) Microsoft Corporation. All rights reserved.
-  Source: https://github.com/dotnet/runtime
+  Source: https://github.com/dotnet/dotnet (built from https://github.com/dotnet/runtime)
 
-Microsoft.Extensions.Logging.Abstractions 8.0.3
+Microsoft.Extensions.Diagnostics.Abstractions 10.0.3
+  Files: Microsoft.Extensions.Diagnostics.Abstractions.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/dotnet/dotnet (built from https://github.com/dotnet/runtime)
+
+Microsoft.Extensions.FileProviders.Abstractions 10.0.3
+  Files: Microsoft.Extensions.FileProviders.Abstractions.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/dotnet/dotnet (built from https://github.com/dotnet/runtime)
+
+Microsoft.Extensions.Hosting.Abstractions 10.0.3
+  Files: Microsoft.Extensions.Hosting.Abstractions.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/dotnet/dotnet (built from https://github.com/dotnet/runtime)
+
+Microsoft.Extensions.Logging.Abstractions 10.0.3
   Files: Microsoft.Extensions.Logging.Abstractions.dll
   License: MIT
   Copyright (c) Microsoft Corporation. All rights reserved.
-  Source: https://github.com/dotnet/runtime
+  Source: https://github.com/dotnet/dotnet (built from https://github.com/dotnet/runtime)
 
-System.Collections.Immutable 9.0.8
+Microsoft.Extensions.Options 10.0.3
+  Files: Microsoft.Extensions.Options.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/dotnet/dotnet (built from https://github.com/dotnet/runtime)
+
+Microsoft.Extensions.Primitives 10.0.3
+  Files: Microsoft.Extensions.Primitives.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/dotnet/dotnet (built from https://github.com/dotnet/runtime)
+
+System.Collections.Immutable 10.0.7
   Files: System.Collections.Immutable.dll
   License: MIT
   Copyright (c) Microsoft Corporation. All rights reserved.
-  Source: https://github.com/dotnet/runtime
+  Source: https://github.com/dotnet/dotnet (built from https://github.com/dotnet/runtime)
 
-System.IO.Pipelines 9.0.8
+System.Diagnostics.DiagnosticSource 10.0.3
+  Files: System.Diagnostics.DiagnosticSource.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/dotnet/dotnet (built from https://github.com/dotnet/runtime)
+
+System.IO.Pipelines 10.0.3
   Files: System.IO.Pipelines.dll
   License: MIT
   Copyright (c) Microsoft Corporation. All rights reserved.
-  Source: https://github.com/dotnet/runtime
+  Source: https://github.com/dotnet/dotnet (built from https://github.com/dotnet/runtime)
+
+System.Memory.Data 10.0.3
+  Files: System.Memory.Data.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/dotnet/dotnet (built from https://github.com/dotnet/runtime)
 
 System.Reflection.Metadata 9.0.8
   Files: System.Reflection.Metadata.dll
@@ -46,19 +142,26 @@ System.Reflection.Metadata 9.0.8
   Copyright (c) Microsoft Corporation. All rights reserved.
   Source: https://github.com/dotnet/runtime
 
-System.Text.Encodings.Web 9.0.8
+System.Security.Cryptography.ProtectedData 4.5.0
+  Files: System.Security.Cryptography.ProtectedData.dll (also runtimes/win/lib/netstandard2.0/)
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/dotnet/corefx (licence: its LICENSE.TXT, MIT)
+
+System.Text.Encodings.Web 10.0.3
   Files: System.Text.Encodings.Web.dll (also runtimes/browser/lib/net8.0/)
   License: MIT
   Copyright (c) Microsoft Corporation. All rights reserved.
-  Source: https://github.com/dotnet/runtime
+  Source: https://github.com/dotnet/dotnet (built from https://github.com/dotnet/runtime)
 
-System.Text.Json 9.0.8
+System.Text.Json 10.0.3
   Files: System.Text.Json.dll
   License: MIT
   Copyright (c) Microsoft Corporation. All rights reserved.
-  Source: https://github.com/dotnet/runtime
+  Source: https://github.com/dotnet/dotnet (built from https://github.com/dotnet/runtime)
 
-Packages built from https://github.com/dotnet/runtime also carry that repository's
+Packages built from https://github.com/dotnet/runtime (directly, through https://github.com/dotnet/dotnet,
+or from https://github.com/dotnet/corefx) also carry that repository's
 THIRD-PARTY-NOTICES.TXT (in each package and at
 https://github.com/dotnet/runtime/blob/main/THIRD-PARTY-NOTICES.TXT) for code it incorporates.
 
