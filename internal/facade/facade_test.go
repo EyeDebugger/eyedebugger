@@ -114,7 +114,7 @@ func TestJoinReplaysState(t *testing.T) {
 		tc := joinReady(t, startSession(t, fakeDriver{}, startParams(stopOnEntry, "")), humanC, "")
 
 		stop, ok := tc.waitEvent("stopped", nil).(*godap.StoppedEvent)
-		if !ok || stop.Body.Reason != "entry" || !stop.Body.AllThreadsStopped || stop.Body.ThreadId != 1 {
+		if !ok || stop.Body.Reason != "entry" || !stop.Body.AllThreadsStopped || stop.Body.ThreadId != 1 || stop.Body.PreserveFocusHint {
 			t.Errorf("replayed stop = %+v", stop)
 		}
 	})
@@ -181,6 +181,9 @@ func TestOrdering(t *testing.T) {
 	tc.checkBefore("terminate", "", "terminated")
 }
 
+// TestOtherClientsResume: another client's step is continued, then a stop
+// that keeps the client's focus (preserveFocusHint); the client's own
+// step's stop doesn't.
 func TestOtherClientsResume(t *testing.T) {
 	t.Parallel()
 
@@ -196,7 +199,15 @@ func TestOtherClientsResume(t *testing.T) {
 		t.Errorf("continued = %+v", c)
 	}
 
-	tc.waitEvent("stopped", isReason("step"))
+	if stop, ok := tc.waitEvent("stopped", isReason("step")).(*godap.StoppedEvent); !ok || !stop.Body.PreserveFocusHint {
+		t.Errorf("stop after the agent's step = %+v, want preserveFocusHint", stop)
+	}
+
+	tc.ok("next", `{"threadId":1}`)
+
+	if stop, ok := tc.waitEvent("stopped", isReason("step")).(*godap.StoppedEvent); !ok || stop.Body.PreserveFocusHint {
+		t.Errorf("stop after the client's own step = %+v, want no preserveFocusHint", stop)
+	}
 }
 
 func TestLeaseHeld(t *testing.T) {

@@ -41,7 +41,8 @@
   },
   "activationEvents": [
     "onDebugResolve:eyedbg",
-    "onDebugDynamicConfigurations:eyedbg"
+    "onDebugDynamicConfigurations:eyedbg",
+    "onStartupFinished"
   ],
   "contributes": {
     "configuration": {
@@ -74,6 +75,50 @@
             "Leave the session's lease policy as it is."
           ],
           "markdownDescription": "After you take control from an agent while the lease policy is `free` (where the agent's next run or step takes control back): switch the session to `human-priority`, so the agent has to ask. Under `handoff` and `human-priority` nothing happens: the agent already can't take control back without asking or forcing it."
+        },
+        "eyedbg.autoJoin": {
+          "type": "string",
+          "default": "ask",
+          "scope": "window",
+          "enum": [
+            "ask",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Offer to join when an agent starts debugging a program in this workspace.",
+            "Never offer; join with EyeDebugger: Join Session…"
+          ],
+          "markdownDescription": "When an agent starts debugging a program in this workspace, offer to join its session. While the window has focus and has no eyedbg debug session, the extension runs `eyedbg sessions --json` every 5 seconds (it never starts the eyedbg daemon); it offers each session once."
+        },
+        "eyedbg.followAgent": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "markdownDescription": "Follow the agent: when another client's step or run stops in the active eyedbg session, show the line in an editor without taking your keyboard focus. VS Code may keep the frame it last focused (and its variables) until you click the top frame in Call Stack."
+        },
+        "eyedbg.activity.hide": {
+          "type": "array",
+          "default": [],
+          "scope": "window",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "exec",
+              "breakpoint",
+              "lease",
+              "client",
+              "exceptions"
+            ],
+            "enumDescriptions": [
+              "Steps, runs and evaluations",
+              "Breakpoints",
+              "Control (the lease)",
+              "Clients joining and leaving",
+              "Exception settings"
+            ]
+          },
+          "markdownDescription": "Kinds of entries the EyeDebugger Activity view hides: `exec` (steps, runs, evaluations), `breakpoint`, `lease` (control), `client` (joining and leaving), `exceptions`. The activity channel (**EyeDebugger: Show Activity**) keeps every line."
         }
       }
     },
@@ -180,6 +225,69 @@
             "program": "${file}",
             "stopOnEntry": true
           }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "EyeDebugger: Join a session",
+            "description": "Join a running eyedbg session, such as an agent's (you pick one when there are several).",
+            "body": {
+              "type": "eyedbg",
+              "request": "attach",
+              "name": "Join eyedbg session"
+            }
+          },
+          {
+            "label": "EyeDebugger: Python file",
+            "description": "Start a Python file under eyedbg and join it.",
+            "body": {
+              "type": "eyedbg",
+              "request": "launch",
+              "name": "Python file (eyedbg)",
+              "lang": "python",
+              "program": "^\"\\${workspaceFolder}/${1:app.py}\"",
+              "stopOnEntry": true
+            }
+          },
+          {
+            "label": "EyeDebugger: Python module",
+            "description": "Run a Python module (python -m) under eyedbg and join it.",
+            "body": {
+              "type": "eyedbg",
+              "request": "launch",
+              "name": "Python module (eyedbg)",
+              "lang": "python",
+              "opts": {
+                "module": "${1:pytest}"
+              },
+              "args": [],
+              "stopOnEntry": true
+            }
+          },
+          {
+            "label": "EyeDebugger: .NET project",
+            "description": "Build a .NET project, run it under eyedbg and join it.",
+            "body": {
+              "type": "eyedbg",
+              "request": "launch",
+              "name": ".NET project (eyedbg)",
+              "lang": "dotnet",
+              "project": "^\"\\${workspaceFolder}\"",
+              "stopOnEntry": true
+            }
+          },
+          {
+            "label": "EyeDebugger: .NET built program",
+            "description": "Run an already-built .NET program under eyedbg (no build) and join it.",
+            "body": {
+              "type": "eyedbg",
+              "request": "launch",
+              "name": ".NET program (eyedbg)",
+              "lang": "dotnet",
+              "program": "^\"\\${workspaceFolder}/bin/Debug/${1:net10.0}/${2:App}.dll\"",
+              "noBuild": true,
+              "stopOnEntry": true
+            }
+          }
         ]
       }
     ],
@@ -252,6 +360,74 @@
       {
         "command": "eyedbg.showActivity",
         "title": "Show Activity",
+        "category": "EyeDebugger",
+        "icon": "$(output)"
+      },
+      {
+        "command": "eyedbg.checkInstallation",
+        "title": "Check eyedbg Installation",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.activity.open",
+        "title": "Open Location",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.activity.filter",
+        "title": "Filter Activity…",
+        "category": "EyeDebugger",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "eyedbg.activity.clear",
+        "title": "Clear Activity",
+        "category": "EyeDebugger",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "eyedbg.followAgent.enable",
+        "title": "Follow the Agent",
+        "category": "EyeDebugger",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "eyedbg.followAgent.disable",
+        "title": "Stop Following the Agent",
+        "category": "EyeDebugger",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "eyedbg.clients.refresh",
+        "title": "Refresh Clients",
+        "category": "EyeDebugger",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "eyedbg.clients.request",
+        "title": "Request Control…",
+        "category": "EyeDebugger",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "eyedbg.clients.take",
+        "title": "Take Control",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.clients.release",
+        "title": "Release Control",
+        "category": "EyeDebugger"
+      },
+      {
+        "command": "eyedbg.clients.grant",
+        "title": "Give Control",
+        "category": "EyeDebugger",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "eyedbg.clients.policy",
+        "title": "Change Lease Policy…",
         "category": "EyeDebugger"
       }
     ],
@@ -288,6 +464,38 @@
         {
           "command": "eyedbg.breakpoints.removeForEveryone",
           "when": "debugType == 'eyedbg'"
+        },
+        {
+          "command": "eyedbg.activity.open",
+          "when": "false"
+        },
+        {
+          "command": "eyedbg.clients.request",
+          "when": "false"
+        },
+        {
+          "command": "eyedbg.clients.take",
+          "when": "false"
+        },
+        {
+          "command": "eyedbg.clients.release",
+          "when": "false"
+        },
+        {
+          "command": "eyedbg.clients.grant",
+          "when": "false"
+        },
+        {
+          "command": "eyedbg.clients.policy",
+          "when": "false"
+        },
+        {
+          "command": "eyedbg.followAgent.enable",
+          "when": "!config.eyedbg.followAgent"
+        },
+        {
+          "command": "eyedbg.followAgent.disable",
+          "when": "config.eyedbg.followAgent"
         }
       ],
       "editor/lineNumber/context": [
@@ -300,6 +508,75 @@
           "command": "eyedbg.breakpoints.removeForEveryone",
           "when": "debugType == 'eyedbg'",
           "group": "eyedbg@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "eyedbg.followAgent.enable",
+          "when": "view == eyedbg.activity && !config.eyedbg.followAgent",
+          "group": "navigation@1"
+        },
+        {
+          "command": "eyedbg.followAgent.disable",
+          "when": "view == eyedbg.activity && config.eyedbg.followAgent",
+          "group": "navigation@1"
+        },
+        {
+          "command": "eyedbg.activity.filter",
+          "when": "view == eyedbg.activity",
+          "group": "navigation@2"
+        },
+        {
+          "command": "eyedbg.activity.clear",
+          "when": "view == eyedbg.activity",
+          "group": "navigation@3"
+        },
+        {
+          "command": "eyedbg.showActivity",
+          "when": "view == eyedbg.activity",
+          "group": "1_log@1"
+        },
+        {
+          "command": "eyedbg.clients.refresh",
+          "when": "view == eyedbg.clients",
+          "group": "navigation@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "eyedbg.clients.request",
+          "when": "view == eyedbg.clients && viewItem =~ /\\bcanRequest\\b/",
+          "group": "inline@1"
+        },
+        {
+          "command": "eyedbg.clients.grant",
+          "when": "view == eyedbg.clients && viewItem =~ /\\bcanGrant\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "eyedbg.clients.request",
+          "when": "view == eyedbg.clients && viewItem =~ /\\bcanRequest\\b/",
+          "group": "1_lease@1"
+        },
+        {
+          "command": "eyedbg.clients.take",
+          "when": "view == eyedbg.clients && viewItem =~ /\\bcanTake\\b/",
+          "group": "1_lease@2"
+        },
+        {
+          "command": "eyedbg.clients.release",
+          "when": "view == eyedbg.clients && viewItem =~ /\\bcanRelease\\b/",
+          "group": "1_lease@3"
+        },
+        {
+          "command": "eyedbg.clients.grant",
+          "when": "view == eyedbg.clients && viewItem =~ /\\bcanGrant\\b/",
+          "group": "1_lease@4"
+        },
+        {
+          "command": "eyedbg.clients.policy",
+          "when": "view == eyedbg.clients && viewItem =~ /\\bcanPolicy\\b/",
+          "group": "1_lease@5"
         }
       ]
     },
@@ -324,6 +601,92 @@
           "highContrastLight": "debugIcon.breakpointForeground"
         }
       }
+    ],
+    "views": {
+      "debug": [
+        {
+          "id": "eyedbg.activity",
+          "name": "EyeDebugger Activity"
+        },
+        {
+          "id": "eyedbg.clients",
+          "name": "EyeDebugger Clients"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "eyedbg.activity",
+        "contents": "What an agent does in the eyedbg sessions you join shows here: its steps (click one to open the line it stopped at), breakpoints and control changes.\n[Join Session](command:eyedbg.joinSession)\nWhen an agent starts debugging a program in this workspace, EyeDebugger offers to join (setting eyedbg.autoJoin)."
+      },
+      {
+        "view": "eyedbg.clients",
+        "contents": "Who is in the eyedbg sessions you join, who has control, and when each was last seen.\n[Join Session](command:eyedbg.joinSession)"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "eyedbg.gettingStarted",
+        "title": "Get started with EyeDebugger",
+        "description": "Watch and join an AI agent's live debug session from VS Code.",
+        "steps": [
+          {
+            "id": "install",
+            "title": "Install eyedbg",
+            "description": "EyeDebugger runs the eyedbg CLI. Install it, put it on PATH or set eyedbg.path in your user settings, then check it.\n[Check eyedbg](command:eyedbg.checkInstallation)",
+            "media": {
+              "markdown": "walkthrough/install.md"
+            },
+            "completionEvents": [
+              "onContext:eyedbg.installed"
+            ]
+          },
+          {
+            "id": "adapters",
+            "title": "Install the debug adapters",
+            "description": "eyedbg debugs through debug adapters: debugpy for Python, netcoredbg for .NET. Install them once from a terminal.\n[Open a Terminal](command:workbench.action.terminal.new)",
+            "media": {
+              "markdown": "walkthrough/adapters.md"
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.terminal.new"
+            ]
+          },
+          {
+            "id": "join",
+            "title": "Join the agent's session",
+            "description": "When an agent starts debugging a program in this workspace, EyeDebugger offers to join. You can also join any running session yourself.\n[Join Session](command:eyedbg.joinSession)",
+            "media": {
+              "markdown": "walkthrough/join.md"
+            },
+            "completionEvents": [
+              "onCommand:eyedbg.joinSession"
+            ]
+          },
+          {
+            "id": "watch",
+            "title": "Watch what the agent does",
+            "description": "The EyeDebugger Activity and Clients views in Run and Debug show the agent's steps, breakpoints and who has control; the editor follows the agent's stops without taking your focus.\n[Show Activity](command:eyedbg.activity.focus)",
+            "media": {
+              "markdown": "walkthrough/watch.md"
+            },
+            "completionEvents": [
+              "onView:eyedbg.activity"
+            ]
+          },
+          {
+            "id": "launch",
+            "title": "Start your own session",
+            "description": "Add an EyeDebugger configuration to launch.json to start a program under eyedbg; an agent can join it too.\n[Add Configuration](command:debug.addConfiguration)",
+            "media": {
+              "markdown": "walkthrough/launch.md"
+            },
+            "completionEvents": [
+              "onCommand:debug.addConfiguration"
+            ]
+          }
+        ]
+      }
     ]
   },
   "scripts": {
@@ -332,7 +695,7 @@
     "lint": "biome ci .",
     "fmt": "biome check --write .",
     "test": "node esbuild.mjs unit && node --test out/unit/all.test.js",
-    "package": "node esbuild.mjs extension && node -e \"require('node:fs').mkdirSync('out',{recursive:true})\" && vsce package --no-dependencies --out out/eyedbg.vsix && node scripts/check-vsix.mjs",
+    "package": "node esbuild.mjs extension && node -e \"require('node:fs').mkdirSync('out',{recursive:true})\" && vsce package --no-dependencies --baseImagesUrl https://github.com/EyeDebugger/eyedebugger/raw/HEAD/extensions/vscode --baseContentUrl https://github.com/EyeDebugger/eyedebugger/blob/HEAD/extensions/vscode --out out/eyedbg.vsix && node scripts/check-vsix.mjs",
     "test:integration": "node esbuild.mjs extension && node esbuild.mjs integration && node out/integration/runner.js"
   },
   "devDependencies": {

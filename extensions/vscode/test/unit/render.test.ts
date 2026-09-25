@@ -8,6 +8,7 @@ import { type Breakpoint, parseBreakpoint, parseEvent, type SessionEvent } from 
 import {
   activityLine,
   annotationText,
+  autoJoinPrompt,
   clock,
   describeActivity,
   errorNotice,
@@ -59,6 +60,20 @@ test('notificationSafe never leaves a link VS Code would render', () => {
   // The regex itself does match the raw text (the test is meaningful).
   LINK_REGEX.lastIndex = 0;
   assert.equal(LINK_REGEX.test(hostile[0] ?? ''), true);
+});
+
+test('the auto-join prompt never carries a link', () => {
+  const info = { id: 's-a1', lang: 'python', program: '/w/app.py', state: 'stopped', lease: undefined, clients: [] };
+  for (const s of hostile) {
+    for (const text of [
+      autoJoinPrompt({ ...info, program: `/w/${s}.py`, lang: s, state: s }, s),
+      autoJoinPrompt({ ...info, program: `/w/x](command:workbench.action.quit).py` }, 'agent'),
+    ]) {
+      LINK_REGEX.lastIndex = 0;
+      assert.equal(LINK_REGEX.test(text), false, text);
+      assert.ok(!text.includes('\n'), text);
+    }
+  }
 });
 
 test('notices', () => {
@@ -273,8 +288,8 @@ test('sessions', () => {
     state: 'stopped',
     lease: { policy: 'handoff' as const, holder: 'agent', requests: [] },
     clients: [
-      { id: 'agent', kind: 'agent', connected: 0 },
-      { id: 'human:x', kind: 'human', connected: 1 },
+      { id: 'agent', kind: 'agent', connected: 0, firstSeen: '', lastSeen: '' },
+      { id: 'human:x', kind: 'human', connected: 1, firstSeen: '', lastSeen: '' },
     ],
   };
   assert.deepEqual(sessionPickItem(info), {

@@ -7,9 +7,11 @@
 // characters become spaces, lengths are capped, and a notification can't
 // carry a link (VS Code runs command: links in notifications on click).
 
+import type { ActivityEntry } from './activity';
 import type { Mirror } from './mirrors';
 import {
   type Breakpoint,
+  type ClientInfo,
   clientKind,
   isClientId,
   type LeaseInfo,
@@ -192,6 +194,127 @@ export function clock(iso: string): string {
 /** activityLine is one line of the activity channel. */
 export function activityLine(e: SessionEvent, session: string, base: string): string {
   return plainText(`${clock(e.time)} ${session} ${describeActivity(e, base)}`, 1000);
+}
+
+// --- The Activity view ---
+
+const maxLabel = 200;
+
+/** Stop reasons an exec's label doesn't repeat: they are what the action does. */
+const plainStops = new Set(['', 'step', 'pause']);
+
+function execLabel(e: SessionEvent): string {
+  const who = clientLabel(e.client);
+  switch (e.action) {
+    case 'next':
+      return `${who} stepped over`;
+    case 'stepIn':
+      return `${who} stepped into`;
+    case 'stepOut':
+      return `${who} stepped out`;
+    case 'continue':
+      return `${who} continued`;
+    case 'runUntil':
+      return `${who} ran to a line`;
+    case 'pause':
+      return `${who} paused`;
+    case 'eval':
+      return `${who} evaluated ${e.text}`;
+    case 'set':
+      return `${who} set ${e.text}`;
+    default:
+      return `${who} ${e.action}`;
+  }
+}
+
+/** activityLabel is an Activity entry's label: what the client did and, for a step, where it stopped (relative to base). */
+export function activityLabel(entry: ActivityEntry, base: string): string {
+  const e = entry.event;
+  let label: string;
+  if (e.kind === 'exec') {
+    label = execLabel(e);
+    if (entry.location !== undefined) {
+      label += ` → ${location(entry.location.path, entry.location.line, base)}`;
+    }
+    if (!plainStops.has(entry.stopReason)) {
+      label += ` (${entry.stopReason})`;
+    }
+  } else {
+    label = describeActivity(e, base);
+  }
+  return plainText(noIcons(label), maxLabel);
+}
+
+/** activityTooltip is an Activity entry's plain tooltip: its channel line and, for a step, the stop. */
+export function activityTooltip(entry: ActivityEntry): string {
+  const lines = [plainText(entry.line, 1000)];
+  if (entry.event.kind === 'exec' && entry.location !== undefined) {
+    lines.push(
+      plainText(
+        `Stopped: ${entry.stopReason || 'unknown reason'} at ${location(entry.location.path, entry.location.line, '')}`,
+        1000,
+      ),
+    );
+  }
+  return lines.join('\n');
+}
+
+// --- The Clients view ---
+
+/** clientsSessionDescription is a session row's description: who has control, the policy, pending requests. */
+export function clientsSessionDescription(lease: LeaseInfo | undefined, self: string): string {
+  if (lease === undefined) {
+    return '';
+  }
+  const holder = lease.holder === '' ? 'nobody' : lease.holder === self ? 'you' : clientLabel(lease.holder);
+  const n = lease.requests.length;
+  const requests = n === 0 ? '' : ` · ${n} request${n === 1 ? '' : 's'}`;
+  return plainText(noIcons(`control: ${holder} · ${lease.policy}${requests}`), maxLabel);
+}
+
+/** clientRowText is a client row's label, description and plain tooltip. */
+export function clientRowText(
+  c: ClientInfo,
+  lease: LeaseInfo | undefined,
+  self: string,
+): { label: string; description: string; tooltip: string } {
+  const label = noIcons(clientLabel(c.id) + (c.id === self ? ' (you)' : ''));
+  const parts: string[] = [];
+  if (lease !== undefined && lease.holder !== '' && lease.holder === c.id) {
+    parts.push('has control');
+  }
+  if (c.connected > 0) {
+    parts.push(c.connected > 1 ? `connected ×${c.connected}` : 'connected');
+  }
+  if (c.lastSeen !== '') {
+    parts.push(`seen ${clock(c.lastSeen)}`);
+  }
+  const tips = [`${clientLabel(c.id)}${c.id === self ? ' (you)' : ''}`];
+  if (parts.length > 0) {
+    tips.push(parts.join(', '));
+  }
+  if (c.firstSeen !== '') {
+    tips.push(`First seen ${clock(c.firstSeen)}`);
+  }
+  const request = lease?.requests.find((r) => r.client === c.id);
+  if (request !== undefined) {
+    tips.push(`Asks for control${request.message !== '' ? `: "${plainText(request.message, 200)}"` : ''}`);
+  }
+  return {
+    label,
+    description: plainText(noIcons(parts.join(' · ')), maxLabel),
+    tooltip: tips.map((l) => plainText(l, 400)).join('\n'),
+  };
+}
+
+// --- The auto-join prompt ---
+
+/** autoJoinPrompt is the notification offering to join info, which agent is debugging. */
+export function autoJoinPrompt(info: SessionInfo, agent: string): string {
+  return notificationSafe(
+    `${clientLabel(agent)} is debugging ${plainText(basename(info.program), 200)} in this workspace (${info.id}, ${info.lang}, ${info.state}).`,
+    400,
+  );
 }
 
 // --- Status bar ---

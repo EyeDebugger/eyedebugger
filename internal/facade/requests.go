@@ -212,7 +212,7 @@ func (c *connection) configurationDone(ctx context.Context, r *godap.Configurati
 
 	switch info.State {
 	case api.StateStopped:
-		c.sendAll(ctx, stoppedEvent(info.Stop, st))
+		c.sendAll(ctx, stoppedEvent(info.Stop, st, false))
 	case api.StateExited:
 		if info.ExitCode != nil {
 			c.send(ctx, &godap.ExitedEvent{Event: event("exited"), Body: godap.ExitedEventBody{ExitCode: *info.ExitCode}})

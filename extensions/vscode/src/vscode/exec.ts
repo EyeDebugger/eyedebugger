@@ -46,6 +46,8 @@ export interface RunOptions {
   timeoutMs: number;
   cwd?: string;
   signal?: AbortSignal;
+  /** quiet logs the run and its failures at trace level (the auto-join poller: every 5 s). */
+  quiet?: boolean;
 }
 
 export class Eyedbg {
@@ -54,28 +56,50 @@ export class Eyedbg {
   constructor(private readonly log: vscode.LogOutputChannel) {}
 
   /** binary returns the eyedbg to run (absolute), checked once per (path, size, mtime). */
-  async binary(): Promise<string> {
+  async binary(quiet = false): Promise<string> {
+    return (await this.check(quiet)).path;
+  }
+
+  /** check is binary with the version it reported. */
+  async check(quiet = false): Promise<{ path: string; version: string }> {
     const setting = vscode.workspace.getConfiguration('eyedbg').get<string>('path', '');
     const r = resolveBinary(typeof setting === 'string' ? setting : '', binaryEnv());
     if (!r.ok) {
       throw new EyedbgError('EYEDBG_NOT_FOUND', r.error);
     }
     const key = `${r.path}\u0000${r.info.size}\u0000${r.info.mtimeMs}`;
-    if (!this.versions.has(key)) {
-      const v = checkVersion(await this.exec(r.path, versionArgs(), { timeoutMs: timeouts.short }));
+    let v = this.versions.get(key);
+    if (v === undefined) {
+      v = checkVersion(await this.exec(r.path, versionArgs(), { timeoutMs: timeouts.short, quiet }));
       this.versions.set(key, v);
       this.log.info(`using ${r.path} (eyedbg ${v.version})`);
+      // The walkthrough's first step checks off.
+      void vscode.commands.executeCommand('setContext', 'eyedbg.installed', true);
     }
-    return r.path;
+    return { path: r.path, version: v.version };
   }
 
   /** run runs 'eyedbg ARGS' (a --json command) and returns its JSON result. */
   async run(argv: string[], opts: RunOptions): Promise<Record<string, unknown>> {
-    return this.exec(await this.binary(), argv, opts);
+    return this.exec(await this.binary(opts.quiet === true), argv, opts);
+  }
+
+  /** warn logs at warning level, or at trace for a quiet run. */
+  private warn(opts: RunOptions, msg: string): void {
+    if (opts.quiet === true) {
+      this.log.trace(msg);
+    } else {
+      this.log.warn(msg);
+    }
   }
 
   private exec(file: string, argv: string[], opts: RunOptions): Promise<Record<string, unknown>> {
-    this.log.info(`run: eyedbg ${redact(argv).join(' ')}`);
+    const line = `run: eyedbg ${redact(argv).join(' ')}`;
+    if (opts.quiet === true) {
+      this.log.trace(line);
+    } else {
+      this.log.info(line);
+    }
     return new Promise((resolve, reject) => {
       execFile(
         file,
@@ -98,7 +122,7 @@ export class Eyedbg {
             resolve(parseResult(err === null ? 0 : (err.code as number), stdout, stderr));
           } catch (e) {
             if (e instanceof EyedbgError) {
-              this.log.warn(`eyedbg ${argv[0] ?? ''}: ${e.code}: ${e.message}${e.hint !== '' ? ` — ${e.hint}` : ''}`);
+              this.warn(opts, `eyedbg ${argv[0] ?? ''}: ${e.code}: ${e.message}${e.hint !== '' ? ` — ${e.hint}` : ''}`);
             }
             reject(e);
           }
@@ -127,7 +151,7 @@ export class Eyedbg {
     } else {
       e = new EyedbgError('INTERNAL', `couldn't run eyedbg ${cmd}: ${err.message}`);
     }
-    this.log.warn(`eyedbg ${cmd}: ${e.code}: ${e.message}`);
+    this.warn(opts, `eyedbg ${cmd}: ${e.code}: ${e.message}`);
     return e;
   }
 }

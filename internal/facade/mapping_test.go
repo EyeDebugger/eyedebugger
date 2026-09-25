@@ -198,6 +198,92 @@ func TestTranslate(t *testing.T) {
 	}
 }
 
+// TestStopFocusHint: a stop carries preserveFocusHint when the latest
+// execution request before it came from another client.
+func TestStopFocusHint(t *testing.T) {
+	t.Parallel()
+
+	exec := func(client, action string) api.Event {
+		return api.Event{Kind: api.EventExec, Client: client, Action: action}
+	}
+	stop := api.Event{Kind: api.EventStopped, Stop: &api.StopInfo{Reason: "step", ThreadID: 1}}
+
+	tests := []struct {
+		name   string
+		events []api.Event
+		want   []bool // the hint of each stop, in order
+	}{
+		{name: "other's next", events: []api.Event{exec("agent", "next"), stop}, want: []bool{true}},
+		{name: "own next", events: []api.Event{exec("human:t", "next"), stop}, want: []bool{false}},
+		{name: "other's pause", events: []api.Event{exec("agent", "pause"), stop}, want: []bool{true}},
+		{name: "other's run-until", events: []api.Event{exec("agent", "runUntil"), stop}, want: []bool{true}},
+		{name: "other's eval", events: []api.Event{exec("agent", "eval"), stop}, want: []bool{false}},
+		{name: "other's set after own step", events: []api.Event{exec("human:t", "stepIn"), exec("agent", "set"), stop}, want: []bool{false}},
+		{name: "latest wins", events: []api.Event{exec("agent", "next"), exec("human:t", "continue"), stop}, want: []bool{false}},
+		{name: "other's pause after own continue", events: []api.Event{exec("human:t", "continue"), exec("agent", "pause"), stop}, want: []bool{true}},
+		{name: "no exec", events: []api.Event{stop}, want: []bool{false}},
+		{name: "second stop", events: []api.Event{exec("agent", "stepOut"), stop, stop}, want: []bool{true, false}},
+		{name: "each stop its own", events: []api.Event{exec("agent", "continue"), stop, exec("human:t", "next"), stop, exec("agent", "next"), stop}, want: []bool{true, false, true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := stopHints(tt.events); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("hints = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// stopHints translates events for the client human:t and returns the
+// preserveFocusHint of each stop sent.
+func stopHints(events []api.Event) []bool {
+	st := &followState{self: "human:t", lastThread: 1}
+
+	var hints []bool
+
+	for i := range events {
+		for _, ev := range translate(&events[i], st) {
+			if s, ok := ev.(*godap.StoppedEvent); ok {
+				hints = append(hints, s.Body.PreserveFocusHint)
+			}
+		}
+	}
+
+	return hints
+}
+
+// TestStopFocusHintWire: the hint's JSON, and a resync (the cause of its
+// stop is unknown) sends none and forgets the last execution request.
+func TestStopFocusHintWire(t *testing.T) {
+	t.Parallel()
+
+	next := api.Event{Kind: api.EventExec, Client: "agent", Action: "next"}
+	stop := api.Event{Kind: api.EventStopped, Stop: &api.StopInfo{Reason: "step", ThreadID: 1}}
+
+	st := &followState{self: "human:t", lastThread: 1}
+	translate(&next, st)
+
+	want := `{"seq":0,"type":"","event":"stopped","body":{"reason":"step","threadId":1,"preserveFocusHint":true}}`
+	if got := encode(t, translate(&stop, st)); got != want {
+		t.Errorf("stopped =\n%s\nwant\n%s", got, want)
+	}
+
+	translate(&next, st)
+
+	want = `{"seq":0,"type":"","event":"output","body":{"category":"console","output":"eyedbg: 1 session events were missed\n"}}` + "\n" +
+		`{"seq":0,"type":"","event":"stopped","body":{"reason":"step","threadId":1}}`
+	if got := encode(t, resync(1, api.SessionInfo{State: api.StateStopped, Stop: stop.Stop}, st)); got != want {
+		t.Errorf("resync =\n%s\nwant\n%s", got, want)
+	}
+
+	if got := encode(t, translate(&stop, st)); got != `{"seq":0,"type":"","event":"stopped","body":{"reason":"step","threadId":1}}` {
+		t.Errorf("stop after the resync = %s, want no preserveFocusHint", got)
+	}
+}
+
 func TestResync(t *testing.T) {
 	t.Parallel()
 

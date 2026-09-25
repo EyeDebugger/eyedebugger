@@ -68,6 +68,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   eyedbg's. CI keeps each run's VSIX as the `vsix` artifact. A publish workflow for the VS Code
   Marketplace and Open VSX runs after each release and does nothing until its secrets are
   configured (`docs/MAINTAINING.md`).
+- The VS Code extension shows what the agent does (ADR 0015 addendum, P2-M5): *EyeDebugger
+  Activity* and *EyeDebugger Clients* views in Run and Debug — the agent's steps land on the line
+  they stopped at (click to open), breakpoints, control changes, who is connected and last seen,
+  with request/take/release/give actions per client; the editor follows the agent's stops without
+  taking focus (`eyedbg.followAgent`); an agent's session of a program in the workspace is offered
+  once with a prompt (`eyedbg.autoJoin`; the extension now starts with each trusted window and
+  runs `eyedbg sessions` every 5 s while the window has focus and nothing is joined);
+  `launch.json` snippets for Python and .NET; a *Get started* walkthrough; **EyeDebugger: Check
+  eyedbg Installation**.
 
 ### Changed
 
@@ -80,6 +89,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entries is refused (`INVALID_REQUEST`). `eyedbg sessions` has a `CONNECTED` column
   before `PROGRAM`, and the sharing line of a stop also shows while an editor is connected or a
   lease request is pending.
+- The DAP facade marks a stop caused by another client's continue, step, run-until or pause with
+  `preserveFocusHint` (ADR 0014 addendum), so an editor keeps its focus when the agent steps; the
+  replayed stop at the join and the editor's own stops are unchanged.
 
 ### Fixed
 

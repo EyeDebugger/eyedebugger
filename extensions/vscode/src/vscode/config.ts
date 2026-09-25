@@ -147,10 +147,34 @@ export class ConfigurationProvider implements vscode.DebugConfigurationProvider 
       throw new EyedbgError('INVALID_REQUEST', `"cwd" ${JSON.stringify(spec.cwd)} is not a directory`);
     }
     const argv = startArgs(spec, client());
-    const started = await vscode.window.withProgress(
+    // No auto-join prompt for the session being started.
+    this.state.launching++;
+    this.state.fire();
+    let started: SessionInfo;
+    try {
+      started = await this.start(argv, spec.lang, cwd, token);
+    } finally {
+      this.state.launching--;
+      this.state.fire(); // a canceled launch returns before the fire below: re-arm the poller
+    }
+    const key = randomUUID();
+    this.state.launched.set(key, started.id);
+    this.state.fire();
+    this.state.log.info(`started session ${started.id} (${spec.lang})`);
+    return { ...config, request: 'attach', session: started.id, [launchToken]: key };
+  }
+
+  /** start runs 'eyedbg start', cancellable from its progress notification. */
+  private async start(
+    argv: string[],
+    lang: string,
+    cwd: string | undefined,
+    token: vscode.CancellationToken | undefined,
+  ): Promise<SessionInfo> {
+    return vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: `EyeDebugger: starting a ${spec.lang} session`,
+        title: `EyeDebugger: starting a ${lang} session`,
         cancellable: true,
       },
       async (_progress, cancel) => {
@@ -182,10 +206,6 @@ export class ConfigurationProvider implements vscode.DebugConfigurationProvider 
         }
       },
     );
-    const key = randomUUID();
-    this.state.launched.set(key, started.id);
-    this.state.log.info(`started session ${started.id} (${spec.lang})`);
-    return { ...config, request: 'attach', session: started.id, [launchToken]: key };
   }
 }
 

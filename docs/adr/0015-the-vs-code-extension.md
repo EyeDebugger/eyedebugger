@@ -218,8 +218,8 @@ consecutive clean runs before merging an extension change), the VSIX file-list c
 
 ## More Information
 
-Supersedes nothing; builds on ADR 0012 and ADR 0014. Publishing is covered by the addendum below;
-the activity and clients views come later.
+Supersedes nothing; builds on ADR 0012 and ADR 0014. Publishing and the views are covered by the
+addenda below.
 
 ## Addendum (2026-09-25, P2-M4): releases and publishing
 
@@ -251,3 +251,68 @@ the activity and clients views come later.
 - **Marketplace via the lockfile-pinned `vsce`** (`./node_modules/.bin/vsce publish`, not `pnpm
   exec vsce publish`, avoiding a zizmor `use-trusted-publishing` false positive). **Azure DevOps
   global PATs retire 2026-12-01**; moving to Entra ID (`--azure-credential`) is a follow-up.
+
+## Addendum (2026-09-25, P2-M5): views, auto-join, follow
+
+- **Views in Run and Debug** (`contributes.views.debug`): **EyeDebugger Activity** and
+  **EyeDebugger Clients**, `TreeView`s with a welcome text (Join Session, the auto-join setting)
+  and no `when`, so they exist before a join. VS Code shows views contributed to that container
+  collapsed on first install; the README says to expand them. Rejected: an own activity-bar
+  container (close call on discoverability; the roadmap puts them beside Call Stack); a webview
+  (no webviews, by rule).
+- **Activity** (`src/core/activity.ts`, pure): per debug session the last 200 `eyedbg/activity`
+  events, newest first; a step's entry gets the line it stopped at. The facade sends another
+  client's step as `continued`, then its `eyedbg/activity`, then `stopped`; VS Code asks for the
+  stopped thread's top frame after every stop, hinted or not; so the tracker pairs the stop with
+  the pending step and reads the location from VS Code's own `stackTrace` response (the request
+  with that thread and `startFrame` 0) — no request of the extension's. An execution request from
+  the editor drops the pending step; `continued`, a new stop, `terminated` or a new adapter
+  connection drop the stop being located. Breakpoint entries have their line. Kinds hidden by
+  `eyedbg.activity.hide` are filtered when shown; **Clear** empties the view; ended sessions keep
+  their entries (the last 3) until then. Clicking an entry opens its line (a `file:` URI from
+  state, looked up by id). The output channel stays as it was.
+- **Clients**: rows ordered holder, connected, last seen; `lastSeen` is the later of the session's
+  value and the client's latest activity event (the session moves it on every request without an
+  event); **Refresh** and the view becoming visible re-read the list (`eyedbg/clients`). Row menus
+  (`viewItem` flags from the pure `clientActions`) run the existing `eyedbg.lease.*` commands, so
+  the lease rules, the modal forced take and error handling stay in one place.
+- **Follow the agent** (`eyedbg.followAgent`, default on): a hinted stop (ADR 0014 addendum,
+  P2-M5) in the active eyedbg session, once located, is shown with `showTextDocument
+  {preserveFocus: true}` in the column already showing the file, else the active one — what VS
+  Code does itself with `debug.focusEditorOnBreak` off. Off, nothing moves. VS Code doesn't focus a
+  hinted stop's frame, and it drops the frame it had focused only if the program is still running
+  200 ms after the resume (`debugService.ts`), so after a quick step it keeps the previous frame
+  focused: that line stays highlighted and the Variables view shows the earlier stop until the
+  human clicks the top frame. No API or command focuses a frame quietly at the 1.100 floor
+  (`debug.activeStackItem` is read-only through 1.139; `workbench.action.debug.callStackTop` takes
+  focus; `workbench.action.debug.focusProcess` needs the workbench's own session object and throws
+  without one at 1.100); documented. Rejected: changing the user's
+  `debug.focus*OnBreak` (global); a focus-stealing follow mode (would need per-connection hint
+  control).
+- **Auto-join prompt** (`eyedbg.autoJoin`: `ask` | `never`): activation adds
+  `onStartupFinished`, so the extension runs in every trusted window (never in Restricted Mode).
+  While the window has focus, has a `file:` folder, no eyedbg debug session and no launch in
+  progress, it runs `eyedbg sessions --json` (the existing `exec.ts` path: resolved binary,
+  `execFile`, a constant argv; `sessions` never starts the daemon) 5 s after the previous look
+  finished (a `setTimeout` chain, never overlapping), 60 s after a failure; failures are logged
+  once each at warning and never shown; each run logs at trace. It offers a session that is live,
+  has an agent client and not this window's client, and whose program is an absolute path under a
+  workspace folder (links resolved; Windows compares case-insensitively) — at most one prompt
+  open, once per session; Ignore, joining or launching it here skips it for the window's life.
+  Join goes through the normal attach resolver. Rejected: `setInterval` (overlap); prompting for
+  every session; joining without a click. `eyedbg.joinSession` accepts `{session}`.
+- **launch.json snippets and a walkthrough**: `configurationSnippets` for joining, a Python file or
+  module, a .NET project and a built .NET program (each launch body passes `validateLaunch`, unit
+  tested); a five-step walkthrough whose media are markdown files shipped in the VSIX
+  (`walkthrough/*.md`) and whose first step checks off on the `eyedbg.installed` context
+  (**EyeDebugger: Check eyedbg Installation**). Installing adapters stays in a terminal (no
+  download path in the extension).
+- **API** (still `apiVersion: 0`, read-only): `views()` (both trees as VS Code gets them),
+  `autoJoin()`, `reveals()`; `sessions()[].clients` gain `firstSeen` and `lastSeen`.
+- **Tests**: the runner's profile sets `eyedbg.autoJoin: never` and `eyedbg.followAgent: false`;
+  the tests that need them switch them on. The only test hook in product code is
+  `EYEDBG_TEST_ASSUME_FOCUSED=1` (window focus is unreliable under xvfb and on a busy desktop).
+- **README images** live in `extensions/vscode/images/` (repository only); `vsce` derives image
+  URLs from the repository's root and ignores `repository.directory`, so `package` passes
+  `--baseImagesUrl`/`--baseContentUrl` under `extensions/vscode`, and `check-vsix.mjs` fails on
+  any packaged README image outside that prefix.

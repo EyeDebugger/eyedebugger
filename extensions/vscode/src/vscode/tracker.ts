@@ -21,6 +21,7 @@ import {
   parseDap,
   parseEvent,
   parseLease,
+  type SourceLine,
 } from '../core/protocol';
 import { isSessionId } from '../core/validate';
 import { client } from './config';
@@ -32,6 +33,10 @@ export interface Handlers {
   leaseHeld(t: Tracked, m: DapMessage): void;
   breakpointsChanged(): void;
   activity(t: Tracked, e: NonNullable<ReturnType<typeof parseEvent>>): void;
+  /** activityChanged: a step's stop was located (the Activity view). */
+  activityChanged(): void;
+  /** reveal: another client's stop, located (following the agent). */
+  reveal(t: Tracked, at: SourceLine): void;
 }
 
 export class TrackerFactory implements vscode.DebugAdapterTrackerFactory {
@@ -80,6 +85,7 @@ export class TrackerFactory implements vscode.DebugAdapterTrackerFactory {
 
   private fromEditor(t: Tracked, m: DapMessage): void {
     t.mirrors.fromEditor(m);
+    t.log.fromEditor(m);
     if (m.type === 'request' && m.command === 'disconnect') {
       if (m.arguments?.restart === true) {
         this.state.restarting.add(t.session.id);
@@ -92,6 +98,13 @@ export class TrackerFactory implements vscode.DebugAdapterTrackerFactory {
   private fromAdapter(t: Tracked, m: DapMessage): void {
     if (t.mirrors.fromAdapter(m)) {
       this.handlers.breakpointsChanged();
+    }
+    const u = t.log.fromAdapter(m);
+    if (u.changed) {
+      this.handlers.activityChanged();
+    }
+    if (u.reveal !== undefined) {
+      this.handlers.reveal(t, u.reveal);
     }
     if (m.type === 'event') {
       this.event(t, m);
