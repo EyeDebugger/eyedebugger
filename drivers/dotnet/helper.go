@@ -49,6 +49,22 @@ const (
 	// MethodThreads reads a dump's managed threads and locks:
 	// ThreadsParams, then ThreadsResult.
 	MethodThreads = "threads"
+	// MethodTrace records an EventPipe trace of a process into a file:
+	// TraceParams, then TraceResult.
+	MethodTrace = "trace"
+	// MethodTraceSummary summarizes a .nettrace file: TraceSummaryParams,
+	// then TraceSummaryResult.
+	MethodTraceSummary = "traceSummary"
+)
+
+// Trace profiles (TraceParams.Profile).
+const (
+	// ProfileCPU samples every managed thread's stack about a thousand
+	// times a second, with GC start and end events.
+	ProfileCPU = "cpu"
+	// ProfileGC records garbage collections and allocation ticks (an event
+	// per about 100 KB allocated).
+	ProfileGC = "gc"
 )
 
 // Dump types (DumpParams.Type).
@@ -75,6 +91,9 @@ const (
 	EndDuration = "duration"
 	// EndExited: the process exited before the duration was over.
 	EndExited = "exited"
+	// EndSize: the trace reached its size limit before the duration was
+	// over.
+	EndSize = "size"
 )
 
 // ProcessesResult is the processes method's result.
@@ -290,6 +309,100 @@ type DumpLock struct {
 	Type    string `json:"type"`
 	Owner   *int   `json:"owner,omitempty"`
 	Waiting int    `json:"waiting"`
+}
+
+// TraceParams are the trace method's params.
+type TraceParams struct {
+	PID        int    `json:"pid"`
+	Profile    string `json:"profile"`
+	DurationMs int64  `json:"durationMs"`
+	// Path is where the trace is written: absolute, nothing there.
+	Path string `json:"path"`
+}
+
+// TraceResult is the trace method's result.
+type TraceResult struct {
+	Bytes     int64  `json:"bytes"`
+	ElapsedMs int64  `json:"elapsedMs"`
+	EndReason string `json:"endReason"`
+}
+
+// TraceSummaryParams are the traceSummary method's params.
+type TraceSummaryParams struct {
+	// Path is the .nettrace file: absolute.
+	Path string `json:"path"`
+	// Scratch is where the summary's temporary file goes: absolute,
+	// nothing there nor at Scratch + ".new".
+	Scratch   string `json:"scratch"`
+	Top       int    `json:"top"`
+	TimeoutMs int64  `json:"timeoutMs"`
+}
+
+// TraceSummaryResult is the traceSummary method's result: CPU is there
+// when the trace has samples, GC with a collection, Allocations with an
+// allocation tick.
+type TraceSummaryResult struct {
+	DurationMs  int64              `json:"durationMs"`
+	EventsLost  int64              `json:"eventsLost"`
+	CPU         *CPUSummary        `json:"cpu,omitempty"`
+	GC          *GCSummary         `json:"gc,omitempty"`
+	Allocations *AllocationSummary `json:"allocations,omitempty"`
+}
+
+// CPUSummary is a trace's CPU samples: all of them, those in managed code,
+// the others (waiting, or in native or runtime code); methods by samples
+// at the top of the stack (Exclusive), anywhere in it (Inclusive), and
+// where the others left managed code (Waiting).
+type CPUSummary struct {
+	Samples          int64           `json:"samples"`
+	Managed          int64           `json:"managed"`
+	Other            int64           `json:"other"`
+	Threads          int             `json:"threads"`
+	UnresolvedFrames int64           `json:"unresolvedFrames"`
+	Exclusive        []MethodSamples `json:"exclusive"`
+	ExclusiveOmitted int             `json:"exclusiveOmitted"`
+	Inclusive        []MethodSamples `json:"inclusive"`
+	InclusiveOmitted int             `json:"inclusiveOmitted"`
+	Waiting          []MethodSamples `json:"waiting"`
+	WaitingOmitted   int             `json:"waitingOmitted"`
+}
+
+// MethodSamples is a method (its module without extension, when known)
+// and its samples; Method "(unresolved)" stands for frames without a name.
+type MethodSamples struct {
+	Method  string `json:"method"`
+	Module  string `json:"module,omitempty"`
+	Samples int64  `json:"samples"`
+}
+
+// GCSummary is a trace's garbage collections.
+type GCSummary struct {
+	Collections  int     `json:"collections"`
+	Gen0         int     `json:"gen0"`
+	Gen1         int     `json:"gen1"`
+	Gen2         int     `json:"gen2"`
+	Background   int     `json:"background"`
+	Induced      int     `json:"induced"`
+	PauseTotalMs float64 `json:"pauseTotalMs"`
+	PauseMaxMs   float64 `json:"pauseMaxMs"`
+}
+
+// AllocationSummary is a trace's allocation ticks (about one per 100 KB
+// allocated) by type.
+type AllocationSummary struct {
+	Ticks        int64           `json:"ticks"`
+	Bytes        int64           `json:"bytes"`
+	TypeCount    int             `json:"typeCount"`
+	Types        []AllocatedType `json:"types"`
+	TypesOmitted int             `json:"typesOmitted"`
+}
+
+// AllocatedType is a type's allocation ticks and the bytes they account
+// for.
+type AllocatedType struct {
+	Name  string `json:"name"`
+	Ticks int64  `json:"ticks"`
+	Bytes int64  `json:"bytes"`
 }
 
 const goosWindows = "windows"

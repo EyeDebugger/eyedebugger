@@ -51,7 +51,7 @@ dap' and the daemon's DAP facade; "presence": connected editors in sessions; "le
 in the editor and output replay; "dotnet.helper": 'eyedbg dotnet ps' and 'eyedbg dotnet counters',
 run through the .NET side helper — which may still be missing at run time, HELPER_NOT_FOUND;
 "dotnet.dump": 'eyedbg dotnet dump', 'eyedbg dotnet heap' and 'eyedbg dotnet threads', through the
-same helper).`, binName),
+same helper; "dotnet.trace": 'eyedbg dotnet trace', through the same helper).`, binName),
 		Example: fmt.Sprintf("  %[1]s version\n  %[1]s version --json", binName),
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -71,7 +71,7 @@ func writeVersion(w io.Writer, name string, info version.Info, asJSON bool) erro
 			GoVersion: info.GoVersion,
 			Platform:  info.Platform,
 			Protocol:  api.ProtocolVersion,
-			Features:  []string{"dap", "presence", "lease.request", "dap.collab", "dotnet.helper", "dotnet.dump"},
+			Features:  []string{"dap", "presence", "lease.request", "dap.collab", "dotnet.helper", "dotnet.dump", "dotnet.trace"},
 		}
 		if err := json.NewEncoder(w).Encode(out); err != nil {
 			return fmt.Errorf("write version: %w", err)

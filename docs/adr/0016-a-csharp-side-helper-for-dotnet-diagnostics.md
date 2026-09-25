@@ -120,7 +120,8 @@ framing**, reading **System.Runtime EventCounters** and leaving **aggregation to
 * **Read-only diagnostics.** The helper calls only `GetPublishedProcesses` and
   `StartEventPipeSession[Async]`; never `ApplyStartupHook`, `AttachProfiler`, `SetStartupProfiler`,
   `SetEnvironmentVariable`, `EnablePerfMap`/`DisablePerfMap` or `ResumeRuntime`. `WriteDump` (M7)
-  comes with its own review — added by the P2-M7 addendum below. It reads no target memory, environment or command line; error messages
+  comes with its own review — added by the P2-M7 addendum below. It reads no target memory, environment or command line (a
+  trace file, P2-M8, holds the command line the runtime records, unread: see that addendum); error messages
   carry pids, process names and exception types, never target data.
 * **Aggregation in Go** (`internal/cli`): a gauge's last, min and max; a sum's total and total per
   second over the intervals it was seen in; missed intervals (a pause) counted against the duration;
@@ -355,3 +356,87 @@ Dependencies added (shipped; all MIT, © Microsoft Corporation):
 Moved up: Microsoft.Extensions.Logging.Abstractions and DependencyInjection.Abstractions 10.0.3,
 System.Collections.Immutable 10.0.7, System.IO.Pipelines, System.Text.Encodings.Web and
 System.Text.Json 10.0.3. The helper publishes 35 files, 8.9 MB.
+
+## Addendum (P2-M8, 2026-09-25): CPU and GC traces
+
+`eyedbg dotnet trace` records a short EventPipe trace of a running process into a `.nettrace` file
+and summarizes it; `eyedbg dotnet trace FILE` summarizes an existing one (eyedbg's or
+dotnet-trace's). Two helper methods join protocol 1 (additive; an older helper's `UNKNOWN_METHOD`
+is `HELPER_MISMATCH`): `trace` and `traceSummary` (wire in `helpers/dotnet/README.md`), and one
+code: `TRACE_UNSUPPORTED` (exit 2). No new package: TraceEvent 3.2.6 (M6) has `TraceLog`.
+
+* **Two helper processes.** The CLI runs `trace` (collect into a file), then a second helper
+  process runs `traceSummary` on that file: one call per process, the trace parser (fed by a
+  same-user and possibly spoofed endpoint) out of the process holding the diagnostics connection,
+  and FILE summaries for free. Rejected: one combined method; TraceLog's real-time session (no file
+  for PerfView, and a second rundown session at start).
+* **Profiles, minimal keywords.** `cpu`: `Microsoft-DotNETCore-SampleProfiler` (Informational) and
+  `Microsoft-Windows-DotNETRuntime` Informational with GC | Loader | Jit (0x19), rundown requested;
+  `gc`: the runtime provider Verbose with GC (0x1: collections and allocation ticks), no rundown.
+  Both with a 256 MB EventPipe buffer (dotnet-trace's default, allocated as needed). Not
+  dotnet-trace's default keywords: no Exception keyword (exception messages are program values),
+  no contention, threading or interop payloads. A trace then holds method, module and type names,
+  GC data and what the runtime records about the process itself — its command line and module
+  paths — which is why it is kept private.
+* **Collection.** The helper creates the file before starting the session, with `FileMode.CreateNew`
+  (O_EXCL: an existing name or symlink fails; nothing followed or truncated), no sharing, and 0600
+  off Windows (`UnixCreateMode`'s setter throws on Windows: measured). The session starts within
+  5 s (`Diagnostics/EventPipeStart`, shared with counters). The stream is copied to the file on its
+  own thread and always drained (M6's Windows rule); past 512 MiB, or once writing failed, it keeps
+  reading and the session is stopped (`endReason: "size"`; a write failure is `HELPER_FAILED`).
+  Stopping waits up to 30 s for the stream's end, which carries the rundown (the method names): a
+  target that stopped answering mid-trace (a breakpoint, a suspend) gets its stream closed, the call
+  fails with `DIAGNOSTICS_TIMEOUT`, and the CLI removes the file, which couldn't be read. A target
+  that exits during the trace ends the stream itself, readable (`endReason: "exited"`); one killed
+  leaves a cut file (`TRACE_UNSUPPORTED` at the summary; appending an end tag would parse it but
+  with every frame unresolved, so it isn't done). stdin's end (Ctrl-C) stops the session within 3 s
+  and the CLI discards the trace. The CLI checks a regular non-empty file arrived (re-applying
+  0600), prunes after it, and moves it to `--out` only after the summary (the helper reads the
+  private file, never the user's location). A stopped session is refused before any helper runs
+  (`NOT_RUNNING`, as counters: EventPipe can't start there).
+* **Summary.** Pass 1 reads the file with `EventPipeEventSource`: GC collections (per generation,
+  background, induced, pause total and max, from TraceEvent's GC analysis), allocation ticks by
+  type, the number of CPU samples. Pass 2, only with samples, converts it with
+  `TraceLog.CreateFromEventPipeDataFile(path, scratch)` — always an explicit scratch path in
+  eyedbg's traces directory (`<pid>-<UTC>-<profile|file>-<8 hex>.etlx`; the default,
+  `<file>.etlx`, deletes and replaces whatever is next to the input; its `.new` sibling is covered
+  too) — made 0600, deleted in the helper's `finally` and again by the CLI; a scratch file left by
+  a killed summary is pruned after an hour (a summary's `--timeout` is at most that). Each sample's
+  stack counts for its top method (exclusive) and once for every method in it (inclusive) when the
+  thread was in managed code; any other sample (a wait, I/O, native or runtime code) counts for the
+  managed method it left from (waiting). EventPipe samples every managed thread about a thousand
+  times a second in total (measured: ~1000/s over 3 threads), not CPU time: ranking all samples
+  together would put `Thread.Sleep` first, hence the separate lists. Method names are TraceEvent's
+  without the IL keywords `class `/`value class `, parameter types as TraceEvent spells them
+  (`int32`); frames without a name count as "(unresolved)" in their module.
+* **Untrusted input.** Any `.nettrace` (a FILE, or a spoofed endpoint's stream) is parsed without
+  symbol lookup: never `SymbolReader`, `TraceLogOptions.ShouldResolveSymbols`/`AlwaysResolveSymbols`,
+  `LookupSymbolsForModule` or `GetSourceLine`, so no symbol server is contacted and no file a trace
+  names is opened (read in TraceEvent 3.2.6's source; measured: the traced app's `.dll` and
+  `.deps.json` replaced by FIFOs, the summary completes). A zero-length file (also what a FIFO or
+  device reports) is refused before it is opened. A file the user can't read
+  (`UnauthorizedAccessException`) is `TRACE_UNSUPPORTED` "can't read PATH"; `FormatException`,
+  `EndOfStreamException`, `InvalidDataException` and `IOException` while reading are
+  `TRACE_UNSUPPORTED` without the parser's message (it can quote the file); any other parser
+  exception is `HELPER_FAILED` with its type only. `TRACE_UNSUPPORTED` means only a file that can't
+  be read: a readable trace with no samples, collections or allocation ticks (a quiet process traced
+  for gc) is an empty summary — the CLI says so in one line and exits 0 (M8-Q13, amending the plan's
+  refusal). The deadline is checked every 4096 events; the TraceLog conversion itself can't be
+  canceled, so a runaway one ends at the CLI's deadline (the helper is killed). Memory inside the
+  helper isn't bounded (the serializer reads lengths from the file, so a crafted one can ask for
+  more than its size): the short-lived helper can die (`HELPER_FAILED`) or be killed at the
+  deadline; and the ETLX file (2.7–4.4× the trace) takes disk in the private directory until the
+  summary ends — residuals for the phase-end security review.
+* **Output.** Names and counts only: methods, modules, types, samples, GC counts and pauses,
+  allocation estimates; never event payloads (the process information with the command line is
+  never read). Names cut at 400 characters, a result under 900 KiB; the CLI makes every string fit
+  for a terminal.
+
+Measured while planning and building (tiny apps; macOS arm64 .NET 10.0.10, Linux x64 10.0.12,
+Windows x64 10.0.12): start 22–110 ms, stop with rundown 25–99 ms; 3 s ≈ 0.5–5.7 MB for cpu, up to
+25 MB for gc at an extreme allocation rate (its event rate follows the allocation rate); the ETLX
+file is 2.7–4.4× the trace, converted in 0.1–0.4 s; a spinning method ranked first with 0 unresolved
+frames (System.Private.CoreLib included) on all three OSes, without the native libraries excluded
+from the package (the Windows conversion was checked before building). Unmeasured: the rundown's
+time on a large app (100k+ methods; the 30 s stop bound), sampling overhead on the target, .NET 8
+and 9 targets.

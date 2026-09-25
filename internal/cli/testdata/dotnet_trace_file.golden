@@ -1,0 +1,27 @@
+trace /tmp/app.nettrace (1.2 MiB): 10s, 9,812 samples on 12 threads (6,001 in managed code, 3,811 waiting or in native code)
+hottest methods (exclusive: at the top of the stack, in managed code):
+  SAMPLES       %  METHOD
+    4,120   68.7%  Burn.Spin(int32)  [breadth]
+    1,210   20.2%  System.Threading.Thread.<PollGC>g__PollGCWorker|67_0()  [System.Private.CoreLib]
+      671   11.2%  App.Evil?[2J?.Run()  [breadth]
+…2 more (--top N)
+inclusive (anywhere in the stack, in managed code):
+  SAMPLES       %  METHOD
+    5,330   88.8%  Burn.Run(System.String)  [breadth]
+    5,330   88.8%  Program.<Main>$(System.String[])  [breadth]
+    4,120   68.7%  Burn.Spin(int32)  [breadth]
+…14 more (--top N)
+waiting or in native code, at:
+  SAMPLES       %  METHOD
+    3,790   99.4%  System.Threading.Thread.Sleep(int32)  [System.Private.CoreLib]
+       21    0.6%  (unresolved)
+GC: 37 collections (gen0 35, gen1 2, gen2 0; 1 induced by GC.Collect), pauses 12.3 ms total (0.1% of the time), 1.2 ms max
+allocated ≈ 17.8 GiB (sampled: an event about every 100 KB); top 3 of 4 allocated types:
+    BYTES≈    TICKS  TYPE
+  17.7 GiB  185,000  System.Byte[]
+  90.6 MiB      900  App.Evil?]0;x?Type
+   4.8 MiB      100  System.String
+…1 more type (--top N)
+21 frames had no method name and count as (unresolved): the process may have ended before its method names were recorded
+trace /tmp/quiet.nettrace (2.0 KiB): 3s
+no CPU samples or GC events in this trace

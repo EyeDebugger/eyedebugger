@@ -486,8 +486,8 @@ func checkPrivateDump(t *testing.T, self string) string {
 
 	decodeJSON(t, run(t, 0, "dotnet", "dump", "--pid", self, "--json"), &d)
 
-	if filepath.Dir(d.Path) != filepath.Join(os.Getenv(adapters.EnvHome), "dumps") || !artifacts.IsDumpName(filepath.Base(d.Path)) ||
-		artifacts.DumpType(filepath.Base(d.Path)) != "heap" || !d.Private || d.Bytes != int64(len(helpertest.DumpContent)) {
+	if filepath.Dir(d.Path) != filepath.Join(os.Getenv(adapters.EnvHome), "dumps") || !artifacts.IsName(artifacts.Dumps, filepath.Base(d.Path)) ||
+		artifacts.TypeOf(artifacts.Dumps, filepath.Base(d.Path)) != "heap" || !d.Private || d.Bytes != int64(len(helpertest.DumpContent)) {
 		t.Fatalf("dump --json = %+v", d)
 	}
 
@@ -698,7 +698,7 @@ func TestDotnetDumpSessionTargets(t *testing.T) {
 
 // TestFileInputTrustsOnlyTheCheckedFile checks that a DUMP's trust and the
 // path the helper opens come from one check: whatever path the caller
-// resolved, a trusted input always names the private file OwnDump found,
+// resolved, a trusted input always names the private file Own found,
 // and an untrusted one never gets trust.
 func TestFileInputTrustsOnlyTheCheckedFile(t *testing.T) {
 	t.Parallel()

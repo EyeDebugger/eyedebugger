@@ -86,21 +86,24 @@ HELPER_FAILED (the helper crashed or timed out; its stderr is shown).`
 func newDotnetCommand(info version.Info, g *globals) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "dotnet",
-		Short: "Inspect .NET processes without debugging them: counters, dumps, heap, threads",
+		Short: "Inspect .NET processes without debugging them: counters, traces, dumps, heap, threads",
 		Long: `Inspect running .NET (Core 3.0 or later) processes without debugging them, through the
 runtime's diagnostics endpoint: 'eyedbg dotnet ps' lists the processes you can inspect, 'eyedbg
 dotnet counters' samples one's CPU, memory, GC, thread pool, exceptions and JIT counters without
-pausing it. When memory grows or a program hangs, 'eyedbg dotnet heap' shows what fills its heap
-and why objects are alive, 'eyedbg dotnet threads' what its threads are doing and who holds a lock;
-both read a dump ('eyedbg dotnet dump'), which suspends the process for the moment it is written.
-Use them on the debuggee of a session (even one stopped at a breakpoint, except counters) or any
-.NET process of yours by pid. dump, heap and threads have more exit codes (DUMP_*): see their
-help.
+pausing it. When it is slow or busy, 'eyedbg dotnet trace' records a few seconds of it and shows
+its hottest methods and where threads wait (or its GCs and top allocating types). When memory grows
+or a program hangs, 'eyedbg dotnet heap' shows what fills its heap and why objects are alive,
+'eyedbg dotnet threads' what its threads are doing and who holds a lock; both read a dump ('eyedbg
+dotnet dump'), which suspends the process for the moment it is written. Use them on the debuggee
+of a session (even one stopped at a breakpoint, except counters and trace) or any .NET process of
+yours by pid. dump, heap, threads and trace have more exit codes (DUMP_*, TRACE_UNSUPPORTED): see
+their help.
 
 Without a subcommand, prints this help and exits 0; an unknown subcommand exits 1.` + dotnetHelp,
 		Example: `  eyedbg dotnet ps
   eyedbg dotnet counters                          # the only session's program, 5s
   eyedbg dotnet counters --pid 4321 --watch
+  eyedbg dotnet trace --pid 4321                  # 10s of CPU samples: hottest methods
   eyedbg dotnet heap --pid 4321 --gcroot MyApp.Order
   eyedbg dotnet threads                           # the only session's program`,
 		Args: cobra.NoArgs,
@@ -108,7 +111,7 @@ Without a subcommand, prints this help and exits 0; an unknown subcommand exits 
 	}
 
 	cmd.AddCommand(newDotnetPsCommand(info, g), newDotnetCountersCommand(info, g), newDotnetDumpCommand(info, g),
-		newDotnetHeapCommand(info, g), newDotnetThreadsCommand(info, g))
+		newDotnetHeapCommand(info, g), newDotnetThreadsCommand(info, g), newDotnetTraceCommand(info, g))
 
 	return cmd
 }

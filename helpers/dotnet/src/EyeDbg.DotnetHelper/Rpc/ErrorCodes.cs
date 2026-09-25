@@ -17,4 +17,5 @@ internal static class ErrorCodes
     public const string DumpUnsupported = "DUMP_UNSUPPORTED";
     public const string DumpRuntimeMissing = "DUMP_RUNTIME_MISSING";
     public const string DumpFailed = "DUMP_FAILED";
+    public const string TraceUnsupported = "TRACE_UNSUPPORTED";
 }

@@ -1,0 +1,27 @@
+cpu trace of pid 4321 (dotnet), session s-k3f9: 10s, 9,812 samples on 12 threads (6,001 in managed code, 3,811 waiting or in native code)
+/home/u/.eyedbg/traces/4321-20260925T150300Z-cpu-1f3a9c0e.nettrace (5.3 MiB)
+private to you, removed after 7 days (at most 10 kept); open it in PerfView or with 'dotnet-trace convert'
+hottest methods (exclusive: at the top of the stack, in managed code):
+  SAMPLES       %  METHOD
+    4,120   68.7%  Burn.Spin(int32)  [breadth]
+    1,210   20.2%  System.Threading.Thread.<PollGC>g__PollGCWorker|67_0()  [System.Private.CoreLib]
+      671   11.2%  App.Evil?[2J?.Run()  [breadth]
+…2 more (--top N)
+inclusive (anywhere in the stack, in managed code):
+  SAMPLES       %  METHOD
+    5,330   88.8%  Burn.Run(System.String)  [breadth]
+    5,330   88.8%  Program.<Main>$(System.String[])  [breadth]
+    4,120   68.7%  Burn.Spin(int32)  [breadth]
+…14 more (--top N)
+waiting or in native code, at:
+  SAMPLES       %  METHOD
+    3,790   99.4%  System.Threading.Thread.Sleep(int32)  [System.Private.CoreLib]
+       21    0.6%  (unresolved)
+GC: 37 collections (gen0 35, gen1 2, gen2 0; 1 induced by GC.Collect), pauses 12.3 ms total (0.1% of the time), 1.2 ms max
+21 frames had no method name and count as (unresolved): the process may have ended before its method names were recorded
+cpu trace of pid 4321 (dotnet), session s-k3f9: 3s
+/home/u/.eyedbg/traces/4321-20260925T150300Z-cpu-1f3a9c0e.nettrace (600 B)
+private to you, removed after 7 days (at most 10 kept); open it in PerfView or with 'dotnet-trace convert'
+no CPU samples in 3s
+GC: 3,048 collections (gen0 3,048, gen1 0, gen2 0), pauses 559.0 ms total (18.6% of the time), 0.5 ms max
+the trace reached its size limit (512 MiB) after 3s and ended early

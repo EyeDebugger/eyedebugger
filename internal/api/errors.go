@@ -75,6 +75,11 @@ const (
 	// CodeDumpFailed: the target's runtime couldn't write the dump, or the
 	// dump it reported isn't there.
 	CodeDumpFailed Code = "DUMP_FAILED"
+	// CodeTraceUnsupported: the trace can't be read — not a .nettrace
+	// eyedbg can parse, cut off (the process ended abruptly), or not
+	// readable by the user. A readable trace with nothing in it isn't an
+	// error.
+	CodeTraceUnsupported Code = "TRACE_UNSUPPORTED"
 )
 
 // Error is a user-facing error: a stable code, a message and an optional hint

@@ -69,12 +69,30 @@ const (
 	// writing a file.
 	ModeDumpNoFile = "dump-nofile"
 	// ModeOld behaves as ModeOK for processes and counters and answers
-	// UNKNOWN_METHOD to dump, heap and threads (a helper older than M7).
+	// UNKNOWN_METHOD to dump, heap, threads, trace and traceSummary (a
+	// helper older than M7).
 	ModeOld = "old"
+	// ModeTraceNoFile behaves as ModeOK, except that trace answers without
+	// writing a file.
+	ModeTraceNoFile = "trace-nofile"
+	// ModeSummaryErrorPrefix + CODE behaves as ModeOK, except that
+	// traceSummary answers with error CODE.
+	ModeSummaryErrorPrefix = "summary-error:"
 )
 
 // DumpContent is what ModeOK's dump writes at its path.
 const DumpContent = "fake dump\n"
+
+// TraceContent is what ModeOK's trace writes at its path for profile;
+// traceSummary answers FakeTraceSummary(profile) for a file holding it
+// (also for profile "empty", which trace never writes), and
+// FakeTraceSummary("cpu") for any other file.
+func TraceContent(profile string) string { return "fake " + profile + " trace\n" }
+
+// ScratchContent is what ModeOK's traceSummary leaves at its scratch path
+// and at the scratch path + ".new" (the real helper deletes both itself):
+// the caller's own cleanup must remove them.
+const ScratchContent = "fake etlx\n"
 
 // FrameworkMissingCode is the dotnet host's exit code when the framework
 // is missing (0x80008096; 150, its low byte, on Unix).
@@ -115,6 +133,13 @@ func MaybeRun() {
 const (
 	jsonrpc  = "jsonrpc"
 	version2 = "2.0"
+)
+
+// Methods and members of the .NET helper's protocol the fake knows.
+const (
+	methodTrace        = "trace"
+	methodTraceSummary = "traceSummary"
+	elapsedMs          = "elapsedMs"
 )
 
 type request struct {
@@ -210,14 +235,18 @@ func (f *fake) serve(call request) int {
 		f.result(call.ID, map[string]any{"processes": []map[string]int{{"pid": os.Getpid()}, {"pid": os.Getppid()}}})
 	case "counters":
 		return f.counters(call)
-	case "dump", "heap", "threads":
+	case "dump", "heap", "threads", methodTrace, methodTraceSummary:
 		if f.mode == ModeOld {
 			f.fail(call.ID, "UNKNOWN_METHOD", "unknown method \""+call.Method+"\"", "")
 
 			return 0
 		}
 
-		f.dumps(call)
+		if call.Method == methodTrace || call.Method == methodTraceSummary {
+			f.traces(call)
+		} else {
+			f.dumps(call)
+		}
 	default:
 		f.fail(call.ID, "UNKNOWN_METHOD", "unknown method", "")
 	}
@@ -293,7 +322,7 @@ func (f *fake) dumps(call request) {
 			}
 		}
 
-		f.result(call.ID, map[string]any{"bytes": len(DumpContent), "elapsedMs": 12})
+		f.result(call.ID, map[string]any{"bytes": len(DumpContent), elapsedMs: 12})
 
 		return
 	}
@@ -317,6 +346,93 @@ func (f *fake) dumps(call request) {
 
 	f.result(call.ID, heap)
 }
+
+// traces answers trace (writing TraceContent at the path unless
+// ModeTraceNoFile; endReason EnvEnd, default "duration") and traceSummary
+// (FakeTraceSummary; leaving ScratchContent at the scratch paths). A
+// missing trace file is INVALID_REQUEST, as in the real helper.
+func (f *fake) traces(call request) {
+	var p struct {
+		Path    string `json:"path"`
+		Profile string `json:"profile"`
+		Scratch string `json:"scratch"`
+	}
+
+	_ = json.Unmarshal(call.Params, &p)
+
+	if call.Method == methodTrace {
+		content := TraceContent(p.Profile)
+		if f.mode != ModeTraceNoFile {
+			if err := os.WriteFile(p.Path, []byte(content), 0o600); err != nil {
+				f.fail(call.ID, "HELPER_FAILED", err.Error(), "")
+
+				return
+			}
+		}
+
+		end := os.Getenv(EnvEnd)
+		if end == "" {
+			end = "duration"
+		}
+
+		f.result(call.ID, map[string]any{"bytes": len(content), elapsedMs: 2004, "endReason": end})
+
+		return
+	}
+
+	if code, ok := strings.CutPrefix(f.mode, ModeSummaryErrorPrefix); ok {
+		f.fail(call.ID, code, "fake \x1b[2Jsummary error", "fake hint")
+
+		return
+	}
+
+	content, err := os.ReadFile(p.Path)
+	if err != nil {
+		f.fail(call.ID, "INVALID_REQUEST", "no trace file at "+p.Path, "")
+
+		return
+	}
+
+	for _, path := range []string{p.Scratch, p.Scratch + ".new"} {
+		if err := os.WriteFile(path, []byte(ScratchContent), 0o600); err != nil {
+			f.fail(call.ID, "HELPER_FAILED", err.Error(), "")
+
+			return
+		}
+	}
+
+	profile := "cpu"
+	for _, p := range []string{"gc", "empty"} {
+		if string(content) == TraceContent(p) {
+			profile = p
+		}
+	}
+
+	f.result(call.ID, FakeTraceSummary(profile))
+}
+
+// FakeTraceSummary is the fake helper's traceSummary result for a trace of
+// profile: cpu (samples and GCs), gc (GCs and allocations) or empty (a
+// readable trace with none of them). Some method and type names carry
+// terminal escapes (App.Evil…), as a hostile program's could: text output
+// must show them harmless.
+func FakeTraceSummary(profile string) map[string]any {
+	switch profile {
+	case "gc":
+		return decode(fakeGCSummaryJSON)
+	case "empty":
+		return decode(fakeEmptySummaryJSON)
+	default:
+		return decode(fakeCPUSummaryJSON)
+	}
+}
+
+// The fake traceSummary results (JSON, as the real helper writes them).
+const (
+	fakeCPUSummaryJSON   = `{"durationMs":10012,"eventsLost":0,"cpu":{"samples":9812,"managed":6001,"other":3811,"threads":12,"unresolvedFrames":21,"exclusive":[{"method":"Burn.Spin(int32)","module":"breadth","samples":4120},{"method":"System.Threading.Thread.<PollGC>g__PollGCWorker|67_0()","module":"System.Private.CoreLib","samples":1210},{"method":"App.Evil\u001b[2J\u009b.Run()","module":"breadth","samples":671}],"exclusiveOmitted":2,"inclusive":[{"method":"Burn.Run(System.String)","module":"breadth","samples":5330},{"method":"Program.<Main>$(System.String[])","module":"breadth","samples":5330},{"method":"Burn.Spin(int32)","module":"breadth","samples":4120}],"inclusiveOmitted":14,"waiting":[{"method":"System.Threading.Thread.Sleep(int32)","module":"System.Private.CoreLib","samples":3790},{"method":"(unresolved)","samples":21}],"waitingOmitted":0},"gc":{"collections":37,"gen0":35,"gen1":2,"gen2":0,"background":0,"induced":1,"pauseTotalMs":12.34,"pauseMaxMs":1.21}}`
+	fakeEmptySummaryJSON = `{"durationMs":3001,"eventsLost":0}`
+	fakeGCSummaryJSON    = `{"durationMs":10004,"eventsLost":5,"gc":{"collections":3048,"gen0":3048,"gen1":0,"gen2":0,"background":0,"induced":0,"pauseTotalMs":559.02,"pauseMaxMs":0.52},"allocations":{"ticks":186000,"bytes":19112345678,"typeCount":4,"types":[{"name":"System.Byte[]","ticks":185000,"bytes":19012345678},{"name":"App.Evil\u001b]0;x\u0007Type","ticks":900,"bytes":95000000},{"name":"System.String","ticks":100,"bytes":5000000}],"typesOmitted":1}}`
+)
 
 // FakeHeap is the fake helper's heap result (with a gcroot answer). Some
 // type and method names carry terminal escapes (App.Evil…), as a hostile
@@ -351,7 +467,7 @@ func (f *fake) sample(i int) {
 	}
 
 	f.write(map[string]any{jsonrpc: version2, "method": "counters.sample", "params": map[string]any{
-		"elapsedMs": 1000 * i,
+		elapsedMs: 1000 * i,
 		"counters": []map[string]any{
 			counter("cpu-usage", "CPU Usage", "%", "gauge", float64(10*i)),
 			counter("working-set", "Working Set", "MB", "gauge", float64(100+i)),

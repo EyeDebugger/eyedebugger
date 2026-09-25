@@ -49,6 +49,11 @@ Everything else is a manual bump.
   (`EYEDBG_E2E=1 go test -run DotnetDump ./internal/e2e/` asserts `static Holder.Keep`) and that
   nothing constructs its symbol server (`grep -rn SymbolServer helpers/dotnet/src` finds only
   comments).
+  On a TraceEvent bump (`Microsoft.Diagnostics.Tracing.TraceEvent`, ADR 0016's P2-M8 addendum),
+  re-run the trace e2e (`EYEDBG_E2E=1 go test -run DotnetTrace ./internal/e2e/` asserts
+  `Burn.Spin` among the hottest methods) and check the summary still resolves no symbols:
+  `grep -rnE 'SymbolReader|ShouldResolveSymbols|AlwaysResolveSymbols|LookupSymbolsForModule|GetSourceLine' helpers/dotnet/src`
+  finds nothing, and every `CreateFromEventPipeDataFile(` passes an explicit ETLX path.
 
 ## CI cost
 
