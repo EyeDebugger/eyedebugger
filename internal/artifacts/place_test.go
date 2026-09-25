@@ -28,10 +28,21 @@ func TestPlaceLinks(t *testing.T) {
 	t.Parallel()
 
 	src := privateDump(t)
-	before, _ := os.Stat(src)
+	// A second name for src: Windows' os.SameFile reads the file id from
+	// the path, which must still exist when it compares.
+	keep := src + ".keep"
+	if err := os.Link(src, keep); err != nil {
+		t.Fatal(err)
+	}
+
 	out := filepath.Join(t.TempDir(), "x.dmp")
 
 	if err := Place(src, out); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := os.Stat(keep)
+	if err != nil {
 		t.Fatal(err)
 	}
 
