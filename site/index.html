@@ -1,0 +1,2343 @@
+<!DOCTYPE html>
+<!-- Copyright The EyeDebugger Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- The project site, served at https://eyedbg.izzat.dev by .github/workflows/pages.yml. See site/README.md. -->
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>EyeDebugger (eyedbg) — the debugger your AI agent drives, in a session you can join</title>
+<meta name="description" content="eyedbg is an open-source, CLI-first debugger built for AI coding agents: breakpoints, stepping, locals and eval from the shell, in one live session you can join from VS Code. .NET, Python, Go, C, C++ and Rust on Linux, macOS and Windows.">
+<link rel="canonical" href="https://eyedbg.izzat.dev/">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#05070d" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f5f7fb" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="EyeDebugger">
+<meta property="og:url" content="https://eyedbg.izzat.dev/">
+<meta property="og:title" content="EyeDebugger — give your agent eyes on the running program">
+<meta property="og:description" content="A CLI-first debugger for AI coding agents, in one live session you can join from VS Code.">
+<meta property="og:image" content="https://eyedbg.izzat.dev/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="EyeDebugger: give your agent eyes on the running program">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2322d3ee'/%3E%3Cstop offset='1' stop-color='%238b5cf6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='%23070b15'/%3E%3Cpath d='M8 32c8-14 40-14 48 0-8 14-40 14-48 0z' fill='none' stroke='url(%23g)' stroke-width='4.5' stroke-linejoin='round'/%3E%3Ccircle cx='32' cy='32' r='10' fill='url(%23g)'/%3E%3Ccircle cx='32' cy='32' r='4.2' fill='%23070b15'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<!-- RznSans from our font CDN (the highest revision in the fonts bucket when this was written). -->
+<link rel="preconnect" href="https://cdn.fonts.izzat.dev" crossorigin>
+<link rel="preload" href="https://cdn.fonts.izzat.dev/rznsans/v1.004/web/RznSans-Regular.woff2?v=1.004" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="https://cdn.fonts.izzat.dev/rznsans/v1.004/web/RznSans-Bold.woff2?v=1.004" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="https://cdn.fonts.izzat.dev/rznsans/v1.004/web/rznsans.css">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"EyeDebugger","alternateName":"eyedbg","description":"A CLI-first debugger built for AI coding agents, in one live session humans can join from VS Code.","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","license":"https://www.apache.org/licenses/LICENSE-2.0","url":"https://eyedbg.izzat.dev/","downloadUrl":"https://github.com/EyeDebugger/eyedebugger/releases","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
+</script>
+<script>
+  // Theme before first paint: a stored choice, else the system's; "js" turns on the scroll reveals.
+  (function () {
+    var d = document.documentElement, t = null;
+    try { t = localStorage.getItem("eyedbg-theme"); } catch (e) {}
+    if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    d.setAttribute("data-theme", t);
+    d.classList.add("js");
+  })();
+</script>
+<style>
+/* ---------- tokens ---------- */
+:root {
+  --font-sans: "RznSans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, "Cascadia Mono", "Liberation Mono", monospace;
+  --ease: cubic-bezier(.22, .8, .24, 1);
+  --ease-io: cubic-bezier(.65, 0, .35, 1);
+  --r-sm: 10px; --r: 14px; --r-lg: 20px; --r-xl: 28px;
+  --nav-h: 68px;
+  /* Screens (terminals, the editor, code blocks) are dark in both themes. */
+  --scr-bg: #070b15; --scr-bg-2: #0b1120; --scr-line: rgba(148, 163, 184, .15);
+  --scr-text: #d7deea; --scr-dim: #7d889c;
+  --tk-cmd: #67e8f9; --tk-sub: #a5f3fc; --tk-flag: #c4b5fd; --tk-str: #86efac; --tk-com: #6f7b91;
+  --tk-num: #fcd34d; --tk-key: #7dd3fc; --tk-kw: #f0abfc; --tk-type: #5eead4; --tk-punc: #94a3b8;
+  --tk-err: #fda4af; --tk-ok: #6ee7b7; --tk-human: #c4b5fd;
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #05070d; --bg-2: #0a0f1c;
+  --surface: rgba(14, 20, 35, .62); --surface-2: rgba(20, 27, 46, .86); --surface-solid: #0c111d;
+  --line: rgba(148, 163, 184, .13); --line-2: rgba(148, 163, 184, .24);
+  --text: #e9edf5; --text-2: #a9b3c6; --text-3: #7a859b;
+  --agent: #22d3ee; --human: #a78bfa; --ok: #34d399; --bp: #fb7185;
+  --agent-soft: rgba(34, 211, 238, .12); --human-soft: rgba(167, 139, 250, .14);
+  --blob-1: rgba(34, 211, 238, .17); --blob-2: rgba(139, 92, 246, .2); --blob-3: rgba(14, 165, 233, .12); --blob-4: rgba(16, 185, 129, .08);
+  --grid: rgba(148, 163, 184, .07);
+  --shadow-lg: 0 40px 100px -30px rgba(0, 0, 0, .8), 0 0 0 1px rgba(148, 163, 184, .06);
+  --shadow-md: 0 18px 50px -22px rgba(0, 0, 0, .7);
+  --inline-code: rgba(148, 163, 184, .12);
+  --noise: .05;
+}
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f5f7fb; --bg-2: #e9eef7;
+  --surface: rgba(255, 255, 255, .7); --surface-2: rgba(255, 255, 255, .94); --surface-solid: #fff;
+  --line: rgba(15, 23, 42, .09); --line-2: rgba(15, 23, 42, .16);
+  --text: #0a1020; --text-2: #45506a; --text-3: #647089;
+  --agent: #0e7490; --human: #6d28d9; --ok: #047857; --bp: #e11d48;
+  --agent-soft: rgba(8, 145, 178, .09); --human-soft: rgba(124, 58, 237, .08);
+  --blob-1: rgba(34, 211, 238, .2); --blob-2: rgba(167, 139, 250, .2); --blob-3: rgba(56, 189, 248, .13); --blob-4: rgba(52, 211, 153, .09);
+  --grid: rgba(15, 23, 42, .055);
+  --shadow-lg: 0 40px 90px -35px rgba(15, 23, 42, .38), 0 0 0 1px rgba(15, 23, 42, .05);
+  --shadow-md: 0 16px 40px -20px rgba(15, 23, 42, .28);
+  --inline-code: rgba(15, 23, 42, .06);
+  --noise: .035;
+}
+
+/* ---------- base ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: calc(var(--nav-h) + 16px); -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body {
+  margin: 0; min-height: 100vh; overflow-x: hidden;
+  background: var(--bg); color: var(--text);
+  font: 400 17px/1.65 var(--font-sans);
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  transition: background-color .5s var(--ease), color .5s var(--ease);
+}
+img, svg, video { display: block; max-width: 100%; }
+a { color: inherit; text-decoration: none; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+h1, h2, h3, h4 { text-wrap: balance; }
+p { text-wrap: pretty; }
+/* Only code is monospace. */
+code, kbd, pre, samp { font-family: var(--font-mono); }
+:not(pre) > code {
+  font-size: .85em; padding: .12em .42em; border-radius: 6px;
+  background: var(--inline-code); border: 1px solid var(--line); overflow-wrap: anywhere;
+}
+.prose a, .text-link { color: var(--agent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--agent) 35%, transparent); text-underline-offset: 3px; transition: text-decoration-color .2s; }
+.prose a:hover, .text-link:hover { text-decoration-color: currentColor; }
+::selection { background: color-mix(in srgb, var(--agent) 32%, transparent); }
+:focus-visible { outline: 2px solid var(--agent); outline-offset: 3px; border-radius: 6px; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.skip { position: fixed; left: 16px; top: -64px; z-index: 100; padding: 10px 16px; border-radius: 10px; background: var(--surface-solid); border: 1px solid var(--line-2); transition: top .2s; }
+.skip:focus { top: 16px; }
+.wrap { width: min(1200px, 100% - 48px); margin-inline: auto; position: relative; }
+@media (max-width: 640px) { .wrap { width: calc(100% - 32px); } body { font-size: 16px; } }
+
+/* ---------- animated background ---------- */
+.bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none;
+  background: radial-gradient(1200px 700px at 50% -10%, var(--bg-2), var(--bg) 70%); transition: background .5s var(--ease); }
+.blob { position: absolute; width: 64vmax; height: 64vmax; border-radius: 50%; will-change: transform; }
+.b1 { top: -26vmax; left: -14vmax; background: radial-gradient(closest-side, var(--blob-1), transparent); animation: drift1 34s var(--ease-io) infinite alternate; }
+.b2 { top: -20vmax; right: -22vmax; background: radial-gradient(closest-side, var(--blob-2), transparent); animation: drift2 41s var(--ease-io) infinite alternate; }
+.b3 { bottom: -32vmax; left: 6vmax; background: radial-gradient(closest-side, var(--blob-3), transparent); animation: drift3 47s var(--ease-io) infinite alternate; }
+.b4 { bottom: -26vmax; right: -10vmax; background: radial-gradient(closest-side, var(--blob-4), transparent); animation: drift4 38s var(--ease-io) infinite alternate; }
+@keyframes drift1 { to { transform: translate3d(20vmax, 14vmax, 0) scale(1.15); } }
+@keyframes drift2 { to { transform: translate3d(-18vmax, 22vmax, 0) scale(.88); } }
+@keyframes drift3 { to { transform: translate3d(16vmax, -20vmax, 0) scale(1.2); } }
+@keyframes drift4 { to { transform: translate3d(-22vmax, -12vmax, 0) scale(1.05); } }
+.bg-grid-mask { position: absolute; inset: 0;
+  -webkit-mask-image: radial-gradient(ellipse 85% 65% at 50% 25%, #000 25%, transparent 78%);
+          mask-image: radial-gradient(ellipse 85% 65% at 50% 25%, #000 25%, transparent 78%); }
+.bg-grid { position: absolute; inset: -64px; will-change: transform;
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 64px 64px; animation: grid-pan 26s linear infinite; }
+@keyframes grid-pan { to { transform: translate3d(64px, 64px, 0); } }
+/* a slow scan line: a thin light with a soft wake, fading out at both sides */
+.bg-beam { position: absolute; left: 0; right: 0; top: 0; height: 140px; will-change: transform;
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--agent) 4%, transparent));
+  border-bottom: 1px solid color-mix(in srgb, var(--agent) 30%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent); mask-image: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent);
+  animation: beam 15s cubic-bezier(.45, 0, .25, 1) infinite; }
+@keyframes beam { 0% { transform: translateY(-200px); } 45%, 100% { transform: translateY(calc(100vh + 40px)); } }
+.bg-spot { position: absolute; left: 0; top: 0; width: 720px; height: 720px; margin: -360px 0 0 -360px; border-radius: 50%; opacity: 0;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--agent) 11%, transparent), color-mix(in srgb, var(--human) 5%, transparent) 55%, transparent);
+  transition: opacity .8s var(--ease); will-change: transform; }
+.has-pointer .bg-spot { opacity: 1; }
+.bg-noise { position: absolute; inset: 0; opacity: var(--noise); mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+
+/* ---------- navigation ---------- */
+.progress { position: fixed; left: 0; right: 0; top: 0; height: 2px; z-index: 60; transform-origin: 0 50%; transform: scaleX(0);
+  background: linear-gradient(90deg, var(--agent), var(--human)); }
+.nav { position: fixed; left: 0; right: 0; top: 0; z-index: 50; height: var(--nav-h); border-bottom: 1px solid transparent;
+  transition: background-color .4s var(--ease), border-color .4s var(--ease); }
+.nav.scrolled, .nav.open { background: color-mix(in srgb, var(--bg) 74%, transparent); border-bottom-color: var(--line);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5); backdrop-filter: blur(16px) saturate(1.5); }
+.nav .wrap { height: 100%; display: flex; align-items: center; gap: 24px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.08rem; letter-spacing: -.01em; }
+.brand svg { width: 32px; height: 32px; }
+.nav-links { display: flex; gap: 2px; margin-left: auto; }
+.nav-links a { position: relative; padding: 8px 12px; border-radius: 9px; font-size: .94rem; font-weight: 500; color: var(--text-2); transition: color .2s, background-color .2s; }
+.nav-links a:hover { color: var(--text); background: var(--agent-soft); }
+.nav-links a.active { color: var(--text); }
+.nav-links a.active::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 2px; height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--agent), var(--human)); animation: grow .4s var(--ease); }
+@keyframes grow { from { transform: scaleX(0); } }
+.nav-actions { display: flex; align-items: center; gap: 8px; }
+.icon-btn { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 11px; color: var(--text-2);
+  border: 1px solid var(--line); background: var(--surface);
+  transition: color .2s, border-color .2s, transform .3s var(--ease), background-color .3s; }
+.icon-btn:hover { color: var(--text); border-color: var(--line-2); transform: translateY(-1px); }
+.icon-btn svg { width: 19px; height: 19px; }
+.menu-btn { display: none; }
+.menu-btn span { display: block; width: 18px; height: 2px; border-radius: 2px; background: currentColor; transition: transform .35s var(--ease), opacity .2s; }
+.menu-btn span + span { margin-top: 4px; }
+.nav.open .menu-btn span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+.nav.open .menu-btn span:nth-child(2) { opacity: 0; }
+.nav.open .menu-btn span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+/* the theme toggle's sun turns into a moon */
+.sunmoon .core { transform-origin: 12px 12px; transition: transform .6s var(--ease); }
+.sunmoon .cut { transition: transform .6s var(--ease); }
+.sunmoon .rays { transform-origin: 12px 12px; transition: transform .6s var(--ease), opacity .35s; }
+html[data-theme="dark"] .sunmoon .core { transform: scale(1.7); }
+html[data-theme="dark"] .sunmoon .cut { transform: translate(-7px, 5px); }
+html[data-theme="dark"] .sunmoon .rays { transform: rotate(-90deg) scale(.4); opacity: 0; }
+@media (max-width: 1080px) {
+  .menu-btn { display: grid; }
+  .nav-links { position: absolute; left: 0; right: 0; top: var(--nav-h); flex-direction: column; gap: 0; margin: 0; padding: 10px 16px 18px;
+    background: color-mix(in srgb, var(--bg) 92%, transparent); border-bottom: 1px solid var(--line);
+    -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    opacity: 0; transform: translateY(-8px); pointer-events: none; transition: opacity .3s var(--ease), transform .3s var(--ease); }
+  .nav.open .nav-links { opacity: 1; transform: none; pointer-events: auto; }
+  .nav-links a { padding: 12px; font-size: 1rem; }
+  .nav-links a.active::after { display: none; }
+  .nav-actions { margin-left: auto; }
+}
+@media (max-width: 520px) { .nav-actions .gh-btn { display: none; } }
+
+/* ---------- buttons, pills ---------- */
+.btn { position: relative; isolation: isolate; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  height: 48px; padding: 0 22px; border-radius: 13px; font-weight: 500; font-size: 1rem; white-space: nowrap;
+  transition: transform .35s var(--ease), box-shadow .35s var(--ease), border-color .3s, background-color .3s; }
+.btn svg { width: 18px; height: 18px; transition: transform .35s var(--ease); }
+.btn:hover svg.arrow { transform: translateX(4px); }
+.btn-primary { color: #fff; background: linear-gradient(135deg, #0e7490, #4f46e5 58%, #7c3aed);
+  box-shadow: 0 12px 32px -12px rgba(79, 70, 229, .7), inset 0 1px 0 rgba(255, 255, 255, .22); }
+.btn-primary::after { content: ""; position: absolute; inset: 0; z-index: -1; transform: translateX(-120%);
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, .3) 50%, transparent 70%); transition: transform .9s var(--ease); }
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 18px 42px -14px rgba(79, 70, 229, .85), inset 0 1px 0 rgba(255, 255, 255, .22); }
+.btn-primary:hover::after { transform: translateX(120%); }
+.btn-ghost { color: var(--text); background: var(--surface); border: 1px solid var(--line-2); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.btn-ghost:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--agent) 45%, var(--line-2)); }
+.pill { display: inline-flex; align-items: center; gap: 10px; padding: 7px 15px 7px 11px; border-radius: 999px; font-size: .86rem; color: var(--text-2);
+  border: 1px solid var(--line-2); background: var(--surface); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: ping 2.4s infinite; }
+@keyframes ping { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent); } 70%, 100% { box-shadow: 0 0 0 9px transparent; } }
+
+/* ---------- reveal on scroll ----------
+   Animations, not transitions, so an element's own hover transitions stay as they are afterwards. */
+.js [data-reveal] { opacity: 0; }
+.js [data-reveal].in { opacity: 1; animation: reveal-up .95s var(--ease) var(--d, 0s) backwards; }
+.js [data-reveal="fade"].in { animation-name: reveal-fade; }
+.js [data-reveal="scale"].in { animation-name: reveal-scale; }
+@keyframes reveal-up { from { opacity: 0; transform: translateY(28px); } }
+@keyframes reveal-fade { from { opacity: 0; } }
+@keyframes reveal-scale { from { opacity: 0; transform: translateY(20px) scale(.965); } }
+.pupil { fill: #070b15; }
+.who-a { color: var(--agent); font-weight: 500; }
+.who-h { color: var(--human); font-weight: 500; }
+
+/* ---------- sections ---------- */
+section { position: relative; padding: clamp(84px, 10vw, 140px) 0; }
+.sec-head { max-width: 780px; margin-bottom: clamp(40px, 5vw, 64px); }
+.sec-head.center { margin-inline: auto; text-align: center; }
+.eyebrow { display: inline-flex; align-items: center; gap: 10px; font-size: .8rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--agent); }
+.eyebrow::before { content: ""; width: 22px; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--agent), var(--human)); }
+h2 { font-size: clamp(2rem, 1.2rem + 2.8vw, 3.3rem); line-height: 1.07; letter-spacing: -.032em; font-weight: 700; margin: 16px 0 18px; }
+.lede { margin: 0; font-size: clamp(1.05rem, 1rem + .3vw, 1.2rem); color: var(--text-2); }
+.grad { background: linear-gradient(90deg, var(--agent), var(--human), var(--agent)); background-size: 200% auto;
+  -webkit-background-clip: text; background-clip: text; color: transparent; animation: shine 7s linear infinite; }
+@keyframes shine { to { background-position: -200% center; } }
+.sep { height: 1px; background: linear-gradient(90deg, transparent, var(--line-2), transparent); position: relative; overflow: hidden; }
+.sep::after { content: ""; position: absolute; top: 0; width: 180px; height: 1px; background: linear-gradient(90deg, transparent, var(--agent), transparent); animation: sweep 6s var(--ease-io) infinite; }
+@keyframes sweep { from { left: -200px; } to { left: 100%; } }
+
+/* ---------- cards ---------- */
+.card { position: relative; overflow: hidden; padding: 28px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  transition: transform .5s var(--ease), border-color .3s, box-shadow .5s var(--ease), background-color .5s; }
+.card:hover { transform: translateY(-4px); border-color: var(--line-2); box-shadow: var(--shadow-md); }
+/* the spotlight follows the pointer (--mx/--my are set by the script) */
+.glow::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity .4s;
+  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--agent) 11%, transparent), transparent 42%); }
+.glow::after { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; opacity: 0; transition: opacity .4s;
+  background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--agent) 75%, transparent), color-mix(in srgb, var(--human) 40%, transparent) 40%, transparent 70%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+          mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.glow:hover::before, .glow:hover::after { opacity: 1; }
+.ic { width: 46px; height: 46px; display: grid; place-items: center; margin-bottom: 18px; border-radius: 13px; color: var(--agent);
+  background: linear-gradient(135deg, var(--agent-soft), var(--human-soft)); border: 1px solid var(--line); transition: transform .6s var(--ease); }
+.ic svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.card:hover .ic { transform: translateY(-2px) rotate(-6deg) scale(1.06); }
+.card h3 { margin: 0 0 8px; font-size: 1.15rem; font-weight: 700; letter-spacing: -.012em; }
+.card p { margin: 0; color: var(--text-2); font-size: .98rem; }
+.card p + p { margin-top: 10px; }
+.card .code { margin-top: 18px; }
+
+/* ---------- code blocks ---------- */
+.code { position: relative; overflow: hidden; border-radius: var(--r); color: var(--scr-text); background: var(--scr-bg);
+  border: 1px solid var(--scr-line); box-shadow: var(--shadow-md); text-align: left; }
+html[data-theme="light"] .code { border-color: rgba(15, 23, 42, .22); }
+.code-bar { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--scr-line); background: rgba(255, 255, 255, .025); }
+.code-bar .lang { font-size: 11px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: var(--scr-dim); }
+.code-bar .lang.file { font-size: 12px; font-weight: 500; letter-spacing: .02em; text-transform: none; }
+.copy { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 8px; font-size: 12px; font-weight: 500;
+  color: var(--scr-dim); border: 1px solid transparent; transition: color .2s, background-color .2s, border-color .2s; }
+.copy:hover { color: var(--scr-text); background: rgba(255, 255, 255, .06); border-color: var(--scr-line); }
+.copy svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.copy .i-check { display: none; }
+.copy.done { color: var(--tk-ok); }
+.copy.done .i-copy { display: none; }
+.copy.done .i-check { display: block; animation: pop .45s var(--ease); }
+@keyframes pop { 0% { transform: scale(.4); } 60% { transform: scale(1.25); } }
+.code pre { margin: 0; padding: 16px 18px; overflow-x: auto; font-size: 13.5px; line-height: 1.7; tab-size: 2; scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+.code pre code { font: inherit; white-space: pre; }
+/* long lines wrap like a terminal's, with a hanging indent so a wrapped command still reads as one */
+.code pre code .cl { display: block; min-height: 1.7em; white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 2ch; text-indent: -2ch; }
+.t-x { color: var(--tk-cmd); } .t-sub { color: var(--tk-sub); } .t-f { color: var(--tk-flag); } .t-s { color: var(--tk-str); }
+.t-c { color: var(--tk-com); font-style: italic; } .t-n { color: var(--tk-num); } .t-k { color: var(--tk-key); } .t-w { color: var(--tk-kw); }
+.t-y { color: var(--tk-type); } .t-p { color: var(--tk-punc); } .t-e { color: var(--tk-err); } .t-o { color: var(--tk-ok); }
+.t-d { color: var(--scr-dim); } .t-h { color: #f1f5f9; font-weight: 600; } .t-hu { color: var(--tk-human); } .t-pr { color: var(--tk-ok); user-select: none; }
+.t-cur { display: inline-block; min-width: 100%; background: linear-gradient(90deg, rgba(34, 211, 238, .16), rgba(34, 211, 238, .04)); border-radius: 3px; }
+
+/* ---------- hero ---------- */
+.hero { padding: calc(var(--nav-h) + clamp(48px, 7vw, 88px)) 0 clamp(40px, 6vw, 72px); text-align: center; }
+.hero-eye { width: 92px; height: 92px; margin: 0 auto 26px; position: relative; animation: rise 1s var(--ease) both; }
+.hero-eye svg { width: 100%; height: 100%; overflow: visible; }
+.hero-eye .ring { fill: none; stroke-width: 1; transform-origin: 60px 60px; }
+.hero-eye .ring.r1 { stroke: color-mix(in srgb, var(--agent) 55%, transparent); stroke-dasharray: 4 7; animation: spin 26s linear infinite; }
+.hero-eye .ring.r2 { stroke: color-mix(in srgb, var(--human) 50%, transparent); stroke-dasharray: 22 10 2 10; animation: spin 38s linear infinite reverse; }
+.hero-eye .halo { fill: url(#halo); animation: breathe 5s ease-in-out infinite; transform-origin: 60px 60px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes breathe { 50% { transform: scale(1.12); opacity: .7; } }
+@keyframes rise { from { opacity: 0; transform: translateY(16px) scale(.9); } }
+/* every eye blinks now and then; its iris follows the pointer */
+.lid { transform-box: fill-box; transform-origin: center; animation: blink 7s infinite; }
+.lid.late { animation-delay: 2.4s; }
+@keyframes blink { 0%, 93%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.06); } }
+.iris { transition: transform .35s var(--ease); }
+.hero h1 { margin: 22px auto; max-width: 17ch; font-size: clamp(2.6rem, 1.05rem + 5.6vw, 5.3rem); line-height: 1.02; letter-spacing: -.04em; font-weight: 700; }
+.hero h1 .w { display: inline-block; opacity: 0; transform: translateY(.45em); filter: blur(10px); animation: word .95s var(--ease) forwards; animation-delay: calc(var(--i) * 70ms + 200ms); }
+@keyframes word { to { opacity: 1; transform: none; filter: blur(0); } }
+.hero .lede { max-width: 690px; margin: 0 auto 36px; animation: fade-up 1s var(--ease) .75s both; }
+.hero .pill { animation: fade-up 1s var(--ease) .1s both; }
+.hero .cta-row { animation: fade-up 1s var(--ease) .9s both; }
+.hero .works { margin: 26px 0 0; font-size: .92rem; color: var(--text-3); animation: fade-up 1s var(--ease) 1.05s both; }
+@keyframes fade-up { from { opacity: 0; transform: translateY(18px); } }
+.cta-row { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+
+/* the shared-session stage: the agent's terminal and your editor */
+.stage { position: relative; max-width: 1180px; margin: clamp(48px, 7vw, 76px) auto 0; perspective: 1800px; text-align: left; }
+.stage::before { content: ""; position: absolute; inset: 8% 6% -4%; z-index: -1; border-radius: 50%; filter: blur(70px); opacity: .55;
+  background: radial-gradient(closest-side at 32% 50%, color-mix(in srgb, var(--agent) 45%, transparent), transparent), radial-gradient(closest-side at 70% 50%, color-mix(in srgb, var(--human) 45%, transparent), transparent);
+  animation: breathe 8s ease-in-out infinite; }
+.stage-grid { display: grid; grid-template-columns: minmax(0, 1.04fr) minmax(0, 1fr); gap: 18px; transform: rotateX(10deg) translateY(24px) scale(.97); transform-origin: 50% 0; opacity: 0;
+  transition: transform 1.4s var(--ease), opacity 1s var(--ease); }
+.stage.in .stage-grid, html:not(.js) .stage-grid { transform: none; opacity: 1; }
+.win { position: relative; display: flex; flex-direction: column; height: 468px; overflow: hidden; border-radius: 16px; background: var(--scr-bg); border: 1px solid var(--scr-line); box-shadow: var(--shadow-lg); color: var(--scr-text); }
+html[data-theme="light"] .win { border-color: rgba(15, 23, 42, .25); }
+.win-bar { flex: none; display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 14px; border-bottom: 1px solid var(--scr-line); background: linear-gradient(#0f1627, #0a0f1c); font-size: 12.5px; color: var(--scr-dim); }
+.dots { display: flex; gap: 7px; }
+.dots i { width: 11px; height: 11px; border-radius: 50%; background: #ff5f57; }
+.dots i:nth-child(2) { background: #febc2e; } .dots i:nth-child(3) { background: #28c840; }
+.win-title { flex: 1; text-align: center; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.role { font-size: 10.5px; font-weight: 700; letter-spacing: .12em; padding: 3px 8px; border-radius: 6px; }
+.role.agent { color: #67e8f9; background: rgba(34, 211, 238, .12); border: 1px solid rgba(34, 211, 238, .3); }
+.role.human { color: #c4b5fd; background: rgba(167, 139, 250, .12); border: 1px solid rgba(167, 139, 250, .32); }
+.term-body { flex: 1; overflow: hidden; padding: 14px 16px 18px; font: 12.8px/1.62 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.term-body .ln { min-height: 1.62em; animation: line-in .35s var(--ease) both; }
+@keyframes line-in { from { opacity: 0; transform: translateY(4px); } }
+.caret { display: inline-block; width: .6em; height: 1.15em; margin-left: 1px; vertical-align: -.2em; background: var(--tk-cmd); animation: caret 1.05s steps(1) infinite; }
+@keyframes caret { 50% { opacity: 0; } }
+/* the editor mock */
+.ed { position: relative; }
+.ed-top { flex: none; display: flex; align-items: center; height: 34px; background: #0a0f1b; border-bottom: 1px solid var(--scr-line); }
+.ed-tab { height: 100%; display: flex; align-items: center; gap: 8px; padding: 0 14px; font-size: 12.5px; background: var(--scr-bg); border-right: 1px solid var(--scr-line); box-shadow: inset 0 1px 0 #a78bfa; }
+.ed-tab b { width: 9px; height: 9px; border-radius: 2px; background: #a78bfa; }
+.ed-tools { margin-left: auto; margin-right: 10px; display: flex; gap: 2px; padding: 3px 5px; border-radius: 7px; background: #111a2e; border: 1px solid var(--scr-line); opacity: .45; transition: opacity .4s; }
+.ed.debugging .ed-tools { opacity: 1; }
+.ed-tools span { width: 22px; height: 20px; display: grid; place-items: center; border-radius: 4px; color: #93c5fd; }
+.ed-tools span.hot { background: rgba(167, 139, 250, .25); color: #ddd6fe; }
+.ed-tools svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ed-code { position: relative; flex: none; padding: 10px 0; font: 12.8px/23px var(--font-mono); }
+.ed-hl { position: absolute; left: 0; right: 0; top: 10px; height: 23px; opacity: 0; border-left: 2px solid #22d3ee;
+  background: linear-gradient(90deg, rgba(34, 211, 238, .2), rgba(34, 211, 238, .05)); transform: translateY(calc(var(--row, 0) * 23px)); transition: transform .7s var(--ease), opacity .4s; }
+.ed-hl.on { opacity: 1; }
+.ed-line { position: relative; display: grid; grid-template-columns: 22px 30px 1fr; align-items: center; height: 23px; white-space: pre; }
+.ed-g { position: relative; width: 10px; height: 10px; margin-left: 7px; border-radius: 50%; background: #f43f5e; transform: scale(0); transition: transform .45s cubic-bezier(.34, 1.56, .64, 1); box-shadow: 0 0 10px rgba(244, 63, 94, .6); }
+.ed-line.bp .ed-g { transform: scale(1); }
+.ed-n { color: #4b5569; text-align: right; padding-right: 12px; font-size: 11.5px; }
+.ed-line.cur .ed-n { color: #cbd5e1; }
+.ed-s { overflow: hidden; }
+.ed-note { position: absolute; right: 12px; top: 0; font-style: italic; font-size: 11.5px; color: #8b95a8; opacity: 0; transform: translateX(8px); transition: opacity .5s, transform .5s var(--ease); pointer-events: none; }
+.ed-note.on { opacity: 1; transform: none; }
+.ed-note .who-a { color: #67e8f9; }
+.ed-panel { flex: 1; min-height: 0; border-top: 1px solid var(--scr-line); padding: 8px 12px; overflow: hidden; background: #080d18; }
+.ed-panel h4 { margin: 0 0 6px; font: 700 10.5px/1.4 var(--font-sans); letter-spacing: .12em; color: #7d889c; }
+.ed-act { list-style: none; margin: 0; padding: 0; font-size: 12px; font-family: var(--font-sans); }
+.ed-act li { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; color: #cbd5e1; animation: slide-in .5s var(--ease) both; }
+.ed-act li:nth-child(n + 4) { display: none; }
+.ed-act li i { font-style: normal; color: #64748b; font-size: 11px; margin-left: auto; font-variant-numeric: tabular-nums; }
+@keyframes slide-in { from { opacity: 0; transform: translateX(-10px); } }
+.ed-status { flex: none; display: flex; align-items: center; gap: 14px; height: 26px; padding: 0 10px; font-size: 11.5px; color: #e2e8f0; background: #151d33; border-top: 1px solid var(--scr-line); transition: background-color .5s; }
+.ed.joined .ed-status { background: linear-gradient(90deg, #3b2a74, #1d2b52); }
+.ed-status .push { margin-left: auto; }
+.ed-lease { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; height: 20px; border-radius: 5px; transition: background-color .3s; }
+.ed-lease.flash { animation: flash 1s var(--ease); }
+@keyframes flash { 30% { background: rgba(255, 255, 255, .22); } }
+.ed-lease b { width: 7px; height: 7px; border-radius: 50%; background: #22d3ee; transition: background-color .4s; }
+.ed-lease.you b { background: #a78bfa; }
+.ed-toast, .ed-menu, .ed-input { position: absolute; z-index: 3; font-family: var(--font-sans); background: #111a2e; border: 1px solid rgba(148, 163, 184, .28); border-radius: 10px; box-shadow: 0 18px 40px -12px rgba(0, 0, 0, .8);
+  opacity: 0; pointer-events: none; transition: opacity .35s var(--ease), transform .45s var(--ease); }
+.ed-toast { right: 12px; bottom: 40px; width: min(330px, calc(100% - 24px)); padding: 12px 14px; font-size: 12.5px; line-height: 1.45; transform: translateY(14px); }
+.ed-toast.on, .ed-menu.on, .ed-input.on { opacity: 1; transform: none; }
+.ed-toast p { margin: 0 0 10px; color: #e2e8f0; }
+.ed-toast .btns { display: flex; gap: 6px; justify-content: flex-end; }
+.ed-toast .btns span { padding: 4px 12px; border-radius: 6px; font-size: 12px; border: 1px solid rgba(148, 163, 184, .3); color: #cbd5e1; }
+.ed-toast .btns .pri { background: #6d28d9; border-color: #7c3aed; color: #fff; }
+.ed-menu { right: 10px; bottom: 32px; width: 220px; padding: 5px; font-size: 12.5px; transform: translateY(8px); }
+.ed-menu span { display: block; padding: 6px 10px; border-radius: 6px; color: #cbd5e1; }
+.ed-menu span.hot { background: #6d28d9; color: #fff; }
+.ed-input { left: 50%; top: 42px; width: min(360px, calc(100% - 24px)); padding: 8px; transform: translate(-50%, -8px); }
+.ed-input.on { transform: translate(-50%, 0); }
+.ed-input small { display: block; font-size: 11px; color: #94a3b8; margin: 0 0 6px 2px; }
+.ed-input div { min-height: 26px; padding: 4px 8px; border-radius: 6px; border: 1px solid #7c3aed; background: #0a0f1c; font-size: 12.5px; color: #e2e8f0; }
+.ed-cursor { position: absolute; left: 0; top: 0; z-index: 5; width: 18px; height: 18px; pointer-events: none; opacity: 0; transform: translate(70%, 60%);
+  transition: transform .75s var(--ease), opacity .4s; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .6)); }
+.ed-cursor.on { opacity: 1; }
+.ed-cursor::after { content: ""; position: absolute; left: -9px; top: -9px; width: 20px; height: 20px; border-radius: 50%; border: 2px solid #c4b5fd; opacity: 0; }
+.ed-cursor.click::after { animation: click-ring .5s var(--ease); }
+@keyframes click-ring { 0% { opacity: 1; transform: scale(.3); } 100% { opacity: 0; transform: scale(1.6); } }
+.stage-steps { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 26px auto 0; padding: 0; list-style: none; }
+.stage-steps button { display: inline-flex; align-items: center; gap: 9px; height: 38px; padding: 0 14px 0 8px; border-radius: 999px; font-size: .88rem; color: var(--text-3); border: 1px solid var(--line); background: var(--surface);
+  transition: color .3s, border-color .3s, background-color .3s, transform .3s var(--ease); }
+.stage-steps button:hover { color: var(--text); transform: translateY(-1px); }
+.stage-steps b { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; font-size: .78rem; background: var(--line); color: var(--text-2); transition: background-color .3s, color .3s; }
+.stage-steps button.on { color: var(--text); border-color: color-mix(in srgb, var(--agent) 45%, var(--line-2)); background: var(--surface-2); }
+.stage-steps button.on b { background: linear-gradient(135deg, var(--agent), var(--human)); color: #fff; }
+.stage-steps button.human.on { border-color: color-mix(in srgb, var(--human) 45%, var(--line-2)); }
+.term-body, .ed-code, .ed-panel { transition: opacity .45s var(--ease); }
+.stage.resetting .term-body, .stage.resetting .ed-code, .stage.resetting .ed-panel { opacity: 0; }
+.nl { animation: line-in .45s var(--ease) both; }
+@media (max-width: 900px) {
+  .stage-grid { grid-template-columns: minmax(0, 1fr); }
+  .win { height: 400px; }
+}
+@media (max-width: 520px) {
+  .term-body, .ed-code { font-size: 11.2px; }
+  .ed-note { display: none; }
+  .stage-steps button { font-size: .8rem; }
+}
+
+/* stats */
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: clamp(56px, 7vw, 88px); border-radius: var(--r-lg); overflow: hidden; background: var(--line); border: 1px solid var(--line); }
+.stat { padding: 26px 24px; background: color-mix(in srgb, var(--bg) 70%, transparent); text-align: left; }
+.stat b { display: block; font-size: clamp(2rem, 1.4rem + 1.6vw, 2.8rem); line-height: 1; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.stat span { display: block; margin-top: 8px; font-size: .92rem; color: var(--text-2); }
+.stat em { font-style: normal; color: var(--text-3); font-size: .84rem; }
+@media (max-width: 760px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+
+/* adapters strip */
+.strip { padding: 10px 0 0; }
+.strip p { margin: 0 0 18px; text-align: center; font-size: .85rem; letter-spacing: .14em; text-transform: uppercase; color: var(--text-3); font-weight: 700; }
+.marquee { overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); }
+.track { display: flex; gap: 14px; width: max-content; animation: marquee 42s linear infinite; }
+.marquee:hover .track { animation-play-state: paused; }
+@keyframes marquee { to { transform: translateX(calc(-50% - 7px)); } }
+.chip { display: inline-flex; align-items: center; gap: 10px; height: 46px; padding: 0 18px; border-radius: 999px; white-space: nowrap; font-size: .95rem; color: var(--text-2); border: 1px solid var(--line); background: var(--surface); }
+.chip strong { color: var(--text); font-weight: 700; }
+.chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--agent)); box-shadow: 0 0 12px var(--c, var(--agent)); }
+
+/* why */
+.why { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+@media (max-width: 900px) { .why { grid-template-columns: 1fr; } }
+.why .num { position: absolute; right: 22px; top: 18px; font-size: 3.4rem; font-weight: 700; line-height: 1; letter-spacing: -.04em; color: transparent; -webkit-text-stroke: 1px var(--line-2); }
+
+/* architecture */
+.arch { position: relative; display: grid; grid-template-columns: 1fr 1.12fr 1fr .78fr; align-items: center; gap: clamp(40px, 7vw, 104px);
+  padding: clamp(22px, 3vw, 36px); border-radius: var(--r-xl); border: 1px solid var(--line); background: var(--surface); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.arch-col { position: relative; z-index: 1; display: grid; gap: 14px; }
+.arch-col > small { font-size: .74rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--text-3); }
+.node { position: relative; padding: 13px 15px; border-radius: 14px; background: var(--surface-solid); border: 1px solid var(--line-2); box-shadow: var(--shadow-md); transition: transform .4s var(--ease), border-color .3s; }
+.node:hover { transform: translateY(-2px); }
+.node .nt { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: .98rem; }
+.node .nt i { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--c, var(--text-3)); box-shadow: 0 0 10px var(--c, transparent); }
+.node .nd { margin-top: 3px; font-size: .84rem; line-height: 1.45; color: var(--text-3); }
+.node.agent { --c: var(--agent); border-color: color-mix(in srgb, var(--agent) 42%, var(--line-2)); }
+.node.human { --c: var(--human); border-color: color-mix(in srgb, var(--human) 42%, var(--line-2)); }
+.node.daemon { padding: 22px; border-color: color-mix(in srgb, var(--agent) 30%, var(--line-2));
+  background: radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--agent) 12%, var(--surface-solid)), var(--surface-solid) 60%), var(--surface-solid); }
+.node.daemon .nt { font-size: 1.15rem; }
+.node.daemon .pulse { position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; border: 1px solid var(--agent); opacity: 0; animation: halo 3.2s var(--ease) infinite; }
+@keyframes halo { 0% { opacity: .7; transform: scale(1); } 100% { opacity: 0; transform: scale(1.08); } }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.chips span { font-size: .76rem; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--text-2); background: var(--surface); }
+.node.prog { text-align: center; padding: 26px 16px; }
+.node.prog svg { width: 34px; height: 34px; margin: 0 auto 10px; stroke: var(--text-2); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.wires { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; overflow: visible; pointer-events: none; }
+.wires .w { fill: none; stroke: var(--line-2); stroke-width: 1.5; }
+.wires .f { fill: none; stroke: var(--agent); stroke-width: 1.8; stroke-dasharray: 5 11; opacity: .75; animation: dash 1.5s linear infinite; }
+.wires .f.hu { stroke: var(--human); }
+.wires .pk { fill: var(--agent); }
+.wires .pk.hu { fill: var(--human); }
+@keyframes dash { to { stroke-dashoffset: -32; } }
+.wire-tag { position: absolute; z-index: 2; transform: translate(-50%, -50%); padding: 3px 9px; border-radius: 999px; font-size: .72rem; font-weight: 700; letter-spacing: .04em; white-space: nowrap;
+  color: var(--text-2); background: var(--surface-solid); border: 1px solid var(--line-2); }
+@media (max-width: 900px) { .arch { grid-template-columns: 1fr; gap: 46px; } .arch-col.adapters { grid-template-columns: 1fr 1fr; } .arch-col.adapters > small { grid-column: 1 / -1; } }
+.arch.vertical .wire-tag { display: none; }
+.facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 18px; }
+.facts .card { padding: 22px; }
+.facts h3 { font-size: 1.02rem; }
+.facts p { font-size: .93rem; }
+@media (max-width: 1000px) { .facts { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 600px) { .facts { grid-template-columns: 1fr; } }
+
+/* the agent loop */
+.steps { position: relative; display: grid; gap: 28px; }
+.steps::before, .steps .fill { content: ""; position: absolute; left: 23px; top: 24px; bottom: 24px; width: 2px; border-radius: 2px; }
+.steps::before { background: var(--line); }
+.steps .fill { background: linear-gradient(var(--agent), var(--human)); transform-origin: 0 0; transform: scaleY(0); }
+.step { position: relative; display: grid; grid-template-columns: 48px minmax(0, .82fr) minmax(0, 1.18fr); gap: 26px; align-items: start; }
+.step .n { position: relative; z-index: 1; width: 48px; height: 48px; display: grid; place-items: center; border-radius: 50%; font-weight: 700;
+  background: var(--surface-solid); border: 1px solid var(--line-2); transition: border-color .5s, box-shadow .5s, color .5s; }
+.step.in .n { color: var(--agent); border-color: var(--agent); box-shadow: 0 0 0 6px var(--agent-soft); }
+.step h3 { margin: 10px 0 8px; font-size: 1.3rem; letter-spacing: -.015em; }
+.step p { margin: 0; color: var(--text-2); }
+@media (max-width: 900px) { .step { grid-template-columns: 48px minmax(0, 1fr); } .step .code { grid-column: 2; } }
+
+/* media: the demo video and screenshots */
+.video-slot { position: relative; isolation: isolate; aspect-ratio: 16 / 9; border-radius: var(--r-xl); overflow: hidden; background: var(--scr-bg); border: 1px solid var(--scr-line); box-shadow: var(--shadow-lg); }
+.video-slot::before { content: ""; position: absolute; inset: -60%; z-index: -1; opacity: .5; animation: spin 16s linear infinite;
+  background: conic-gradient(from 0deg, transparent 0 25%, rgba(34, 211, 238, .35) 35%, transparent 45% 70%, rgba(167, 139, 250, .35) 80%, transparent 90%); }
+.video-slot::after { content: ""; position: absolute; inset: 1px; z-index: -1; border-radius: calc(var(--r-xl) - 1px); background: radial-gradient(90% 90% at 50% 30%, #0e1528, var(--scr-bg)); }
+.video-slot > video, .video-slot > iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; }
+.ph { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 18px; padding: 24px; text-align: center; color: #e9edf5; }
+.ph .grid-lines { position: absolute; inset: 0; opacity: .5; background-image: linear-gradient(rgba(148, 163, 184, .08) 1px, transparent 1px), linear-gradient(90deg, rgba(148, 163, 184, .08) 1px, transparent 1px); background-size: 40px 40px;
+  -webkit-mask-image: radial-gradient(closest-side, #000, transparent); mask-image: radial-gradient(closest-side, #000, transparent); }
+.play { position: relative; width: 86px; height: 86px; display: grid; place-items: center; border-radius: 50%; background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .2); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.play svg { width: 30px; height: 30px; margin-left: 4px; fill: #fff; }
+.play::before, .play::after { content: ""; position: absolute; inset: -1px; border-radius: 50%; border: 1px solid rgba(103, 232, 249, .6); animation: ripple 3s var(--ease) infinite; }
+.play::after { animation-delay: 1.5s; border-color: rgba(196, 181, 253, .6); }
+@keyframes ripple { from { transform: scale(1); opacity: .9; } to { transform: scale(2.1); opacity: 0; } }
+.ph strong { position: relative; font-size: clamp(1.1rem, 1rem + .6vw, 1.5rem); letter-spacing: -.01em; }
+.ph span { position: relative; font-size: .92rem; color: #94a3b8; max-width: 44ch; }
+.soon { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 999px; font-size: .78rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: #a5f3fc; border: 1px solid rgba(103, 232, 249, .35); background: rgba(34, 211, 238, .08); }
+.shots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 18px; }
+@media (max-width: 900px) { .shots { grid-template-columns: 1fr; } }
+.shot { margin: 0; }
+.shot-frame { position: relative; display: block; width: 100%; aspect-ratio: 16 / 10; overflow: hidden; border-radius: var(--r-lg); background: var(--scr-bg); border: 1px solid var(--scr-line); box-shadow: var(--shadow-md); }
+.shot-frame img { width: 100%; height: 100%; object-fit: cover; object-position: top left; transition: transform .8s var(--ease); }
+button.shot-frame { cursor: zoom-in; }
+button.shot-frame:hover img { transform: scale(1.035); }
+.sk { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.sk-bar { height: 26px; flex: none; display: flex; align-items: center; gap: 5px; padding: 0 10px; border-bottom: 1px solid var(--scr-line); }
+.sk-bar i { width: 7px; height: 7px; border-radius: 50%; background: #334155; }
+.sk-body { flex: 1; display: grid; grid-template-columns: 28% 1fr; }
+.sk-side { border-right: 1px solid var(--scr-line); padding: 12px 10px; display: grid; align-content: start; gap: 8px; }
+.sk-main { padding: 14px; display: grid; align-content: start; gap: 9px; }
+.sk-l { height: 8px; border-radius: 4px; background: linear-gradient(90deg, #172036 0%, #22304d 40%, #172036 80%); background-size: 300% 100%; animation: shimmer 2.2s linear infinite; }
+.sk-l.c { background: linear-gradient(90deg, rgba(34, 211, 238, .25), rgba(34, 211, 238, .5), rgba(34, 211, 238, .25)); background-size: 300% 100%; }
+.sk-l.v { background: linear-gradient(90deg, rgba(167, 139, 250, .25), rgba(167, 139, 250, .5), rgba(167, 139, 250, .25)); background-size: 300% 100%; }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -200% 0; } }
+.sk-tag { position: absolute; right: 12px; bottom: 12px; font-size: .72rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: #94a3b8; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--scr-line); background: rgba(7, 11, 21, .8); }
+.shot figcaption { margin-top: 12px; font-size: .93rem; color: var(--text-2); }
+.shot figcaption b { display: block; color: var(--text); font-weight: 700; }
+.lightbox { max-width: min(1400px, 94vw); max-height: 92vh; padding: 0; border: 1px solid var(--line-2); border-radius: var(--r-lg); background: var(--scr-bg); overflow: hidden; box-shadow: var(--shadow-lg); }
+.lightbox[open] { animation: zoom-in .45s var(--ease); }
+.lightbox::backdrop { background: rgba(3, 6, 12, .78); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.lightbox img { max-width: 100%; max-height: 92vh; object-fit: contain; }
+.lightbox .icon-btn { position: absolute; right: 12px; top: 12px; background: rgba(7, 11, 21, .8); color: #e2e8f0; border-color: rgba(148, 163, 184, .3); }
+@keyframes zoom-in { from { opacity: 0; transform: scale(.94); } }
+
+/* features */
+.bento { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.bento .wide { grid-column: span 2; }
+@media (max-width: 1000px) { .bento { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) { .bento { grid-template-columns: 1fr; } .bento .wide { grid-column: auto; } }
+.meter { margin-top: 18px; height: 10px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.meter i { display: block; height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, var(--agent), var(--human)); transition: width 2.2s var(--ease) .3s; }
+.in .meter i { width: 72%; }
+.meter-l { display: flex; justify-content: space-between; margin-top: 8px; font-size: .8rem; color: var(--text-3); }
+.kv { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+.kv code { font-size: .8rem; }
+
+/* co-debugging */
+.co { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(28px, 5vw, 64px); align-items: start; }
+@media (max-width: 960px) { .co { grid-template-columns: 1fr; } }
+.list { display: grid; gap: 22px; margin: 0; padding: 0; list-style: none; }
+.list li { display: grid; grid-template-columns: 42px 1fr; gap: 16px; }
+.list .ic { width: 42px; height: 42px; margin: 0; border-radius: 12px; }
+.list h3 { margin: 2px 0 4px; font-size: 1.08rem; letter-spacing: -.01em; }
+.list p { margin: 0; color: var(--text-2); font-size: .98rem; }
+.lease { padding: 24px; }
+.lease-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.lease-top b { font-size: 1rem; }
+.policy { font-size: .78rem; font-weight: 700; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--text-2); transition: color .4s, border-color .4s, background-color .4s; }
+.policy.hp { color: var(--human); border-color: color-mix(in srgb, var(--human) 50%, transparent); background: var(--human-soft); }
+.clients { position: relative; display: grid; gap: 10px; }
+.client { display: flex; align-items: center; gap: 12px; height: 60px; padding: 0 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); }
+.av { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 11px; flex: none; }
+.av svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.av.a { color: var(--agent); background: var(--agent-soft); }
+.av.h { color: var(--human); background: var(--human-soft); }
+.client b { display: block; font-size: .95rem; line-height: 1.2; }
+.client small { display: block; color: var(--text-3); font-size: .8rem; }
+.client .req { margin-left: auto; font-size: .76rem; font-weight: 700; color: var(--human); opacity: 0; transform: translateX(6px); transition: opacity .4s, transform .4s var(--ease); }
+.client .req.on { opacity: 1; transform: none; }
+.token { position: absolute; right: 14px; top: 15px; height: 30px; display: inline-flex; align-items: center; gap: 7px; padding: 0 12px; border-radius: 999px; font-size: .74rem; font-weight: 700; letter-spacing: .1em; color: #fff;
+  background: linear-gradient(135deg, #0e7490, #4f46e5); box-shadow: 0 8px 22px -8px rgba(79, 70, 229, .8); transition: transform .9s var(--ease), background .6s; }
+.token svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.token.h { transform: translateY(70px); background: linear-gradient(135deg, #6d28d9, #4f46e5); }
+.lease-log { margin-top: 16px; min-height: 48px; padding: 12px 14px; border-radius: 12px; border: 1px dashed var(--line-2); font-size: .92rem; color: var(--text-2); }
+.lease-log > span { display: block; animation: fade-up .5s var(--ease); }
+.policies { display: grid; gap: 10px; margin-top: 18px; }
+.policies div { display: grid; grid-template-columns: 130px 1fr; gap: 12px; font-size: .92rem; color: var(--text-2); }
+.policies code { justify-self: start; align-self: start; }
+.co-code { margin-top: 18px; }
+.tabs { position: relative; display: inline-flex; gap: 4px; max-width: 100%; overflow-x: auto; padding: 5px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { position: relative; z-index: 1; flex: none; height: 36px; padding: 0 15px; border-radius: 10px; font-size: .92rem; font-weight: 500; color: var(--text-2); transition: color .25s; }
+.tab:hover, .tab[aria-selected="true"] { color: var(--text); }
+.tab-ind { position: absolute; z-index: 0; left: 0; top: 5px; bottom: 5px; width: 0; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line-2); box-shadow: var(--shadow-md);
+  transition: transform .45s var(--ease), width .45s var(--ease); }
+.panel { margin-top: 14px; animation: fade-up .5s var(--ease); }
+.panel[hidden] { display: none; }
+
+/* .NET diagnostics */
+.diag { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: clamp(24px, 4vw, 48px); align-items: start; }
+@media (max-width: 960px) { .diag { grid-template-columns: 1fr; } }
+.qs { display: grid; gap: 10px; }
+.q { display: grid; grid-template-columns: 38px 1fr; gap: 14px; width: 100%; padding: 16px; text-align: left; border-radius: 16px; border: 1px solid var(--line); background: var(--surface); transition: border-color .3s, background-color .3s, transform .35s var(--ease); }
+.q:hover { transform: translateX(3px); }
+.q[aria-selected="true"] { border-color: color-mix(in srgb, var(--agent) 45%, var(--line-2)); background: var(--surface-2); }
+.q .ic { width: 38px; height: 38px; margin: 0; border-radius: 11px; }
+.q .ic svg { width: 19px; height: 19px; }
+.q b { display: block; font-size: 1rem; }
+.q span { display: block; font-size: .9rem; color: var(--text-2); margin-top: 2px; }
+.diag .code pre { min-height: 330px; }
+.note { display: flex; gap: 14px; margin-top: 18px; padding: 16px 18px; border-radius: 16px; font-size: .93rem; color: var(--text-2); border: 1px solid color-mix(in srgb, var(--ok) 30%, var(--line)); background: color-mix(in srgb, var(--ok) 6%, transparent); }
+.note svg { width: 22px; height: 22px; flex: none; stroke: var(--ok); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* languages */
+.langs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+@media (max-width: 800px) { .langs { grid-template-columns: 1fr; } }
+.langs .card, .bento .card { display: flex; flex-direction: column; }
+.langs .card .code, .bento .card > .kv, .bento .card > .meter { margin-top: auto; }
+.langs .card p { margin-bottom: 18px; }
+.lang-top { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.badge { width: 50px; height: 50px; flex: none; display: grid; place-items: center; border-radius: 14px; font-weight: 700; font-size: .95rem; letter-spacing: -.02em; color: #fff; background: var(--c); box-shadow: 0 10px 24px -10px var(--c); }
+.lang-top h3 { margin: 0; }
+.lang-top small { display: block; font-size: .85rem; color: var(--text-3); }
+.platforms { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 30px; }
+.platforms span { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; font-size: .9rem; color: var(--text-2); border: 1px solid var(--line); background: var(--surface); }
+.platforms span::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+
+/* built for agents */
+.agents { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+@media (max-width: 900px) { .agents { grid-template-columns: 1fr; } }
+.exit { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: .92rem; }
+.exit th, .exit td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.exit th { color: var(--text-3); font-size: .75rem; letter-spacing: .12em; text-transform: uppercase; }
+.exit td:first-child { font-weight: 700; color: var(--agent); width: 44px; }
+.exit td { color: var(--text-2); }
+
+/* security */
+.sec-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+@media (max-width: 1000px) { .sec-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) { .sec-grid { grid-template-columns: 1fr; } }
+
+/* install */
+.install { display: grid; gap: 18px; counter-reset: inst; }
+.inst { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: clamp(20px, 4vw, 48px); align-items: center; }
+@media (max-width: 900px) { .inst { grid-template-columns: 1fr; } }
+.inst h3::before { counter-increment: inst; content: counter(inst); display: inline-grid; place-items: center; width: 30px; height: 30px; margin-right: 12px; border-radius: 9px; font-size: .9rem; color: #fff; background: linear-gradient(135deg, #0e7490, #6d28d9); vertical-align: 2px; }
+.inst h3 { font-size: 1.25rem; }
+.inst .code + .code { margin-top: 12px; }
+
+/* FAQ */
+.faq { max-width: 880px; margin: 0 auto; display: grid; gap: 12px; }
+.faq details { border-radius: 16px; border: 1px solid var(--line); background: var(--surface); transition: border-color .3s, background-color .3s; }
+.faq details[open] { border-color: var(--line-2); background: var(--surface-2); }
+.faq summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 16px; padding: 19px 22px; font-weight: 700; font-size: 1.04rem; }
+.faq summary::-webkit-details-marker { display: none; }
+.plus { position: relative; flex: none; margin-left: auto; width: 28px; height: 28px; border-radius: 9px; border: 1px solid var(--line-2); transition: transform .45s var(--ease), background-color .3s; }
+.plus::before, .plus::after { content: ""; position: absolute; left: 50%; top: 50%; width: 11px; height: 2px; border-radius: 2px; background: currentColor; transform: translate(-50%, -50%); transition: transform .45s var(--ease); }
+.plus::after { transform: translate(-50%, -50%) rotate(90deg); }
+.faq details[open]:not(.closing) .plus { transform: rotate(180deg); background: var(--agent-soft); }
+.faq details[open]:not(.closing) .plus::after { transform: translate(-50%, -50%) rotate(0deg); }
+.faq .ans { overflow: hidden; }
+.faq .ans > div { padding: 0 22px 20px; color: var(--text-2); }
+.faq .ans p { margin: 0; }
+.faq .ans p + p { margin-top: 10px; }
+
+/* final call to action */
+.final { position: relative; isolation: isolate; overflow: hidden; text-align: center; padding: clamp(64px, 9vw, 120px) 24px; border-radius: 34px; border: 1px solid var(--line-2); background: var(--surface); }
+.final::before { content: ""; position: absolute; inset: -60%; z-index: -1; opacity: .55; filter: blur(50px); animation: spin 18s linear infinite;
+  background: conic-gradient(from 90deg, transparent 0 18%, color-mix(in srgb, var(--agent) 40%, transparent) 28%, transparent 42% 60%, color-mix(in srgb, var(--human) 40%, transparent) 72%, transparent 86%); }
+.final::after { content: ""; position: absolute; inset: 1px; z-index: -1; border-radius: 33px; background: color-mix(in srgb, var(--bg) 66%, transparent); }
+.final h2 { font-size: clamp(2.2rem, 1.2rem + 3.6vw, 4rem); margin-top: 0; }
+.final .lede { max-width: 620px; margin: 0 auto 32px; }
+
+/* footer */
+footer { padding: 64px 0 40px; border-top: 1px solid var(--line); }
+.foot { display: grid; grid-template-columns: 1.5fr repeat(3, 1fr); gap: 32px; }
+@media (max-width: 800px) { .foot { grid-template-columns: 1fr 1fr; } .foot > div:first-child { grid-column: 1 / -1; } }
+.foot p { color: var(--text-2); font-size: .95rem; max-width: 36ch; }
+.foot h4 { margin: 4px 0 14px; font-size: .76rem; letter-spacing: .14em; text-transform: uppercase; color: var(--text-3); }
+.foot ul { list-style: none; margin: 0; padding: 0; }
+.foot li a { display: inline-block; padding: 4px 0; font-size: .95rem; color: var(--text-2); transition: color .2s, transform .3s var(--ease); }
+.foot li a:hover { color: var(--text); transform: translateX(3px); }
+.legal { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin-top: 44px; padding-top: 24px; border-top: 1px solid var(--line); font-size: .88rem; color: var(--text-3); }
+
+/* theme switch: a circle grows from the toggle (view transitions); no other transitions meanwhile */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+html.vt *, html.vt *::before, html.vt *::after { transition: none !important; }
+
+/* reduced motion: everything settles at once */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .001ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; transition-delay: 0s !important; }
+  .bg-beam, .bg-spot { display: none; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<!-- Shared defs for every eye mark on the page (not display:none, so the gradients render). -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="eye-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient>
+    <clipPath id="eye-clip"><path d="M3.5 20C9 10.5 31 10.5 36.5 20 31 29.5 9 29.5 3.5 20Z"/></clipPath>
+    <radialGradient id="halo"><stop offset="0" stop-color="#22d3ee" stop-opacity=".32"/><stop offset=".62" stop-color="#8b5cf6" stop-opacity=".1"/><stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/></radialGradient>
+    <symbol id="eye" viewBox="0 0 40 40">
+      <path d="M3.5 20C9 10.5 31 10.5 36.5 20 31 29.5 9 29.5 3.5 20Z" fill="none" stroke="url(#eye-grad)" stroke-width="2.6" stroke-linejoin="round"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="bg" aria-hidden="true">
+  <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div><div class="blob b4"></div>
+  <div class="bg-grid-mask"><div class="bg-grid"></div></div>
+  <div class="bg-beam"></div>
+  <div class="bg-spot"></div>
+  <div class="bg-noise"></div>
+</div>
+
+<div class="progress" aria-hidden="true"></div>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="EyeDebugger home">
+      <svg viewBox="0 0 40 40" aria-hidden="true" data-eye="2">
+        <g class="lid">
+          <use href="#eye"/>
+          <g clip-path="url(#eye-clip)"><g class="iris"><circle cx="20" cy="20" r="6.6" fill="url(#eye-grad)"/><circle class="pupil" cx="20" cy="20" r="2.7"/><circle cx="22.1" cy="17.9" r="1.1" fill="#fff" opacity=".85"/></g></g>
+        </g>
+      </svg>
+      EyeDebugger
+    </a>
+    <nav class="nav-links" id="nav-links" aria-label="Sections">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#co">Co-debugging</a>
+      <a href="#dotnet">.NET</a>
+      <a href="#languages">Languages</a>
+      <a href="#install">Install</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="icon-btn gh-btn" href="https://github.com/EyeDebugger/eyedebugger" aria-label="EyeDebugger on GitHub">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.73.5.5 5.73.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.39-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.73 18.27.5 12 .5z"/></svg>
+      </a>
+      <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch to light theme">
+        <svg class="sunmoon" viewBox="0 0 24 24" aria-hidden="true">
+          <mask id="moon-cut"><rect width="24" height="24" fill="#fff"/><circle class="cut" cx="24" cy="4" r="7" fill="#000"/></mask>
+          <circle class="core" cx="12" cy="12" r="5" fill="currentColor" mask="url(#moon-cut)"/>
+          <g class="rays" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1.5v2.2M12 20.3v2.2M1.5 12h2.2M20.3 12h2.2M4.6 4.6l1.5 1.5M17.9 17.9l1.5 1.5M4.6 19.4l1.5-1.5M17.9 6.1l1.5-1.5"/></g>
+        </svg>
+      </button>
+      <button class="icon-btn menu-btn" id="menu-btn" type="button" aria-label="Menu" aria-expanded="false" aria-controls="nav-links"><span></span><span></span><span></span></button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+<!-- ============ hero ============ -->
+<section class="hero" id="top">
+  <div class="wrap">
+    <div class="hero-eye" aria-hidden="true">
+      <svg viewBox="0 0 120 120">
+        <circle class="halo" cx="60" cy="60" r="58"/>
+        <circle class="ring r1" cx="60" cy="60" r="55"/>
+        <circle class="ring r2" cx="60" cy="60" r="45"/>
+        <svg x="21" y="21" width="78" height="78" viewBox="0 0 40 40" data-eye="2.6">
+          <g class="lid late">
+            <use href="#eye"/>
+            <g clip-path="url(#eye-clip)"><g class="iris"><circle cx="20" cy="20" r="6.6" fill="url(#eye-grad)"/><circle class="pupil" cx="20" cy="20" r="2.7"/><circle cx="22.1" cy="17.9" r="1.1" fill="#fff" opacity=".85"/></g></g>
+          </g>
+        </svg>
+      </svg>
+    </div>
+    <span class="pill"><span class="dot"></span>Open source · Apache-2.0 · .NET, Python, Go, C, C++ and Rust</span>
+    <h1>
+      <span class="w" style="--i:0">Give</span> <span class="w" style="--i:1">your</span> <span class="w" style="--i:2">agent</span> <span class="w grad" style="--i:3">eyes</span>
+      <span class="w" style="--i:4">on</span> <span class="w" style="--i:5">the</span> <span class="w" style="--i:6">running</span> <span class="w" style="--i:7">program.</span>
+    </h1>
+    <p class="lede">eyedbg is a CLI-first debugger built for AI coding agents. Breakpoints, stepping, locals and eval — one shell command at a time — in a live session you can join from VS Code whenever you want to look, or take the wheel.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#install">Get started <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      <a class="btn btn-ghost" href="https://github.com/EyeDebugger/eyedebugger"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.73.5.5 5.73.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.39-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.73 18.27.5 12 .5z"/></svg>View on GitHub</a>
+    </div>
+    <p class="works">Works with Claude Code, Codex and any agent that can run a shell command.</p>
+
+    <!-- The shared session, animated by the script: the agent's terminal on the left, your editor on the right. -->
+    <div class="stage" id="stage" data-reveal="fade">
+      <div class="stage-grid" aria-hidden="true">
+        <div class="win term">
+          <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span><span class="win-title">agent — zsh — ~/shop</span><span class="role agent">AGENT</span></div>
+          <div class="term-body"></div>
+        </div>
+        <div class="win ed">
+          <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span><span class="win-title">Orders.cs — shop</span><span class="role human">YOU</span></div>
+          <div class="ed-top">
+            <div class="ed-tab"><b></b>Orders.cs</div>
+            <div class="ed-tools">
+              <span><svg viewBox="0 0 24 24"><path d="M7 4l12 8-12 8z"/></svg></span>
+              <span data-t="over"><svg viewBox="0 0 24 24"><path d="M4 14a8 8 0 0 1 15-3"/><path d="M20 5v6h-6"/><circle cx="12" cy="19" r="1.6"/></svg></span>
+              <span><svg viewBox="0 0 24 24"><path d="M12 3v11M7 9l5 5 5-5"/><circle cx="12" cy="20" r="1.6"/></svg></span>
+              <span><svg viewBox="0 0 24 24"><path d="M12 15V4M7 9l5-5 5 5"/><circle cx="12" cy="20" r="1.6"/></svg></span>
+              <span><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg></span>
+            </div>
+          </div>
+          <div class="ed-code">
+            <div class="ed-hl"></div>
+            <div class="ed-line" data-l="12"><span class="ed-g"></span><span class="ed-n">12</span><span class="ed-s"><span class="t-w">public</span> <span class="t-w">decimal</span> <span class="t-y">Total</span>(<span class="t-y">IReadOnlyList</span>&lt;<span class="t-y">Order</span>&gt; orders)</span></div>
+            <div class="ed-line" data-l="13"><span class="ed-g"></span><span class="ed-n">13</span><span class="ed-s">{</span></div>
+            <div class="ed-line" data-l="14"><span class="ed-g"></span><span class="ed-n">14</span><span class="ed-s">    <span class="t-w">var</span> total = <span class="t-n">0m</span>;</span><span class="ed-note"><span class="who-a">⬥ agent</span></span></div>
+            <div class="ed-line" data-l="15"><span class="ed-g"></span><span class="ed-n">15</span><span class="ed-s">    <span class="t-w">for</span> (<span class="t-w">var</span> i = <span class="t-n">0</span>; i &lt; orders.Count; i++)</span></div>
+            <div class="ed-line" data-l="16"><span class="ed-g"></span><span class="ed-n">16</span><span class="ed-s">    {</span></div>
+            <div class="ed-line" data-l="17"><span class="ed-g"></span><span class="ed-n">17</span><span class="ed-s">        <span class="t-w">var</span> order = orders[i];</span></div>
+            <div class="ed-line" data-l="18"><span class="ed-g"></span><span class="ed-n">18</span><span class="ed-s">        total += order.Price * order.Quantity;</span><span class="ed-note">i = 3 · total = 127.50</span></div>
+            <div class="ed-line" data-l="19"><span class="ed-g"></span><span class="ed-n">19</span><span class="ed-s">    }</span><span class="ed-note">total = 42.50</span></div>
+            <div class="ed-line" data-l="20"><span class="ed-g"></span><span class="ed-n">20</span><span class="ed-s">    <span class="t-w">return</span> total;</span></div>
+            <div class="ed-line" data-l="21"><span class="ed-g"></span><span class="ed-n">21</span><span class="ed-s">}</span></div>
+          </div>
+          <div class="ed-panel"><h4>EYEDEBUGGER ACTIVITY</h4><ul class="ed-act"></ul></div>
+          <div class="ed-status"><span class="ed-sess">⎇ main</span><span class="push"></span><span class="ed-lease" hidden><b></b><span></span></span></div>
+          <div class="ed-toast"><p><b>agent</b> is debugging Shop.dll in this workspace (s-7f3k, dotnet, stopped).</p><div class="btns"><span>Ignore</span><span class="pri" data-t="join">Join</span></div></div>
+          <div class="ed-menu"><span data-t="request">Request Control…</span><span>Take Control</span><span>Give Control…</span></div>
+          <div class="ed-input"><small>Tell agent why (optional) — Enter to send</small><div></div></div>
+          <svg class="ed-cursor" viewBox="0 0 24 24"><path d="M4 2.5l15.5 9.8-6.9 1.4-3.9 6.3z" fill="#fff" stroke="#0a0f1c" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        </div>
+      </div>
+      <p class="sr-only">Animation: an agent starts a debug session from its terminal and stops at a breakpoint; you join the same session from VS Code; the agent runs to the iteration with the bug; you ask for control, and the agent hands it over.</p>
+      <ol class="stage-steps">
+        <li><button type="button" data-go="0"><b>1</b>Agent starts a session</button></li>
+        <li><button type="button" data-go="1" class="human"><b>2</b>You join from VS Code</button></li>
+        <li><button type="button" data-go="2"><b>3</b>Agent runs to the bug</button></li>
+        <li><button type="button" data-go="3" class="human"><b>4</b>You ask for control</button></li>
+        <li><button type="button" data-go="4"><b>5</b>Agent hands it over</button></li>
+      </ol>
+    </div>
+
+    <div class="stats" data-reveal>
+      <div class="stat"><b data-count="6">6</b><span>languages <em>· .NET, Python, Go, C, C++, Rust</em></span></div>
+      <div class="stat"><b data-count="6">6</b><span>platforms <em>· Linux, macOS, Windows on x64 and arm64</em></span></div>
+      <div class="stat"><b data-count="1">1</b><span>live session <em>· shared by every agent and human</em></span></div>
+      <div class="stat"><b data-count="0" data-from="12">0</b><span>MCP servers to set up <em>· the CLI is the interface</em></span></div>
+    </div>
+  </div>
+</section>
+
+<div class="strip">
+  <p>Drives proven debuggers for you</p>
+  <div class="marquee">
+    <div class="track">
+      <span class="chip" style="--c:#8b5cf6"><i></i><strong>.NET</strong> netcoredbg · SharpDbg</span>
+      <span class="chip" style="--c:#3b82f6"><i></i><strong>Python</strong> debugpy</span>
+      <span class="chip" style="--c:#06b6d4"><i></i><strong>Go</strong> Delve</span>
+      <span class="chip" style="--c:#6366f1"><i></i><strong>C</strong> lldb-dap</span>
+      <span class="chip" style="--c:#0ea5e9"><i></i><strong>C++</strong> lldb-dap</span>
+      <span class="chip" style="--c:#f43f5e"><i></i><strong>Rust</strong> lldb-dap</span>
+      <span class="chip" style="--c:#10b981"><i></i><strong>Your language</strong> a JSON adapter manifest</span>
+      <span class="chip" style="--c:#a78bfa"><i></i><strong>Editors</strong> VS Code · nvim-dap · any DAP client</span>
+      <span aria-hidden="true" class="chip" style="--c:#8b5cf6"><i></i><strong>.NET</strong> netcoredbg · SharpDbg</span>
+      <span aria-hidden="true" class="chip" style="--c:#3b82f6"><i></i><strong>Python</strong> debugpy</span>
+      <span aria-hidden="true" class="chip" style="--c:#06b6d4"><i></i><strong>Go</strong> Delve</span>
+      <span aria-hidden="true" class="chip" style="--c:#6366f1"><i></i><strong>C</strong> lldb-dap</span>
+      <span aria-hidden="true" class="chip" style="--c:#0ea5e9"><i></i><strong>C++</strong> lldb-dap</span>
+      <span aria-hidden="true" class="chip" style="--c:#f43f5e"><i></i><strong>Rust</strong> lldb-dap</span>
+      <span aria-hidden="true" class="chip" style="--c:#10b981"><i></i><strong>Your language</strong> a JSON adapter manifest</span>
+      <span aria-hidden="true" class="chip" style="--c:#a78bfa"><i></i><strong>Editors</strong> VS Code · nvim-dap · any DAP client</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ why ============ -->
+<section id="why">
+  <div class="wrap">
+    <div class="sec-head" data-reveal>
+      <span class="eyebrow">Why eyedbg</span>
+      <h2>Agents guess. <span class="grad">Debuggers know.</span></h2>
+      <p class="lede">When a fix based on reading the code fails once or twice, the fastest way forward is to look at what the program really does. eyedbg gives your agent a real debugger it drives from the shell — and gives you a seat in the same session.</p>
+    </div>
+    <div class="why" data-stagger>
+      <article class="card glow" data-reveal>
+        <span class="num" aria-hidden="true">01</span>
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></div>
+        <h3>Evidence, not hypotheses</h3>
+        <p>Stop where the bug happens, read the locals that changed, evaluate an expression in the frame that matters. The agent works from the values the program really has at runtime, not from what the code suggests.</p>
+      </article>
+      <article class="card glow" data-reveal>
+        <span class="num" aria-hidden="true">02</span>
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 17l6-5-6-5"/><path d="M12 19h8"/></svg></div>
+        <h3>Made for how agents work</h3>
+        <p>One stateless command per step, each answering with the full picture. Output is budgeted to fit a context window, JSON and error codes are stable, and the built-in help is the documentation. No MCP server to install or configure.</p>
+      </article>
+      <article class="card glow" data-reveal>
+        <span class="num" aria-hidden="true">03</span>
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3.2"/><circle cx="16.5" cy="9.5" r="2.6"/><path d="M2.5 20a5.5 5.5 0 0 1 11 0"/><path d="M13.6 15.2a4.6 4.6 0 0 1 7.9 3.3"/></svg></div>
+        <h3>A session you can share</h3>
+        <p>Existing agent debuggers are MCP servers or bound to an IDE, and none lets an agent and a human both drive one session. With eyedbg, a daemon owns the session and every client joins it: the agent's CLI, your VS Code, any DAP client.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><div class="sep"></div></div>
+
+<!-- ============ how it works ============ -->
+<section id="how">
+  <div class="wrap">
+    <div class="sec-head" data-reveal>
+      <span class="eyebrow">How it works</span>
+      <h2>One daemon owns the session. <span class="grad">Everyone else is a client.</span></h2>
+      <p class="lede">The eyedbg CLI is stateless: each command is a short call to <code>eyedbgd</code>, a per-user daemon that holds your debug sessions and drives a proven Debug Adapter Protocol (DAP) debugger for each language. Your editor connects to the same daemon, so the agent and you always see the same program state.</p>
+    </div>
+
+    <div class="arch" id="arch" data-reveal="scale">
+      <svg class="wires" aria-hidden="true"></svg>
+      <div class="arch-col">
+        <small>Clients</small>
+        <div class="node agent" data-node="agent"><div class="nt"><i></i>Your agent</div><div class="nd"><code>eyedbg</code> CLI · stateless, one call per step</div></div>
+        <div class="node human" data-node="human"><div class="nt"><i></i>You, in VS Code</div><div class="nd">The EyeDebugger extension</div></div>
+        <div class="node human" data-node="dap"><div class="nt"><i></i>Any DAP client</div><div class="nd">nvim-dap, scripts · <code>eyedbg dap</code></div></div>
+      </div>
+      <div class="arch-col">
+        <small>Per-user daemon</small>
+        <div class="node daemon" data-node="daemon">
+          <span class="pulse" aria-hidden="true"></span>
+          <div class="nt"><i style="--c:var(--agent)"></i>eyedbgd</div>
+          <div class="nd">Owns every session. Starts on first use, exits when idle.</div>
+          <div class="chips"><span>sessions</span><span>control lease</span><span>breakpoint owners</span><span>event log</span><span>stop snapshots</span><span>budgets</span></div>
+        </div>
+      </div>
+      <div class="arch-col adapters">
+        <small>DAP adapters</small>
+        <div class="node" data-node="net" style="--c:#8b5cf6"><div class="nt"><i></i>netcoredbg · SharpDbg</div><div class="nd">.NET</div></div>
+        <div class="node" data-node="py" style="--c:#3b82f6"><div class="nt"><i></i>debugpy</div><div class="nd">Python</div></div>
+        <div class="node" data-node="go" style="--c:#06b6d4"><div class="nt"><i></i>Delve</div><div class="nd">Go</div></div>
+        <div class="node" data-node="lldb" style="--c:#f43f5e"><div class="nt"><i></i>lldb-dap</div><div class="nd">C · C++ · Rust</div></div>
+      </div>
+      <div class="arch-col">
+        <small>Debuggee</small>
+        <div class="node prog" data-node="prog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18"/><path d="M7 13l3 2.5L7 18"/><path d="M12.5 18H17"/></svg>
+          <div class="nt" style="justify-content:center">Your program</div>
+          <div class="nd">launched, attached, or a test run</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="facts" data-stagger>
+      <article class="card glow" data-reveal><h3>Stateless CLI</h3><p>Each command is one short-lived process: it connects, does one thing and exits. Agent harnesses that run every command in a fresh shell just work.</p></article>
+      <article class="card glow" data-reveal><h3>A daemon you never manage</h3><p>The first command starts <code>eyedbgd</code>; it serves all your sessions and exits after 30 idle minutes. An adapter crash ends only its own session.</p></article>
+      <article class="card glow" data-reveal><h3>Local and authenticated</h3><p>A Unix socket in a directory only you can enter, and a fresh random token checked on every connection. No TCP listener, even for editors.</p></article>
+      <article class="card glow" data-reveal><h3>Proven debuggers</h3><p>eyedbg adds no engine of its own: it drives DAP adapters, each described by a JSON manifest that says how to install, find and launch it.</p></article>
+    </div>
+  </div>
+</section>
+
+<!-- ============ the agent loop ============ -->
+<section id="loop">
+  <div class="wrap">
+    <div class="sec-head" data-reveal>
+      <span class="eyebrow">The agent loop</span>
+      <h2>From bug to cause <span class="grad">in five commands</span></h2>
+      <p class="lede">A wrong order total, found the way your agent would find it. Every execution command answers with where the program stopped, the source around it and the locals that changed, so there's never a follow-up call just to see where it is.</p>
+    </div>
+    <div class="steps">
+      <span class="fill" aria-hidden="true"></span>
+      <div class="step" data-reveal>
+        <span class="n">1</span>
+        <div><h3>Start where it matters</h3><p>Builds the project, runs it and stops on the one line that contains <code>var total =</code>. Text anchors keep working when lines move; <code>Orders.cs:14</code> and <code>func:Orders.Total</code> work too.</p></div>
+        <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg start dotnet --project src/Shop --bp 'Orders.cs@"var total ="'
+session s-7f3k (dotnet, netcoredbg) stopped: breakpoint, thread 4242
+  at Shop.Orders.Total() Orders.cs:14
+    13 | {
+  &gt; 14 |     var total = 0m;
+    15 |     for (var i = 0; i &lt; orders.Count; i++)</code></pre></div>
+      </div>
+      <div class="step" data-reveal>
+        <span class="n">2</span>
+        <div><h3>Run to the interesting iteration</h3><p><code>run-until</code> continues to line 18 and stops there only once <code>i == 3</code>. The answer is the stop itself: location, source and what changed since the last one.</p></div>
+        <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg run-until Orders.cs:18 --if 'i == 3'
+session s-7f3k (dotnet, netcoredbg) stopped: breakpoint, thread 4242
+  at Shop.Orders.Total() Orders.cs:18
+    17 |         var order = orders[i];
+  &gt; 18 |         total += order.Price * order.Quantity;
+    19 |     }
+  changed since the previous stop:
+    i: int = 3  (was 0)
+    total: decimal = 127.50  (was 0)
+    order: Order = {Shop.Order} {…}  (new)</code></pre></div>
+      </div>
+      <div class="step" data-reveal>
+        <span class="n">3</span>
+        <div><h3>Ask the program</h3><p><code>eval</code> runs in the stopped frame. The fourth order is a refund with a negative quantity — the wrong total, explained with two reads.</p></div>
+        <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg eval 'order.Quantity'
+-2  (int)
+$ eyedbg eval 'order.Refunded'
+true  (bool)</code></pre></div>
+      </div>
+      <div class="step" data-reveal>
+        <span class="n">4</span>
+        <div><h3>Safe by default</h3><p>An expression that could change the program is refused, with a stable code and a hint. <code>--allow-side-effects</code> runs it: that takes the control lease and is recorded in the session's events.</p></div>
+        <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg eval 'order.Recalculate()'
+eyedbg: eval would call a method (Recalculate), which can change the program [SIDE_EFFECTS]
+hint: add --allow-side-effects (it takes the control lease)</code></pre></div>
+      </div>
+      <div class="step" data-reveal>
+        <span class="n">5</span>
+        <div><h3>Always stop</h3><p><code>eyedbg stop</code> ends the session and the program, or detaches from a program you attached to. The daemon goes away by itself once it's idle.</p></div>
+        <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg stop
+session s-7f3k ended</code></pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ demo: video and screenshots ============
+     Slots for the demo video and screenshots. Until a source is set they show placeholders.
+     To publish one, set its data attribute — see site/README.md:
+       video:       data-video="media/demo.mp4" (or an https:// URL, or a YouTube link), data-poster="media/demo-poster.webp"
+       screenshots: data-shot="media/terminal.webp" -->
+<section id="demo">
+  <div class="wrap">
+    <div class="sec-head center" data-reveal>
+      <span class="eyebrow">See it in action</span>
+      <h2>Watch an agent and a human <span class="grad">debug together</span></h2>
+      <p class="lede">A walkthrough of one shared session: the agent's first breakpoint, you joining from VS Code, and the handoff of control.</p>
+    </div>
+    <div class="video-slot" data-video="" data-poster="" data-title="EyeDebugger demo: an agent and a human share one debug session" data-reveal="scale">
+      <div class="ph">
+        <div class="grid-lines" aria-hidden="true"></div>
+        <span class="play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 4.5v15l12.5-7.5z"/></svg></span>
+        <strong>The demo video</strong>
+        <span>An agent and a human, one live session, from the first breakpoint to the handoff.</span>
+        <span class="soon">Coming soon</span>
+      </div>
+    </div>
+    <div class="shots" data-stagger>
+      <figure class="shot" data-shot="" data-alt="The agent's terminal: a stop snapshot with the source line and the locals that changed" data-reveal>
+        <div class="shot-frame">
+          <div class="sk" aria-hidden="true">
+            <div class="sk-bar"><i></i><i></i><i></i></div>
+            <div class="sk-main"><div class="sk-l c" style="width:62%"></div><div class="sk-l" style="width:84%"></div><div class="sk-l" style="width:46%"></div><div class="sk-l c" style="width:70%"></div><div class="sk-l" style="width:52%"></div><div class="sk-l v" style="width:38%"></div><div class="sk-l" style="width:74%"></div></div>
+          </div>
+          <span class="sk-tag">Screenshot soon</span>
+        </div>
+        <figcaption><b>In the agent's terminal</b>Stops, source and changed locals, in one call.</figcaption>
+      </figure>
+      <figure class="shot" data-shot="" data-alt="VS Code joined to the agent's session: its breakpoints, the Activity and Clients views" data-reveal>
+        <div class="shot-frame">
+          <div class="sk" aria-hidden="true">
+            <div class="sk-bar"><i></i><i></i><i></i></div>
+            <div class="sk-body"><div class="sk-side"><div class="sk-l" style="width:80%"></div><div class="sk-l v" style="width:60%"></div><div class="sk-l" style="width:70%"></div><div class="sk-l" style="width:50%"></div></div>
+            <div class="sk-main"><div class="sk-l" style="width:70%"></div><div class="sk-l c" style="width:88%"></div><div class="sk-l" style="width:56%"></div><div class="sk-l" style="width:64%"></div><div class="sk-l v" style="width:42%"></div></div></div>
+          </div>
+          <span class="sk-tag">Screenshot soon</span>
+        </div>
+        <figcaption><b>In your VS Code</b>The agent's breakpoints, its activity and who has control.</figcaption>
+      </figure>
+      <figure class="shot" data-shot="" data-alt="The EyeDebugger .NET views in VS Code: counters, memory, threads and CPU trace" data-reveal>
+        <div class="shot-frame">
+          <div class="sk" aria-hidden="true">
+            <div class="sk-bar"><i></i><i></i><i></i></div>
+            <div class="sk-body"><div class="sk-side"><div class="sk-l c" style="width:70%"></div><div class="sk-l" style="width:85%"></div><div class="sk-l" style="width:60%"></div><div class="sk-l v" style="width:75%"></div></div>
+            <div class="sk-main"><div class="sk-l" style="width:90%"></div><div class="sk-l" style="width:40%"></div><div class="sk-l c" style="width:66%"></div><div class="sk-l" style="width:78%"></div><div class="sk-l" style="width:34%"></div></div></div>
+          </div>
+          <span class="sk-tag">Screenshot soon</span>
+        </div>
+        <figcaption><b>.NET diagnostics</b>Counters, heap, threads and CPU traces, in VS Code.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><div class="sep"></div></div>
+
+<!-- ============ features ============ -->
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head" data-reveal>
+      <span class="eyebrow">Features</span>
+      <h2>A full debugger, <span class="grad">shaped for agents</span></h2>
+      <p class="lede">Launch and attach, breakpoints of every kind, stepping, threads, stacks, variables, eval and set — with output an LLM can read in one pass and a human can trust.</p>
+    </div>
+    <div class="bento" style="grid-auto-flow:dense" data-stagger>
+      <article class="card glow wide" data-reveal>
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+        <h3>Every step answers with the stop</h3>
+        <p><code>continue</code>, <code>next</code>, <code>step-in</code>, <code>step-out</code> and <code>run-until</code> wait until the program stops, exits or times out (30 s by default), then print the reason, the location, the source around it and the locals that changed. A timeout isn't an error: the program keeps running and <code>eyedbg wait</code> picks it up.</p>
+        <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg next
+session s-7f3k (dotnet, netcoredbg) stopped: step, thread 4242
+  at Shop.Orders.Total() Orders.cs:19
+    18 |         total += order.Price * order.Quantity;
+  &gt; 19 |     }
+    20 |     return total;
+  changed since the previous stop:
+    total: decimal = 42.50  (was 127.50)</code></pre></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><path d="M12 7v14"/><path d="M5 12H3a9 9 0 0 0 18 0h-2"/></svg></div>
+        <h3>Anchors, not line numbers</h3>
+        <p><code>Orders.cs@"var total ="</code> resolves to the one line that holds the text, and reports the line it found. The agent sets breakpoints by what the code says, not by numbers that drift with every edit.</p>
+        <div class="kv"><code>File:LINE</code><code>File@"text"</code><code>func:Name</code></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg></div>
+        <h3>Conditions, hit counts, logpoints</h3>
+        <p>Stop only when it matters, or print instead of stopping. eyedbg runs hit counts and logpoints itself, so they behave the same on every adapter.</p>
+        <div class="kv"><code>--if 'i == 3'</code><code>--hit '&gt;=3'</code><code>--log 'i={i}'</code></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 14l4-4"/><path d="M3.3 17a9 9 0 1 1 17.4 0"/></svg></div>
+        <h3>Output that fits a context window</h3>
+        <p>Variables are cut to <code>--budget</code> tokens (2,000 by default), and every cut says how to see the rest, like <code>eyedbg vars --expand orders</code>.</p>
+        <div class="meter" aria-hidden="true"><i></i></div>
+        <div class="meter-l" aria-hidden="true"><span>budget</span><span>2,000 tokens</span></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></div>
+        <h3>Eval that won't surprise you</h3>
+        <p>Method calls, assignments, <code>new</code> and <code>++</code> are refused as <code>SIDE_EFFECTS</code> unless you pass <code>--allow-side-effects</code>, which needs the control lease and is logged.</p>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg></div>
+        <h3>Exception stops</h3>
+        <p><code>eyedbg bp exceptions uncaught</code> (or <code>all</code>) stops where an exception is thrown; the stop shows its type, message, stack and inner exception, and <code>$exception</code> evaluates it.</p>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></div>
+        <h3>Attach, or debug a test</h3>
+        <p><code>eyedbg attach dotnet --pid 4321</code> joins a running process of yours. <code>eyedbg test dotnet Adds</code> runs <code>dotnet test</code> attached to the test host, so breakpoints in the tests and the code they call hit; Go runs tests with <code>--opt mode=test</code>.</p>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></div>
+        <h3>A log of who did what</h3>
+        <p><code>eyedbg events --since 12 --wait</code> long-polls the session's event log: stops, steps, breakpoints, lease changes and output, from every client. A late joiner catches up in one call.</p>
+      </article>
+      <article class="card glow wide" data-reveal>
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/><path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/></svg></div>
+        <h3>Machine-readable when you want it</h3>
+        <p><code>--json</code> on any command returns output with a <code>"schema"</code> version. Errors carry a stable code, a message and a hint to follow, and exit codes group them: 1 usage, 2 state, 3 setup, 4 adapter.</p>
+        <div class="code" data-lang="json"><div class="code-bar"><span class="lang file">eyedbg continue --json</span></div><pre><code>{
+  "schema": 1,
+  "error": {
+    "code": "LEASE_HELD",
+    "message": "the lease of session s-7f3k is held by human:alex (policy human-priority)",
+    "hint": "ask human:alex to run 'eyedbg lease grant agent'; 'eyedbg events --wait --kind lease' waits for a change"
+  }
+}</code></pre></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></div>
+        <h3>Nothing to babysit</h3>
+        <p>No server to start, no port to pick. The daemon starts with the first command, one per user, and cleans up after itself. <code>eyedbg daemon status</code> shows what it's doing.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============ co-debugging ============ -->
+<section id="co">
+  <div class="wrap">
+    <div class="sec-head" data-reveal>
+      <span class="eyebrow">Co-debugging</span>
+      <h2>One session. <span class="grad">Two drivers.</span></h2>
+      <p class="lede">Join the agent's live session from VS Code, or start one with F5 and let the agent join you. You see where it stopped, its breakpoints and everything it does; a control lease decides who drives.</p>
+    </div>
+    <div class="co">
+      <ul class="list" data-stagger>
+        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M12 14.5V21M9.6 11.2L3.5 9.5M14.4 11.2l6.1-1.7"/></svg></span>
+          <div><h3>A control lease, not a free-for-all</h3><p>Exactly one client holds execution control: continue, step, pause, <code>set</code> and side-effecting eval. Everyone else can read state, set their own breakpoints and ask for control.</p></div></li>
+        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></span>
+          <div><h3>Breakpoints keep their owners</h3><p>The agent's breakpoints show in your editor with whose they are and what they do (<code>⬥ agent · if total &gt; 3</code>). Removing one only hides it for you; <em>Copy as My Breakpoint</em> makes it yours.</p></div></li>
+        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
+          <div><h3>Follow the agent, keep your focus</h3><p>When the agent's step stops, VS Code shows the line without taking your keyboard focus. The Activity and Clients views list what each client did, who is connected and who has control.</p></div></li>
+        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
+          <div><h3>Join when an agent starts</h3><p>When an agent starts debugging a program in your workspace, VS Code offers to join — once per session, and never without your click.</p></div></li>
+        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M9 7V3M15 7V3"/><path d="M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/></svg></span>
+          <div><h3>Any DAP client</h3><p><code>eyedbg dap</code> speaks standard DAP on stdio and joins a running session under the same rules — for nvim-dap, scripts or another editor.</p></div></li>
+      </ul>
+      <div>
+        <div class="card lease" data-reveal="scale" id="lease-demo">
+          <div class="lease-top"><b>Session s-7f3k</b><span class="policy">policy: free</span></div>
+          <div class="clients">
+            <div class="client"><span class="av a"><svg viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4"/><circle cx="12" cy="3" r="1"/><path d="M9 14h.01M15 14h.01"/></svg></span><div><b>agent</b><small>eyedbg CLI · seen just now</small></div></div>
+            <div class="client"><span class="av h"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span><div><b>human:alex</b><small>VS Code · connected</small></div><span class="req">requested control</span></div>
+            <span class="token"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M12 14.5V21M9.6 11.2L3.5 9.5M14.4 11.2l6.1-1.7"/></svg>CONTROL</span>
+          </div>
+          <div class="lease-log" aria-live="off"><span>agent holds the lease under the default policy.</span></div>
+          <div class="policies">
+            <div><code>free</code><span>The default. Anyone can take control; running or stepping takes it automatically.</span></div>
+            <div><code>handoff</code><span>Only the holder releases control or gives it to someone.</span></div>
+            <div><code>human-priority</code><span>Like handoff, but a human can always take control from an agent. Agents never take it from one another.</span></div>
+          </div>
+        </div>
+        <div class="co-code" data-reveal>
+          <div class="tabs" role="tablist" aria-label="Joining a session">
+            <span class="tab-ind" aria-hidden="true"></span>
+            <button class="tab" type="button" role="tab" id="t-join" aria-controls="p-join" aria-selected="true">Join in VS Code</button>
+            <button class="tab" type="button" role="tab" id="t-launch" aria-controls="p-launch" aria-selected="false" tabindex="-1">Start with F5</button>
+            <button class="tab" type="button" role="tab" id="t-nvim" aria-controls="p-nvim" aria-selected="false" tabindex="-1">nvim-dap</button>
+            <button class="tab" type="button" role="tab" id="t-agent" aria-controls="p-agent" aria-selected="false" tabindex="-1">The agent's side</button>
+          </div>
+          <div class="panel" role="tabpanel" id="p-join" aria-labelledby="t-join">
+            <div class="code" data-lang="json"><div class="code-bar"><span class="lang file">.vscode/launch.json</span></div><pre><code>{
+  "type": "eyedbg",
+  "request": "attach",
+  "name": "Join eyedbg session"
+}</code></pre></div>
+          </div>
+          <div class="panel" role="tabpanel" id="p-launch" aria-labelledby="t-launch" hidden>
+            <div class="code" data-lang="json"><div class="code-bar"><span class="lang file">.vscode/launch.json</span></div><pre><code>{
+  "type": "eyedbg",
+  "request": "launch",
+  "name": "Debug Shop",
+  "lang": "dotnet",
+  "project": "${workspaceFolder}/src/Shop",
+  "leasePolicy": "human-priority"
+}</code></pre></div>
+          </div>
+          <div class="panel" role="tabpanel" id="p-nvim" aria-labelledby="t-nvim" hidden>
+            <div class="code" data-lang="lua"><div class="code-bar"><span class="lang file">init.lua</span></div><pre><code>local dap = require('dap')
+dap.adapters.eyedbg = {
+  type = 'executable',
+  command = 'eyedbg',
+  args = { 'dap', '--as', 'human:alex' },
+}
+dap.configurations.cs = {
+  { type = 'eyedbg', request = 'attach', name = 'Join eyedbg session' },
+}</code></pre></div>
+          </div>
+          <div class="panel" role="tabpanel" id="p-agent" aria-labelledby="t-agent" hidden>
+            <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg sessions                                    # who is connected, who has control
+eyedbg lease request --message 'let me step into Total()'
+eyedbg events --wait --kind lease                  # wait for the answer
+eyedbg lease grant human:alex                      # hand control to a human</code></pre></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><div class="sep"></div></div>
+
+<!-- ============ .NET diagnostics ============ -->
+<section id="dotnet">
+  <div class="wrap">
+    <div class="sec-head" data-reveal>
+      <span class="eyebrow">.NET diagnostics</span>
+      <h2>Slow, bloated or stuck? <span class="grad">Ask without pausing.</span></h2>
+      <p class="lede"><code>eyedbg dotnet</code> answers the questions that usually send you back to a paid IDE. A C# side helper reads EventPipe counters and traces and analyzes dumps with ClrMD — the CLI runs it for one command, no session or lease involved. The same four views are in VS Code.</p>
+    </div>
+    <div class="diag">
+      <div class="qs" role="tablist" aria-label=".NET questions" aria-orientation="vertical" data-reveal>
+        <button class="q" type="button" role="tab" id="q-counters" aria-controls="d-counters" aria-selected="true">
+          <span class="ic"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></span>
+          <span><b>Is it busy, allocating or throwing?</b><span>Runtime counters, live: CPU, GC heap, exceptions, thread pool.</span></span>
+        </button>
+        <button class="q" type="button" role="tab" id="q-trace" aria-controls="d-trace" aria-selected="false" tabindex="-1">
+          <span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="14" r="8"/><path d="M12 10v4l2.5 2.5M9 2h6"/></svg></span>
+          <span><b>Why is it slow?</b><span>Ten seconds of CPU samples: the hottest methods and where threads wait.</span></span>
+        </button>
+        <button class="q" type="button" role="tab" id="q-heap" aria-controls="d-heap" aria-selected="false" tabindex="-1">
+          <span class="ic"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9.5 9.5h5v5h-5z"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg></span>
+          <span><b>Why won't memory go down?</b><span>What fills the heap, and the path that keeps it alive.</span></span>
+        </button>
+        <button class="q" type="button" role="tab" id="q-threads" aria-controls="d-threads" aria-selected="false" tabindex="-1">
+          <span class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+          <span><b>Is it stuck?</b><span>Every thread's stack, the locks, their owners and waiters.</span></span>
+        </button>
+      </div>
+      <div data-reveal>
+        <div class="panel" role="tabpanel" id="d-counters" aria-labelledby="q-counters">
+          <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal · live</span></div><pre><code id="counters-out">$ eyedbg dotnet counters --watch --counters cpu-usage,gc-heap-size,exception-count
++1.0s  cpu-usage=18.4%  gc-heap-size=96.1MB  exception-count=0
++2.0s  cpu-usage=22.9%  gc-heap-size=101.7MB  exception-count=2
++3.0s  cpu-usage=16.2%  gc-heap-size=99.3MB  exception-count=0
++4.0s  cpu-usage=31.5%  gc-heap-size=108.8MB  exception-count=1</code></pre></div>
+        </div>
+        <div class="panel" role="tabpanel" id="d-trace" aria-labelledby="q-trace" hidden>
+          <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg dotnet trace
+cpu trace of pid 4321 (Shop), session s-7f3k: 10s, 9,812 samples on 12 threads (6,001 in managed code, 3,811 waiting or in native code)
+/home/alex/.eyedbg/traces/4321-20260925T150300Z-cpu-1f3a9c0e.nettrace (5.3 MiB)
+private to you, removed after 7 days (at most 10 kept); open it in PerfView or with 'dotnet-trace convert'
+hottest methods (exclusive: at the top of the stack, in managed code):
+  SAMPLES       %  METHOD
+    4,120   68.7%  Shop.Pricing.ApplyDiscounts(Shop.Order)  [Shop]
+    1,210   20.2%  System.Text.Json.JsonSerializer.Serialize(System.Object)  [System.Text.Json]
+      671   11.2%  Shop.Orders.Total(System.Collections.Generic.IReadOnlyList)  [Shop]
+waiting or in native code, at:
+  SAMPLES       %  METHOD
+    3,790   99.4%  System.Threading.Monitor.Wait(System.Object)  [System.Private.CoreLib]
+GC: 37 collections (gen0 35, gen1 2, gen2 0), pauses 12.3 ms total (0.1% of the time), 1.2 ms max</code></pre></div>
+        </div>
+        <div class="panel" role="tabpanel" id="d-heap" aria-labelledby="q-heap" hidden>
+          <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg dotnet heap --gcroot Shop.CartSnapshot
+heap of pid 4321 (Shop), session s-7f3k · dump /home/alex/.eyedbg/dumps/4321-20260925T150300Z-heap-1f3a9c0e.dmp (.NET 10.0.12, workstation GC)
+1,204,332 objects, 412.6 MiB: gen0 18.2 MiB, gen1 6.1 MiB, gen2 371.9 MiB, LOH 16.4 MiB, POH 8.0 KiB, frozen 7.7 KiB
+top 3 of 2,118 types by size:
+      BYTES    COUNT  TYPE
+  301.4 MiB  820,114  Shop.CartSnapshot
+   48.2 MiB  211,902  System.String
+   22.0 MiB       13  Shop.CartSnapshot[]
+…2,115 more types (--top N, --type PATTERN)
+why alive: Shop.CartSnapshot (820,114 objects): 2 paths, more may exist (--paths N):
+  static Shop.CartCache.History → System.Collections.Generic.List&lt;Shop.CartSnapshot&gt; 0x7f3a1c809c18 → Shop.CartSnapshot[] 0x7f3a2e84a008 → Shop.CartSnapshot 0x7f3a2e864988
+  stack thread 1 Shop.Program.Main() → …2 more… → Shop.CartSnapshot 0x7f3a2e8649b8</code></pre></div>
+        </div>
+        <div class="panel" role="tabpanel" id="d-threads" aria-labelledby="q-threads" hidden>
+          <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg dotnet threads
+threads of pid 4321 (Shop), session s-7f3k · dump /home/alex/.eyedbg/dumps/4321-20260925T150412Z-heap-8c21d7aa.dmp (.NET 10.0.12, workstation GC)
+14 threads
+locks:
+  System.Object 0x7f3a2e86eb78 held by thread 9, 3 waiting
+thread 9 (holds a lock):
+  System.Threading.Monitor.Enter(System.Object) +0x18
+  Shop.Inventory.Reserve(Shop.Order) +0x5c (Inventory.cs:58)
+  Shop.Orders.Checkout(Shop.Order) +0x21 (Orders.cs:37)
+  …4 more frames (--frames N)
+threads 11, 12, 13 (3 threads, background, threadpool):
+  System.Threading.Monitor.Enter(System.Object) +0x18
+  Shop.Inventory.Release(Shop.Order) +0x2a (Inventory.cs:74)
+  …3 more frames (--frames N)</code></pre></div>
+        </div>
+        <div class="note">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
+          <span>Dumps and traces hold your program's memory and names. eyedbg keeps them in a private directory, prunes its own after 7 days (10 at most), never overwrites a file, prints names, counts and sizes — never values — and only inspects processes of your own user.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ languages ============ -->
+<section id="languages">
+  <div class="wrap">
+    <div class="sec-head center" data-reveal>
+      <span class="eyebrow">Languages</span>
+      <h2>Six languages, <span class="grad">one interface</span></h2>
+      <p class="lede">The same commands, the same output and the same rules for every language. Adding one takes a JSON adapter manifest, not a new driver.</p>
+    </div>
+    <div class="langs" data-stagger>
+      <article class="card glow" data-reveal>
+        <div class="lang-top"><span class="badge" style="--c:#6d28d9">.NET</span><div><h3>.NET</h3><small>netcoredbg · SharpDbg (opt-in)</small></div></div>
+        <p>Builds your project and debugs it, attaches to a running process or a test run. SharpDbg adds lambdas and LINQ in eval. Never vsdbg.</p>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters install netcoredbg
+eyedbg start dotnet --project src/Shop --bp Orders.cs:18
+eyedbg test dotnet Adds --bp 'CalculatorTests.cs@"Assert.Equal"'</code></pre></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="lang-top"><span class="badge" style="--c:#2563eb">Py</span><div><h3>Python</h3><small>debugpy</small></div></div>
+        <p>Runs a script or a module like <code>python -m</code>. Finds your interpreter: <code>--opt python=PATH</code>, your active virtualenv, the project's <code>.venv</code>, then PATH.</p>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters install python
+eyedbg start python --program app.py --bp app.py:7
+eyedbg start python --opt module=pytest -- -x tests/test_orders.py</code></pre></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="lang-top"><span class="badge" style="--c:#0891b2">Go</span><div><h3>Go</h3><small>Delve</small></div></div>
+        <p>Debugs a package, a built binary (<code>--opt mode=exec</code>) or a package's tests, over a private Unix socket. Function breakpoints are package-qualified.</p>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters install delve
+eyedbg start go --program ./cmd/shop --bp main.go:20
+eyedbg start go --program ./internal/orders --opt mode=test</code></pre></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="lang-top"><span class="badge" style="--c:#4f46e5">C</span><div><h3>C and C++</h3><small>LLVM lldb-dap</small></div></div>
+        <p>Uses the <code>lldb-dap</code> on your PATH, or the one <code>EYEDBG_LLDB_DAP</code> names. In C++, <code>--exceptions all</code> stops at every throw.</p>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg start c --program ./build/app --bp main.c:20
+eyedbg start cpp --program ./build/app --exceptions all</code></pre></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="lang-top"><span class="badge" style="--c:#be123c">Rs</span><div><h3>Rust</h3><small>LLVM lldb-dap</small></div></div>
+        <p>Debugs your debug build with lldb-dap. Import Rust's LLDB formatters in <code>~/.lldbinit</code> to read <code>String</code>, <code>Vec</code> and <code>HashMap</code> values.</p>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>cargo build
+eyedbg start rust --program ./target/debug/shop --bp src/main.rs:20</code></pre></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="lang-top"><span class="badge" style="--c:#047857">{ }</span><div><h3>Your own</h3><small>an adapter manifest</small></div></div>
+        <p>A JSON manifest says how to download, find and launch a DAP adapter and how to fill its launch request. Yours live in <code>~/.eyedbg/adapters</code>, trusted like your shell config — never read from a project.</p>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters ls        # bundled and your own
+eyedbg adapters doctor    # checks each one it knows</code></pre></div>
+      </article>
+    </div>
+    <div class="platforms" data-reveal><span>Linux x64</span><span>Linux arm64</span><span>macOS arm64</span><span>macOS x64</span><span>Windows x64</span><span>Windows arm64</span></div>
+  </div>
+</section>
+
+<div class="wrap"><div class="sep"></div></div>
+
+<!-- ============ built for agents ============ -->
+<section id="agents">
+  <div class="wrap">
+    <div class="sec-head" data-reveal>
+      <span class="eyebrow">Built for agents</span>
+      <h2>The help is the interface</h2>
+      <p class="lede">No schema to register and no server to run. An agent learns eyedbg the way it learns any command-line tool — by reading its help — and every page of that help is written, tested and kept in sync for exactly that reader.</p>
+    </div>
+    <div class="agents" data-stagger>
+      <article class="card glow" data-reveal>
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></div>
+        <h3>Every command documents itself</h3>
+        <p>What it does, when to use it, how long it blocks, its effect on the program, its output and its exit codes, with real examples. <code>eyedbg help --all</code> prints the whole tree in one read; <code>--json</code> returns it as data.</p>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg help --all           # every command, one read
+eyedbg help run-until       # one command
+eyedbg help --all --json    # the same, as data</code></pre></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></svg></div>
+        <h3>A skill in one command</h3>
+        <p><code>eyedbg skill install</code> writes SKILL.md — when to reach for the debugger, the standard loop, budgets, sharing etiquette and "always stop" — into Claude Code's skills folder. <code>--dir</code> targets another agent's.</p>
+        <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg skill install
+installed /home/alex/.claude/skills/eyedbg/SKILL.md
+restart your agent (or start a new session) to load it</code></pre></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg></div>
+        <h3>Errors that say what to do next</h3>
+        <p>Every error has a stable code and a hint, so the agent recovers instead of guessing. Here, a human holds control, and the hint says how to ask for it.</p>
+        <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg continue
+eyedbg: the lease of session s-7f3k is held by human:alex (policy human-priority) [LEASE_HELD]
+hint: ask human:alex to run 'eyedbg lease grant agent'; 'eyedbg events --wait --kind lease' waits for a change</code></pre></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M6 3v18M18 3v6a6 6 0 0 1-6 6H6"/></svg></div>
+        <h3>Exit codes to branch on</h3>
+        <p>Scripts and agents can tell a usage mistake from a busy session or a missing adapter without parsing text.</p>
+        <table class="exit">
+          <thead><tr><th>Exit</th><th>Means</th></tr></thead>
+          <tbody>
+            <tr><td>0</td><td>Success — including a wait that timed out (the output says so)</td></tr>
+            <tr><td>1</td><td>Usage: a bad request, <code>SIDE_EFFECTS</code>, an anchor not found</td></tr>
+            <tr><td>2</td><td>State: no session, not stopped, <code>LEASE_HELD</code>, not the owner</td></tr>
+            <tr><td>3</td><td>Setup: adapter not installed, build or attach failed — run the hint</td></tr>
+            <tr><td>4</td><td>The adapter or side helper refused or can't do it</td></tr>
+          </tbody>
+        </table>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============ security ============ -->
+<section id="security">
+  <div class="wrap">
+    <div class="sec-head" data-reveal>
+      <span class="eyebrow">Security and privacy</span>
+      <h2>A debugger sees everything. <span class="grad">It stays on your machine.</span></h2>
+      <p class="lede">Debug sessions hold secrets: tokens in variables, customer data in memory. eyedbg is built to keep them yours.</p>
+    </div>
+    <div class="sec-grid" data-stagger>
+      <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><path d="M2 8.8a15 15 0 0 1 20 0"/><path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><path d="M12 19.5h.01"/><path d="M3 3l18 18"/></svg></div><h3>Local only, no telemetry</h3><p>The daemon listens on a Unix socket in a private directory — never TCP — and checks a fresh random token on every connection. eyedbg has no telemetry — it even turns off the .NET CLI's for the builds it runs — and goes online only to download adapters you install.</p></article>
+      <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M16 11l2 2 4-4"/></svg></div><h3>Your processes only</h3><p><code>attach</code> and <code>eyedbg dotnet</code> check that a process is yours before anything runs, and show it as <code>pid N (name)</code> — never by its command line.</p></article>
+      <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></div><h3>Read-only eval by default</h3><p>Expressions that would change the program need <code>--allow-side-effects</code>, which takes the control lease and is recorded — so a stray eval can't quietly change state someone else is looking at.</p></article>
+      <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5 9 5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></div><h3>Pinned, verified adapters</h3><p>Adapter downloads are https, size-capped and SHA-256-checked before extraction, through a staging directory that refuses escaping paths. Manifests are never read from a project.</p></article>
+      <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div><h3>Private dumps and traces</h3><p>Written under fresh random names in a directory only you can read, never overwritten, pruned after 7 days. Session recordings keep control events only — no output or values.</p></article>
+      <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg></div><h3>Never vsdbg</h3><p>Microsoft's .NET debugger is licensed for Microsoft's tools only. eyedbg never downloads, detects or runs it; .NET debugging uses the MIT-licensed netcoredbg and SharpDbg.</p></article>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><div class="sep"></div></div>
+
+<!-- ============ install ============ -->
+<section id="install">
+  <div class="wrap">
+    <div class="sec-head" data-reveal>
+      <span class="eyebrow">Install</span>
+      <h2>Up and running <span class="grad">in four steps</span></h2>
+      <p class="lede">Once per machine. After that, your agent starts sessions on its own and you join them when you like.</p>
+    </div>
+    <div class="install">
+      <div class="card inst" data-reveal>
+        <div><h3>Get eyedbg</h3><p>Download the archive for your platform from <a class="text-link" href="https://github.com/EyeDebugger/eyedebugger/releases/latest">the latest release</a>: <code>eyedbg</code>, <code>eyedbgd</code> and the .NET side helper. Keep them together on your PATH, and check the archive was built by the project's release workflow. With Go 1.26 or later, <code>go install</code> works too (without the .NET helper).</p></div>
+        <div>
+          <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Verify a download</span></div><pre><code>gh attestation verify eyedebugger_X.Y.Z_linux_amd64.tar.gz -R EyeDebugger/eyedebugger</code></pre></div>
+          <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Or with Go</span></div><pre><code>go install github.com/eyedebugger/eyedebugger/cmd/eyedbg@latest github.com/eyedebugger/eyedebugger/cmd/eyedbgd@latest</code></pre></div>
+        </div>
+      </div>
+      <div class="card inst" data-reveal>
+        <div><h3>Install a debug adapter</h3><p>Pinned and checksum-verified. Name an adapter or a language; C, C++ and Rust use the <code>lldb-dap</code> on your PATH. <code>doctor</code> checks what you have.</p></div>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters install netcoredbg   # or: python, delve, sharpdbg
+eyedbg adapters doctor</code></pre></div>
+      </div>
+      <div class="card inst" data-reveal>
+        <div><h3>Teach your agent</h3><p>Installs the skill for Claude Code. For another agent, use <code>--dir</code> with its skills folder, or point it at <code>eyedbg help --all</code>.</p></div>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg skill install</code></pre></div>
+      </div>
+      <div class="card inst" data-reveal>
+        <div><h3>Join from VS Code</h3><p>Install the EyeDebugger extension — from the VSIX attached to each release, or from the VS Code Marketplace and Open VSX. It finds <code>eyedbg</code> on your PATH, or set <code>eyedbg.path</code>.</p></div>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>code --install-extension eyedebugger_X.Y.Z_vscode.vsix</code></pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section id="faq">
+  <div class="wrap">
+    <div class="sec-head center" data-reveal>
+      <span class="eyebrow">FAQ</span>
+      <h2>Questions, answered</h2>
+    </div>
+    <div class="faq" data-stagger>
+      <details data-reveal><summary>Is eyedbg an MCP server?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>No. The CLI is the interface: any agent that can run a shell command can use it, and <code>eyedbg help --all</code> teaches it the whole tool in one read. There's nothing to register and nothing to keep running — the daemon starts by itself.</p></div></div></details>
+      <details data-reveal><summary>Which agents does it work with?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>Any agent with a shell: Claude Code, Codex and others. <code>eyedbg skill install</code> installs SKILL.md for Claude Code; for other agents, install it with <code>--dir</code>, print it with <code>eyedbg skill print</code>, or let the agent read <code>eyedbg help --all</code>.</p></div></div></details>
+      <details data-reveal><summary>Can an agent and I really drive the same session?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>Yes. The daemon owns the session; the agent's CLI and your editor are both clients of it. One control lease decides who may run, step or pause; everyone else can read state, set their own breakpoints and ask for control. Breakpoints on the same line are merged and keep their owners.</p></div></div></details>
+      <details data-reveal><summary>Will the agent take control away from me?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>Under the default <code>free</code> policy, whoever acts takes control. Switch to <code>human-priority</code> — VS Code offers it when you take over — and agents have to ask: a human can always take control from an agent, never the other way round. The agent skill tells agents never to force the lease over a human.</p></div></div></details>
+      <details data-reveal><summary>Why not Microsoft's vsdbg for .NET?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>Its license restricts it to Microsoft's own tools. eyedbg uses netcoredbg (Samsung, MIT) by default and the opt-in SharpDbg (MIT), and never downloads, detects or launches vsdbg. The result is a free VS Code .NET debugging experience without the license question.</p></div></div></details>
+      <details data-reveal><summary>Is eval safe to run on my program?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>It's read-only by intent: expressions that visibly change the program — method calls, assignments, <code>new</code>, <code>++</code> — are refused unless you pass <code>--allow-side-effects</code>. The check is best-effort: property getters still run code, as they would in any debugger.</p></div></div></details>
+      <details data-reveal><summary>Does anything leave my machine?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>No. The daemon has no network listener and eyedbg has no telemetry. The only downloads are the adapters you ask for, pinned and checksum-verified.</p></div></div></details>
+      <details data-reveal><summary>What does it run on?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>Linux, macOS and Windows, on x64 and arm64. On Intel Macs and Windows on Arm, .NET debugging uses SharpDbg, since netcoredbg has no build there.</p></div></div></details>
+      <details data-reveal><summary>What does it cost?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>Nothing. EyeDebugger is open source under the Apache-2.0 license, and contributions are welcome.</p></div></div></details>
+    </div>
+  </div>
+</section>
+
+<!-- ============ final call to action ============ -->
+<section class="cta-sec" id="start" style="padding-top:0">
+  <div class="wrap">
+    <div class="final" data-reveal="scale">
+      <span class="eyebrow">Get started</span>
+      <h2>Stop guessing. <span class="grad">Start looking.</span></h2>
+      <p class="lede">Install eyedbg, give your agent the skill, and debug the next hard bug together.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#install">Install eyedbg <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        <a class="btn btn-ghost" href="https://github.com/EyeDebugger/eyedebugger">Star on GitHub</a>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <div>
+        <a class="brand" href="#top" aria-label="EyeDebugger, back to top">
+          <svg viewBox="0 0 40 40" aria-hidden="true" data-eye="2">
+            <g class="lid late">
+              <use href="#eye"/>
+              <g clip-path="url(#eye-clip)"><g class="iris"><circle cx="20" cy="20" r="6.6" fill="url(#eye-grad)"/><circle class="pupil" cx="20" cy="20" r="2.7"/><circle cx="22.1" cy="17.9" r="1.1" fill="#fff" opacity=".85"/></g></g>
+            </g>
+          </svg>
+          EyeDebugger
+        </a>
+        <p>The debugger your AI agent drives — in a live session you can join.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="#how">How it works</a></li>
+          <li><a href="#features">Features</a></li>
+          <li><a href="#co">Co-debugging</a></li>
+          <li><a href="#dotnet">.NET diagnostics</a></li>
+          <li><a href="#languages">Languages</a></li>
+          <li><a href="#install">Install</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul>
+          <li><a href="https://github.com/EyeDebugger/eyedebugger/blob/main/docs/DESIGN.md">Design</a></li>
+          <li><a href="https://github.com/EyeDebugger/eyedebugger/tree/main/docs/adr">Decision records</a></li>
+          <li><a href="https://github.com/EyeDebugger/eyedebugger/blob/main/skill/eyedbg/SKILL.md">Agent skill</a></li>
+          <li><a href="https://github.com/EyeDebugger/eyedebugger/blob/main/extensions/vscode/README.md">VS Code extension</a></li>
+          <li><a href="https://github.com/EyeDebugger/eyedebugger/blob/main/docs/adapter-manifests.md">Adapter manifests</a></li>
+          <li><a href="https://github.com/EyeDebugger/eyedebugger/blob/main/CHANGELOG.md">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Project</h4>
+        <ul>
+          <li><a href="https://github.com/EyeDebugger/eyedebugger">GitHub</a></li>
+          <li><a href="https://github.com/EyeDebugger/eyedebugger/releases">Releases</a></li>
+          <li><a href="https://github.com/EyeDebugger/eyedebugger/blob/main/CONTRIBUTING.md">Contributing</a></li>
+          <li><a href="https://github.com/EyeDebugger/eyedebugger/blob/main/SECURITY.md">Security</a></li>
+          <li><a href="https://github.com/EyeDebugger/eyedebugger/blob/main/CODE_OF_CONDUCT.md">Code of conduct</a></li>
+          <li><a href="https://github.com/EyeDebugger/eyedebugger/blob/main/LICENSE">License</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="legal"><span>© The EyeDebugger Authors · Apache-2.0</span><span>eyedbg.izzat.dev</span></div>
+  </div>
+</footer>
+
+<dialog class="lightbox" id="lightbox" aria-label="Screenshot">
+  <button class="icon-btn" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+</dialog>
+
+<script>
+(() => {
+  "use strict";
+  const doc = document, root = doc.documentElement;
+  const $ = (s, el = doc) => el.querySelector(s);
+  const $$ = (s, el = doc) => Array.from(el.querySelectorAll(s));
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const fine = matchMedia("(hover: hover) and (pointer: fine)").matches;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  // One broken feature must not take the rest down.
+  const safe = (name, fn) => { try { fn(); } catch (e) { console.error("[eyedbg site] " + name + ":", e); } };
+
+  // ---------- syntax highlighting ----------
+  const esc = s => s.replace(/[&<>]/g, c => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"));
+  const tok = (cls, s) => '<span class="' + cls + '">' + esc(s) + "</span>";
+  const SUB2 = /^(add|ls|rm|exceptions|install|doctor|print|status|stop|logs|take|release|grant|request|policy|ps|counters|dump|heap|threads|trace)$/;
+
+  function hlShell(line) {
+    const re = /(\s+)|('[^']*'?|"(?:[^"\\]|\\.)*"?)|(#.*$)|(--?[A-Za-z][\w-]*)(=?)|([^\s'"#][^\s'"]*)/gy;
+    let out = "", m, word = 0, first = "", pos = 0;
+    while (pos < line.length) {
+      re.lastIndex = pos;
+      if (!(m = re.exec(line))) break;
+      pos = re.lastIndex;
+      if (m[1]) out += m[1];
+      else if (m[2]) out += tok("t-s", m[2]);
+      else if (m[3]) out += tok("t-c", m[3]);
+      else if (m[4]) { out += tok("t-f", m[4]) + (m[5] ? tok("t-p", m[5]) : ""); word++; }
+      else {
+        const w = m[6];
+        if (word === 0) { first = w; out += tok("t-x", w); }
+        else if (first === "eyedbg" && ((word === 1 && /^[a-z][a-z-]*$/.test(w)) || (word === 2 && SUB2.test(w)))) out += tok("t-sub", w);
+        else out += esc(w);
+        word++;
+      }
+    }
+    return out + esc(line.slice(pos));
+  }
+
+  function hlJSON(src) {
+    const re = /("(?:[^"\\]|\\.)*")(\s*:)?|\b(true|false|null)\b|(-?\b\d+(?:\.\d+)?\b)|([{}[\],])/g;
+    let out = "", last = 0, m;
+    while ((m = re.exec(src))) {
+      out += esc(src.slice(last, m.index));
+      if (m[1]) out += m[2] ? tok("t-k", m[1]) + tok("t-p", m[2]) : tok("t-s", m[1]);
+      else if (m[3]) out += tok("t-w", m[3]);
+      else if (m[4]) out += tok("t-n", m[4]);
+      else out += tok("t-p", m[5]);
+      last = re.lastIndex;
+    }
+    return out + esc(src.slice(last));
+  }
+
+  function hlLua(src) {
+    const re = /(--[^\n]*)|('[^'\n]*'|"[^"\n]*")|\b(local|function|end|return|require|nil|true|false)\b|([{}()=,])/g;
+    let out = "", last = 0, m;
+    while ((m = re.exec(src))) {
+      out += esc(src.slice(last, m.index));
+      out += m[1] ? tok("t-c", m[1]) : m[2] ? tok("t-s", m[2]) : m[3] ? tok("t-w", m[3]) : tok("t-p", m[4]);
+      last = re.lastIndex;
+    }
+    return out + esc(src.slice(last));
+  }
+
+  // Client names, quotes, codes and addresses inside program output (screens are always dark).
+  function rich(s) {
+    const re = /(human:[\w-]+)|\b(agent(?::[\w-]+)?)\b|("[^"]*"|'[^']*')|(\[[A-Z_]+\])|(0x[0-9a-f]+|→)/g;
+    let out = "", last = 0, m;
+    while ((m = re.exec(s))) {
+      out += esc(s.slice(last, m.index));
+      out += m[1] ? tok("t-hu", m[1]) : m[2] ? tok("t-x", m[2]) : m[3] ? tok("t-s", m[3]) : m[4] ? tok("t-e", m[4]) : tok("t-d", m[5]);
+      last = re.lastIndex;
+    }
+    return out + esc(s.slice(last));
+  }
+  // The same names on the themed page itself.
+  const who = s => esc(s).replace(/human:[\w-]+/g, '<span class="who-h">$&</span>').replace(/\bagent\b/g, '<span class="who-a">$&</span>');
+
+  // One line of eyedbg output, in the shapes the CLI prints.
+  function hlOut(l) {
+    let m;
+    if (l.startsWith("$ ")) return tok("t-pr", "$ ") + hlShell(l.slice(2));
+    if ((m = /^session (s-\w+)( \([^)]*\))? (stopped: [^,]+|exited[^:]*|ended|detached)(.*)$/.exec(l)))
+      return tok("t-d", "session ") + tok("t-x", m[1]) + tok("t-d", m[2] || "") + " " + tok("t-h", m[3]) + tok("t-d", m[4]);
+    if ((m = /^session (s-\w+)(:.*)$/.exec(l))) return tok("t-d", "session ") + tok("t-x", m[1]) + rich(m[2]);
+    if ((m = /^(\s*)> (\s*\d+ \|)(.*)$/.exec(l))) return '<span class="t-cur">' + esc(m[1]) + tok("t-x", "> ") + tok("t-d", m[2]) + esc(m[3]) + "</span>";
+    if ((m = /^(\s+)(\d+ \|)(.*)$/.exec(l))) return esc(m[1]) + tok("t-d", m[2]) + esc(m[3]);
+    if ((m = /^(\s*)at (\S+) (\S+:\d+)$/.exec(l))) return esc(m[1]) + tok("t-d", "at ") + tok("t-y", m[2]) + " " + tok("t-k", m[3]);
+    if ((m = /^eyedbg: (.*) (\[[A-Z_]+\])$/.exec(l))) return tok("t-e", "eyedbg: ") + rich(m[1]) + " " + tok("t-e", m[2]);
+    if ((m = /^hint: (.*)$/.exec(l))) return tok("t-o", "hint: ") + rich(m[1]);
+    if ((m = /^next: (.*)$/.exec(l))) return tok("t-d", "next: ") + hlShell(m[1]);
+    if ((m = /^installed (.*)$/.exec(l))) return tok("t-o", "installed ") + esc(m[1]);
+    if ((m = /^(\s+)(lease:|requested by)(.*)$/.exec(l))) return esc(m[1]) + tok("t-d", m[2]) + rich(m[3]);
+    if ((m = /^(\s+)([\w$.[\]]+): (.+?) = (.*?)(\s{2}\((?:was [^)]*|new)\))?$/.exec(l)))
+      return esc(m[1]) + tok("t-k", m[2]) + tok("t-d", ": ") + tok("t-y", m[3]) + tok("t-d", " = ") + esc(m[4]) + (m[5] ? tok("t-hu", m[5]) : "");
+    if ((m = /^(-?[\d.,]+|true|false)(\s{2}\([\w.]+\))$/.exec(l))) return tok("t-n", m[1]) + tok("t-d", m[2]);
+    if ((m = /^(\d+)(\s{2})(.*)$/.exec(l))) return tok("t-d", m[1]) + m[2] + rich(m[3]);
+    if ((m = /^(\+[\d.]+s)(.*)$/.exec(l))) return tok("t-d", m[1]) + m[2].replace(/(\S+?)=(\S+)/g, (_, k, v) => tok("t-k", k) + tok("t-d", "=") + tok("t-n", v));
+    if ((m = /^(cpu trace|gc trace|heap|threads|dump) of (.*)$/.exec(l))) return tok("t-h", m[1] + " of ") + rich(m[2]);
+    if (/^\s*(…|private to you|restart your)/.test(l) || /^[/~]/.test(l) || /^\s+(SAMPLES|BYTES)\b/.test(l)) return tok("t-d", l);
+    if ((m = /^(\s+)([\d.,]+(?: [KMG]?i?B)?)(\s+)([\d.,]+%?)(\s{2})(.*?)(\s{2}\[[^\]]+\])?$/.exec(l)))
+      return esc(m[1]) + tok("t-n", m[2]) + m[3] + tok("t-n", m[4]) + m[5] + esc(m[6]) + (m[7] ? tok("t-d", m[7]) : "");
+    if ((m = /^(\s+)(\S.*?)( \+0x[0-9a-f]+)( \([^)]*\))?$/.exec(l))) return esc(m[1]) + tok("t-y", m[2]) + tok("t-d", m[3]) + (m[4] ? tok("t-k", m[4]) : "");
+    if (/:$/.test(l)) return tok("t-k", l);
+    return rich(l);
+  }
+
+  // ---------- code blocks: highlight and copy ----------
+  const ICONS = '<svg class="i-copy" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>' +
+    '<svg class="i-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg><span>Copy</span>';
+
+  function fallbackCopy(text) {
+    const ta = doc.createElement("textarea");
+    ta.value = text; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+    doc.body.append(ta); ta.select();
+    let ok = false;
+    try { ok = doc.execCommand("copy"); } catch (e) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+
+  function initCode() {
+    for (const block of $$(".code")) {
+      const code = $("pre code", block);
+      if (!code) continue;
+      const lang = block.dataset.lang, raw = code.textContent;
+      const lines = lang === "term" ? raw.split("\n").map(hlOut)
+        : lang === "sh" ? raw.split("\n").map(hlShell)
+        : (lang === "json" ? hlJSON(raw) : lang === "lua" ? hlLua(raw) : esc(raw)).split("\n"); // no token spans a line
+      code.innerHTML = lines.map(l => '<span class="cl">' + l + "</span>").join("");
+      code.dataset.raw = raw;
+      // A terminal copies its commands only, without the prompt or the output.
+      const text = lang === "term" ? raw.split("\n").filter(l => l.startsWith("$ ")).map(l => l.slice(2)).join("\n") : raw;
+      let btn = $(".copy", block);
+      if (!btn) {
+        btn = doc.createElement("button");
+        btn.type = "button"; btn.className = "copy";
+        $(".code-bar", block).append(btn);
+      }
+      btn.innerHTML = ICONS;
+      btn.title = lang === "term" ? "Copy the command" : "Copy to clipboard";
+      btn.addEventListener("click", async () => {
+        let ok = true;
+        try { await navigator.clipboard.writeText(text); } catch (e) { ok = fallbackCopy(text); }
+        const label = $("span", btn);
+        label.textContent = ok ? "Copied" : "Select and copy";
+        btn.classList.toggle("done", ok);
+        clearTimeout(btn._t);
+        btn._t = setTimeout(() => { btn.classList.remove("done"); label.textContent = "Copy"; }, 1800);
+      });
+    }
+  }
+
+  // ---------- reveal on scroll ----------
+  function initReveal() {
+    const els = $$("[data-reveal]");
+    if (!("IntersectionObserver" in window)) { els.forEach(e => e.classList.add("in")); return; }
+    for (const group of $$("[data-stagger]")) Array.from(group.children).forEach((c, i) => c.style.setProperty("--d", (i % 6) * 90 + "ms"));
+    const io = new IntersectionObserver(entries => {
+      for (const e of entries) if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+    }, { rootMargin: "0px 0px -6% 0px", threshold: 0.08 });
+    els.forEach(e => io.observe(e));
+  }
+
+  // ---------- theme: the system's until you choose; choosing the system's again follows it again ----------
+  function initTheme() {
+    const KEY = "eyedbg-theme", btn = $("#theme-toggle"), sys = matchMedia("(prefers-color-scheme: light)");
+    const metas = $$('meta[name="theme-color"]');
+    const stored = () => { try { return localStorage.getItem(KEY); } catch (e) { return null; } };
+    const store = v => { try { v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY); } catch (e) { /* private mode */ } };
+    const apply = t => {
+      root.setAttribute("data-theme", t);
+      metas.forEach(m => m.setAttribute("content", t === "light" ? "#f5f7fb" : "#05070d"));
+      btn.setAttribute("aria-label", t === "light" ? "Switch to dark theme" : "Switch to light theme");
+      btn.title = btn.getAttribute("aria-label");
+    };
+    apply(root.getAttribute("data-theme"));
+    btn.addEventListener("click", () => {
+      const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      store(next === (sys.matches ? "light" : "dark") ? null : next);
+      if (!doc.startViewTransition || reduce) { apply(next); return; }
+      const r = btn.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+      const end = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+      root.classList.add("vt");
+      const vt = doc.startViewTransition(() => apply(next));
+      vt.ready.then(() => root.animate(
+        { clipPath: ["circle(0px at " + x + "px " + y + "px)", "circle(" + end + "px at " + x + "px " + y + "px)"] },
+        { duration: 700, easing: "cubic-bezier(.22,.8,.24,1)", pseudoElement: "::view-transition-new(root)" }
+      )).catch(() => {});
+      vt.finished.finally(() => root.classList.remove("vt"));
+    });
+    sys.addEventListener("change", () => { if (!stored()) apply(sys.matches ? "light" : "dark"); });
+  }
+
+  // ---------- navigation: glass on scroll, progress, mobile menu, current section ----------
+  function initNav() {
+    const nav = $(".nav"), bar = $(".progress"), btn = $("#menu-btn"), links = $("#nav-links");
+    let raf = 0;
+    const onScroll = () => {
+      raf = 0;
+      nav.classList.toggle("scrolled", scrollY > 8);
+      const max = root.scrollHeight - innerHeight;
+      bar.style.transform = "scaleX(" + (max > 0 ? clamp(scrollY / max, 0, 1) : 0).toFixed(4) + ")";
+    };
+    addEventListener("scroll", () => { if (!raf) raf = requestAnimationFrame(onScroll); }, { passive: true });
+    onScroll();
+    const setOpen = open => { btn.setAttribute("aria-expanded", String(open)); nav.classList.toggle("open", open); };
+    btn.addEventListener("click", () => setOpen(btn.getAttribute("aria-expanded") !== "true"));
+    links.addEventListener("click", e => { if (e.target.closest("a")) setOpen(false); });
+    doc.addEventListener("keydown", e => { if (e.key === "Escape" && nav.classList.contains("open")) { setOpen(false); btn.focus(); } });
+    const byId = new Map($$("a", links).map(a => [a.getAttribute("href").slice(1), a]));
+    const spy = new IntersectionObserver(entries => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        byId.forEach(a => a.classList.remove("active"));
+        const a = byId.get(e.target.id);
+        if (a) a.classList.add("active");
+      }
+    }, { rootMargin: "-45% 0px -50% 0px" });
+    $$("main section[id]").forEach(s => spy.observe(s));
+  }
+
+  // ---------- pointer: the background glow and the eyes follow it; cards light up under it ----------
+  function initPointer() {
+    if (!fine || reduce) return;
+    const spot = $(".bg-spot"), eyes = $$("[data-eye]");
+    let x = innerWidth / 2, y = innerHeight / 3, raf = 0;
+    const frame = () => {
+      raf = 0;
+      spot.style.transform = "translate3d(" + x + "px," + y + "px,0)";
+      for (const svg of eyes) {
+        const r = svg.getBoundingClientRect();
+        if (!r.width || r.bottom < 0 || r.top > innerHeight) continue;
+        const dx = x - (r.left + r.width / 2), dy = y - (r.top + r.height / 2), d = Math.hypot(dx, dy) || 1;
+        const k = +svg.dataset.eye * Math.min(1, d / 260);
+        $(".iris", svg).style.transform = "translate(" + (dx / d * k).toFixed(2) + "px," + (dy / d * k * 0.6).toFixed(2) + "px)";
+      }
+    };
+    addEventListener("pointermove", e => {
+      x = e.clientX; y = e.clientY;
+      root.classList.add("has-pointer");
+      if (!raf) raf = requestAnimationFrame(frame);
+      const card = e.target.closest && e.target.closest(".glow");
+      if (card) {
+        const r = card.getBoundingClientRect();
+        card.style.setProperty("--mx", e.clientX - r.left + "px");
+        card.style.setProperty("--my", e.clientY - r.top + "px");
+      }
+    }, { passive: true });
+    doc.documentElement.addEventListener("pointerleave", () => root.classList.remove("has-pointer"));
+  }
+
+  // ---------- tabs (horizontal with a sliding indicator, or vertical) ----------
+  function initTabs() {
+    for (const list of $$('[role="tablist"]')) {
+      const tabs = $$('[role="tab"]', list), ind = $(".tab-ind", list);
+      const place = () => {
+        const t = tabs.find(t => t.getAttribute("aria-selected") === "true");
+        if (!ind || !t) return;
+        ind.style.width = t.offsetWidth + "px";
+        ind.style.transform = "translateX(" + t.offsetLeft + "px)";
+      };
+      const select = (tab, focus) => {
+        for (const t of tabs) {
+          const on = t === tab, panel = doc.getElementById(t.getAttribute("aria-controls"));
+          t.setAttribute("aria-selected", String(on));
+          t.tabIndex = on ? 0 : -1;
+          if (panel) panel.hidden = !on;
+        }
+        if (focus) tab.focus();
+        place();
+      };
+      tabs.forEach((t, i) => {
+        t.addEventListener("click", () => select(t));
+        t.addEventListener("keydown", e => {
+          const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+          const j = step ? (i + step + tabs.length) % tabs.length : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : -1;
+          if (j < 0) return;
+          e.preventDefault();
+          select(tabs[j], true);
+        });
+      });
+      if (ind) { new ResizeObserver(place).observe(list); place(); }
+    }
+  }
+
+  // ---------- the architecture diagram's wires, drawn between the real boxes ----------
+  function initArch() {
+    const arch = $("#arch");
+    if (!arch) return;
+    const svg = $(".wires", arch);
+    const links = [["agent", "daemon", "a"], ["human", "daemon", "h"], ["dap", "daemon", "h"],
+      ["daemon", "net"], ["daemon", "py"], ["daemon", "go"], ["daemon", "lldb"],
+      ["net", "prog"], ["py", "prog"], ["go", "prog"], ["lldb", "prog"]];
+    const tags = [[0, "JSON-RPC", 0.5], [2, "DAP", 0.5], [4, "DAP", 0.55]];
+    const tagEls = tags.map(([, text]) => { const t = doc.createElement("span"); t.className = "wire-tag"; t.textContent = text; arch.append(t); return t; });
+    const node = n => $('[data-node="' + n + '"]', arch);
+    const draw = () => {
+      const b = svg.getBoundingClientRect(), a0 = arch.getBoundingClientRect();
+      const vertical = getComputedStyle(arch).gridTemplateColumns.trim().split(/\s+/).length < 2;
+      arch.classList.toggle("vertical", vertical); // stacked: the wires pass behind nodes, so no labels
+      let html = "";
+      links.forEach(([from, to, kind], i) => {
+        const ra = node(from).getBoundingClientRect(), rz = node(to).getBoundingClientRect();
+        let d;
+        if (vertical) {
+          const x1 = ra.left + ra.width / 2 - b.left, y1 = ra.bottom - b.top, x2 = rz.left + rz.width / 2 - b.left, y2 = rz.top - b.top, k = (y2 - y1) / 2;
+          d = "M" + x1 + " " + y1 + "C" + x1 + " " + (y1 + k) + " " + x2 + " " + (y2 - k) + " " + x2 + " " + y2;
+        } else {
+          const x1 = ra.right - b.left, y1 = ra.top + ra.height / 2 - b.top, x2 = rz.left - b.left, y2 = rz.top + rz.height / 2 - b.top, k = (x2 - x1) / 2;
+          d = "M" + x1 + " " + y1 + "C" + (x1 + k) + " " + y1 + " " + (x2 - k) + " " + y2 + " " + x2 + " " + y2;
+        }
+        const hu = kind === "h" ? " hu" : "";
+        html += '<path id="wire-' + i + '" class="w" d="' + d + '"/><path class="f' + hu + '" d="' + d + '" style="animation-delay:' + (-i * 0.23).toFixed(2) + 's"/>';
+        if (!reduce) html += '<circle class="pk' + hu + '" r="3.2"><animateMotion dur="' + (2.2 + (i % 4) * 0.4).toFixed(1) + 's" begin="' + (-i * 0.45).toFixed(2) + 's" repeatCount="indefinite"><mpath href="#wire-' + i + '"/></animateMotion></circle>';
+      });
+      svg.innerHTML = html;
+      tags.forEach(([i, , at], n) => {
+        const p = $("#wire-" + i, svg), pt = p.getPointAtLength(p.getTotalLength() * at);
+        tagEls[n].style.left = pt.x + b.left - a0.left + "px";
+        tagEls[n].style.top = pt.y + b.top - a0.top + "px";
+      });
+    };
+    new ResizeObserver(() => requestAnimationFrame(draw)).observe(arch);
+    arch.addEventListener("animationend", e => { if (e.target === arch) draw(); }); // measured mid-reveal, boxes are scaled
+    if (doc.fonts) doc.fonts.ready.then(draw);
+  }
+
+  // ---------- the hero: an agent's terminal and your editor, one session ----------
+  function initStage() {
+    const stage = $("#stage");
+    if (!stage) return;
+    const term = $(".term-body", stage), ed = $(".ed", stage), hl = $(".ed-hl", ed), act = $(".ed-act", ed);
+    const sess = $(".ed-sess", ed), lease = $(".ed-lease", ed), leaseText = $(".ed-lease span", ed);
+    const toast = $(".ed-toast", ed), menu = $(".ed-menu", ed), input = $(".ed-input", ed), inputText = $(".ed-input div", ed), cursor = $(".ed-cursor", ed);
+    const buttons = $$(".stage-steps button", stage);
+    const line = n => $('.ed-line[data-l="' + n + '"]', ed);
+    const ABORT = new Error("abort");
+    let runId = 0, inView = false, waiters = [];
+    const live = () => inView && !doc.hidden;
+    const wake = () => { if (live()) waiters.splice(0).forEach(r => r()); };
+    const check = p => { if (p.id !== runId) throw ABORT; };
+    const wait = async (p, ms) => {
+      check(p);
+      if (p.fast) return;
+      await sleep(ms);
+      check(p);
+      while (!live()) { await new Promise(r => waiters.push(r)); check(p); }
+    };
+
+    // terminal
+    const scroll = () => { term.scrollTop = term.scrollHeight; };
+    const prompt = () => {
+      let ln = term.lastElementChild;
+      if (!ln || !ln.classList.contains("idle")) {
+        ln = doc.createElement("div");
+        ln.className = "ln idle";
+        ln.innerHTML = '<span class="t-pr">$ </span><span class="cmd"></span><span class="caret"></span>';
+        term.append(ln);
+      }
+      return ln;
+    };
+    const type = async (p, text) => {
+      const ln = prompt(), cmd = $(".cmd", ln);
+      ln.classList.remove("idle");
+      if (!p.fast) {
+        await wait(p, 380);
+        for (let i = 1; i <= text.length; i++) {
+          cmd.innerHTML = hlShell(text.slice(0, i));
+          await wait(p, text[i - 1] === " " ? 60 : 16 + Math.random() * 34);
+        }
+        await wait(p, 280);
+      }
+      cmd.innerHTML = hlShell(text);
+      const caret = $(".caret", ln);
+      if (caret) caret.remove();
+      scroll();
+    };
+    const out = async (p, lines) => {
+      for (const l of lines) {
+        const d = doc.createElement("div");
+        d.className = "ln";
+        d.innerHTML = hlOut(l);
+        term.append(d);
+        while (term.childElementCount > 80) term.firstElementChild.remove();
+        scroll();
+        await wait(p, 45);
+      }
+      prompt();
+      scroll();
+    };
+
+    // editor
+    const setHl = n => {
+      hl.style.setProperty("--row", n - 12);
+      hl.classList.add("on");
+      $$(".ed-line.cur", ed).forEach(l => l.classList.remove("cur"));
+      line(n).classList.add("cur");
+    };
+    const note = (n, on) => $(".ed-note", line(n)).classList.toggle("on", on);
+    const setLease = (text, you) => {
+      lease.hidden = false;
+      leaseText.textContent = text;
+      lease.classList.toggle("you", you);
+      lease.classList.remove("flash");
+      void lease.offsetWidth;
+      lease.classList.add("flash");
+    };
+    const activity = text => {
+      const li = doc.createElement("li");
+      li.innerHTML = rich(text) + "<i>" + new Date().toTimeString().slice(0, 8) + "</i>";
+      act.prepend(li);
+    };
+    const point = async (p, el, click = true) => {
+      const r = el.getBoundingClientRect(), b = ed.getBoundingClientRect();
+      cursor.classList.add("on");
+      cursor.style.transform = "translate(" + (r.left - b.left + r.width * 0.5) + "px," + (r.top - b.top + r.height * 0.55) + "px)";
+      await wait(p, 850);
+      if (click && !p.fast) {
+        cursor.classList.remove("click");
+        void cursor.getBoundingClientRect();
+        cursor.classList.add("click");
+        await wait(p, 280);
+      }
+    };
+    const typeInto = async (p, el, text) => {
+      for (let i = 1; i <= text.length; i++) {
+        if (p.fast) { el.textContent = text; break; }
+        el.textContent = text.slice(0, i);
+        await wait(p, 26 + Math.random() * 40);
+      }
+    };
+
+    const reset = () => {
+      term.innerHTML = "";
+      prompt();
+      ed.classList.remove("joined", "debugging");
+      hl.classList.remove("on");
+      $$(".ed-line", ed).forEach(l => l.classList.remove("bp", "cur"));
+      $$(".ed-note, .ed-toast, .ed-menu, .ed-input, .ed-cursor, .hot", ed).forEach(el => el.classList.remove("on", "hot"));
+      inputText.textContent = "";
+      act.innerHTML = "";
+      sess.textContent = "⎇ main";
+      lease.hidden = true;
+      cursor.style.transform = "translate(" + ed.clientWidth * 0.62 + "px," + ed.clientHeight * 0.42 + "px)";
+    };
+
+    const scenes = [
+      async p => { // the agent starts a session
+        await type(p, "eyedbg start dotnet --project src/Shop --bp 'Orders.cs@\"var total =\"'");
+        await wait(p, 900);
+        await out(p, [
+          "session s-7f3k (dotnet, netcoredbg) stopped: breakpoint, thread 4242",
+          "  at Shop.Orders.Total() Orders.cs:14",
+          "    13 | {",
+          "  > 14 |     var total = 0m;",
+          "    15 |     for (var i = 0; i < orders.Count; i++)",
+        ]);
+        await wait(p, 600);
+        toast.classList.add("on");
+        await wait(p, 1500);
+      },
+      async p => { // you join from VS Code
+        toast.classList.add("on");
+        await point(p, $('[data-t="join"]', toast));
+        toast.classList.remove("on");
+        ed.classList.add("joined", "debugging");
+        sess.textContent = "eyedbg: s-7f3k";
+        setLease("agent has control · free", false);
+        line(14).classList.add("bp");
+        note(14, true);
+        setHl(14);
+        await wait(p, 500);
+        await point(p, line(16), false);
+        await wait(p, 900);
+      },
+      async p => { // the agent runs to the bug
+        await type(p, "eyedbg run-until Orders.cs:18 --if 'i == 3'");
+        await wait(p, 800);
+        setHl(18);
+        note(18, true);
+        activity("agent continued → Orders.cs:18 (breakpoint)");
+        await out(p, [
+          "session s-7f3k (dotnet, netcoredbg) stopped: breakpoint, thread 4242",
+          "  lease: agent (free); clients: agent, human:alex (connected)",
+          "  at Shop.Orders.Total() Orders.cs:18",
+          "    17 |         var order = orders[i];",
+          "  > 18 |         total += order.Price * order.Quantity;",
+          "    19 |     }",
+          "  changed since the previous stop:",
+          "    i: int = 3  (was 0)",
+          "    total: decimal = 127.50  (was 0)",
+        ]);
+        await wait(p, 900);
+        await type(p, "eyedbg eval 'order.Quantity'");
+        await wait(p, 350);
+        await out(p, ["-2  (int)"]);
+        await wait(p, 1300);
+      },
+      async p => { // you ask for control
+        await point(p, lease);
+        menu.classList.add("on");
+        await wait(p, 450);
+        const request = $('[data-t="request"]', menu);
+        await point(p, request, false);
+        request.classList.add("hot");
+        await wait(p, 350);
+        menu.classList.remove("on");
+        request.classList.remove("hot");
+        input.classList.add("on");
+        await wait(p, 400);
+        await typeInto(p, inputText, "let me check the refund path");
+        await wait(p, 600);
+        input.classList.remove("on");
+        setLease("agent has control · free · 1 request", false);
+        await wait(p, 800);
+        await type(p, "eyedbg lease");
+        await out(p, [
+          "session s-7f3k: lease held by agent (policy free)",
+          '  requested by human:alex: "let me check the refund path"',
+        ]);
+        await wait(p, 1200);
+      },
+      async p => { // the agent hands it over
+        await type(p, "eyedbg lease grant human:alex");
+        await out(p, ["session s-7f3k: lease held by human:alex (connected, policy free)"]);
+        setLease("you have control · free", true);
+        activity("lease: agent gave it to human:alex");
+        await wait(p, 900);
+        const over = $('[data-t="over"]', ed);
+        await point(p, over);
+        over.classList.add("hot");
+        setHl(19);
+        note(18, false);
+        note(19, true);
+        await wait(p, 500);
+        over.classList.remove("hot");
+        await wait(p, 700);
+        await type(p, "eyedbg events --since 22");
+        await out(p, [
+          '23  lease: human:alex asks agent for it: "let me check the refund path"',
+          "24  lease: agent gave it to human:alex",
+          "25  human:alex: next (thread 4242)",
+          "26  stopped: step, thread 4242",
+          "next: eyedbg events --since 26",
+        ]);
+        await wait(p, 4200);
+      },
+    ];
+
+    const mark = i => buttons.forEach((b, j) => b.classList.toggle("on", i === j));
+    const run = async from => {
+      const id = ++runId, fast = { id, fast: true }, p = { id, fast: false };
+      try {
+        reset();
+        for (let i = 0; i < from; i++) await scenes[i](fast);
+        if (reduce) { await scenes[from](fast); mark(from); return; }
+        for (let i = from; ; i = (i + 1) % scenes.length) {
+          if (i === 0 && id === runId && term.childElementCount > 1) {
+            stage.classList.add("resetting");
+            await wait(p, 500);
+            reset();
+            stage.classList.remove("resetting");
+            await wait(p, 300);
+          }
+          mark(i);
+          await scenes[i](p);
+        }
+      } catch (e) {
+        if (e !== ABORT) throw e;
+      } finally {
+        if (id === runId) stage.classList.remove("resetting");
+      }
+    };
+    buttons.forEach((b, i) => b.addEventListener("click", () => { stage.classList.remove("resetting"); run(i); }));
+
+    let started = false;
+    new IntersectionObserver(([e]) => {
+      inView = e.isIntersecting;
+      wake();
+      if (inView && !started) { started = true; run(reduce ? scenes.length - 1 : 0); }
+    }, { threshold: 0.2 }).observe(stage);
+    doc.addEventListener("visibilitychange", wake);
+  }
+
+  // ---------- the loop's progress line fills as you read ----------
+  function initSteps() {
+    const steps = $("#loop .steps"), fill = steps && $(".fill", steps);
+    if (!fill) return;
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const r = steps.getBoundingClientRect();
+      fill.style.transform = "scaleY(" + clamp((innerHeight * 0.62 - r.top) / r.height, 0, 1).toFixed(4) + ")";
+    };
+    addEventListener("scroll", () => { if (!raf) raf = requestAnimationFrame(update); }, { passive: true });
+    addEventListener("resize", update);
+    update();
+  }
+
+  // ---------- numbers count up (or down) when they appear ----------
+  function initCount() {
+    const io = new IntersectionObserver(entries => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        io.unobserve(e.target);
+        const el = e.target, to = +el.dataset.count, from = +(el.dataset.from || 0);
+        if (reduce) { el.textContent = to; continue; }
+        const t0 = performance.now(), dur = 1500;
+        const tick = now => {
+          const k = clamp((now - t0) / dur, 0, 1);
+          el.textContent = Math.round(from + (to - from) * (1 - Math.pow(1 - k, 3)));
+          if (k < 1) requestAnimationFrame(tick);
+        };
+        el.textContent = from;
+        requestAnimationFrame(tick);
+      }
+    }, { threshold: 0.6 });
+    $$("[data-count]").forEach(el => io.observe(el));
+  }
+
+  // ---------- live counters in the .NET section (a simulation of what --watch prints) ----------
+  function initCounters() {
+    const code = $("#counters-out");
+    if (!code || reduce) return;
+    const panel = code.closest(".panel"), raw = (code.dataset.raw || code.textContent).split("\n");
+    const head = raw[0], lines = raw.slice(1);
+    let t = lines.length, cpu = 31.5, heap = 108.8, inView = false;
+    new IntersectionObserver(([e]) => { inView = e.isIntersecting; }).observe(code);
+    setInterval(() => {
+      if (!inView || doc.hidden || panel.hidden) return;
+      t += 1;
+      cpu = clamp(cpu + (Math.random() - 0.5) * 16, 4, 74);
+      heap = heap > 150 ? 90 + Math.random() * 8 : heap + Math.random() * 8 - 1.5; // a gen0 GC now and then
+      const exc = Math.random() < 0.3 ? 1 + Math.floor(Math.random() * 3) : 0;
+      lines.push("+" + t + ".0s  cpu-usage=" + cpu.toFixed(1) + "%  gc-heap-size=" + heap.toFixed(1) + "MB  exception-count=" + exc);
+      if (lines.length > 12) lines.shift();
+      code.innerHTML = [head].concat(lines).map((l, i, all) => '<span class="cl' + (i === all.length - 1 ? " nl" : "") + '">' + hlOut(l) + "</span>").join("");
+    }, 1000);
+  }
+
+  // ---------- the lease card cycles through a handoff ----------
+  function initLease() {
+    const box = $("#lease-demo");
+    if (!box) return;
+    const token = $(".token", box), req = $(".req", box), policy = $(".policy", box), log = $(".lease-log", box);
+    const say = t => { log.innerHTML = "<span>" + who(t) + "</span>"; };
+    const states = [
+      () => { token.classList.remove("h"); req.classList.remove("on"); policy.classList.remove("hp"); policy.textContent = "policy: free"; say("agent holds the lease under the default policy."); },
+      () => { req.classList.add("on"); say("human:alex asks agent for control: “let me check the refund path”"); },
+      () => { req.classList.remove("on"); token.classList.add("h"); say("agent gives it to human:alex: the next step is theirs."); },
+      () => { policy.classList.add("hp"); policy.textContent = "policy: human-priority"; say("Under human-priority, agents have to ask human:alex for it."); },
+    ];
+    if (reduce) { states.forEach(s => s()); return; }
+    let i = 0, inView = false;
+    new IntersectionObserver(([e]) => { inView = e.isIntersecting; }, { threshold: 0.3 }).observe(box);
+    setInterval(() => { if (!inView || doc.hidden) return; i = (i + 1) % states.length; states[i](); }, 3000);
+  }
+
+  // ---------- FAQ: animated open and close ----------
+  function initFaq() {
+    for (const d of $$(".faq details")) {
+      const summary = $("summary", d), ans = $(".ans", d);
+      summary.addEventListener("click", e => {
+        if (reduce || !ans.animate) return;
+        e.preventDefault();
+        if (d.dataset.busy) return;
+        d.dataset.busy = "1";
+        if (d.open) {
+          d.classList.add("closing");
+          const a = ans.animate({ height: [ans.offsetHeight + "px", "0px"], opacity: [1, 0] }, { duration: 320, easing: "cubic-bezier(.65,0,.35,1)" });
+          a.onfinish = () => { d.open = false; d.classList.remove("closing"); delete d.dataset.busy; };
+        } else {
+          d.open = true;
+          const a = ans.animate({ height: ["0px", ans.offsetHeight + "px"], opacity: [0, 1] }, { duration: 420, easing: "cubic-bezier(.22,.8,.24,1)" });
+          a.onfinish = () => { delete d.dataset.busy; };
+        }
+      });
+    }
+  }
+
+  // ---------- media: the demo video and screenshots, once their sources are set (site/README.md) ----------
+  function initMedia() {
+    const slot = $(".video-slot"), src = slot ? (slot.dataset.video || "").trim() : "";
+    if (src) {
+      const yt = /(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([\w-]{11})/.exec(src);
+      let el;
+      if (yt) {
+        el = doc.createElement("iframe");
+        el.src = "https://www.youtube-nocookie.com/embed/" + yt[1] + "?rel=0";
+        el.allow = "encrypted-media; picture-in-picture; fullscreen";
+        el.allowFullscreen = true;
+        el.loading = "lazy";
+        el.title = slot.dataset.title || "Demo video";
+      } else {
+        el = doc.createElement("video");
+        el.controls = true;
+        el.playsInline = true;
+        el.preload = "metadata";
+        if (slot.dataset.poster) el.poster = slot.dataset.poster;
+        el.src = src;
+        el.setAttribute("aria-label", slot.dataset.title || "Demo video");
+      }
+      $(".ph", slot).remove();
+      slot.append(el);
+    }
+    const box = $("#lightbox");
+    let boxImg = null;
+    for (const fig of $$(".shot[data-shot]")) {
+      const shot = (fig.dataset.shot || "").trim();
+      if (!shot) continue;
+      const img = new Image();
+      img.src = shot;
+      img.alt = fig.dataset.alt || "";
+      img.loading = "lazy";
+      img.decoding = "async";
+      const btn = doc.createElement("button");
+      btn.type = "button";
+      btn.className = "shot-frame";
+      btn.setAttribute("aria-label", "Enlarge: " + img.alt);
+      btn.append(img);
+      btn.addEventListener("click", () => {
+        if (!box || !box.showModal) { open(shot, "_blank", "noopener"); return; }
+        if (!boxImg) { boxImg = new Image(); box.prepend(boxImg); }
+        boxImg.src = shot;
+        boxImg.alt = img.alt;
+        box.showModal();
+      });
+      $(".shot-frame", fig).replaceWith(btn);
+    }
+    if (box) box.addEventListener("click", e => { if (e.target === box || e.target.closest("[data-close]")) box.close(); });
+  }
+
+  // If the reveals can't run, show everything rather than leave it hidden.
+  try { initReveal(); } catch (e) { root.classList.remove("js"); console.error("[eyedbg site] reveal:", e); }
+  safe("code", initCode);
+  safe("theme", initTheme);
+  safe("nav", initNav);
+  safe("pointer", initPointer);
+  safe("tabs", initTabs);
+  safe("arch", initArch);
+  safe("stage", initStage);
+  safe("steps", initSteps);
+  safe("count", initCount);
+  safe("counters", initCounters);
+  safe("lease", initLease);
+  safe("faq", initFaq);
+  safe("media", initMedia);
+})();
+</script>
+</body>
+</html>
