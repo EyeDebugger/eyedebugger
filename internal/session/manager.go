@@ -227,7 +227,13 @@ func checkStart(p api.StartParams) (api.StartParams, error) {
 		return p, err
 	}
 
+	// ClientDir too: a driver may default the working directory to it, and
+	// it must name that directory the same way as the program. On Windows
+	// EvalSymlinks also expands 8.3 short names (C:\Users\RUNNER~1, the
+	// GitHub runner's %TEMP%), and 'go build' run from the short form
+	// refuses the long form's package as "outside main module".
 	p.Project, p.Program, p.Cwd = realPath(p.Project), realPath(p.Program), realPath(p.Cwd)
+	p.ClientDir = realPath(p.ClientDir)
 
 	bps := make([]api.BreakpointSpec, len(p.Breakpoints))
 

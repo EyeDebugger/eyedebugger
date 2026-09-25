@@ -444,6 +444,29 @@ func samePath(a, b string) bool {
 	return a != "" && b != "" && (a == b || filepath.Clean(a) == filepath.Clean(b))
 }
 
+// sameFile reports whether a and b name the same file: the same path, or
+// the same file on disk. An adapter's frame paths need not be spelled as
+// the file keys are: Delve on Windows reports C:/Users/... with forward
+// slashes, possibly in another case or without 8.3 short names.
+func sameFile(a, b string) bool {
+	if samePath(a, b) {
+		return true
+	}
+
+	if a == "" || b == "" {
+		return false
+	}
+
+	ia, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+
+	ib, err := os.Stat(b)
+
+	return err == nil && os.SameFile(ia, ib)
+}
+
 // conditionHolds evaluates a breakpoint condition at the stop: it holds if
 // it is true, and if it fails to evaluate (as adapters treat a failing
 // condition: stop and let the user see).

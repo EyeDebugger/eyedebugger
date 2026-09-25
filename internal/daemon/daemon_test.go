@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -337,6 +338,58 @@ func TestStaleFilesAreReplaced(t *testing.T) {
 
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A daemon replaces its token while clients read it: every Dial reads the
+// token, and after a killed daemon left its token behind a client polling
+// for the new one reads that. On Windows a rename can't replace an open
+// file, so replaceFile retries; without that, about every other write here
+// failed with "Access is denied" and the daemon exited during start-up.
+func TestWriteFileAtomicWhileRead(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+
+	const readers = 2
+	for range readers {
+		go func() {
+			defer func() { done <- struct{}{} }()
+
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					_, _ = os.ReadFile(path)
+				}
+			}
+		}()
+	}
+
+	var err error
+	for i := 0; i < 50 && err == nil; i++ {
+		err = writeFileAtomic(path, []byte(strconv.Itoa(i)), 0o600)
+	}
+
+	close(stop)
+
+	for range readers {
+		<-done
+	}
+
+	if err != nil {
+		t.Fatalf("writeFileAtomic while the file is read: %v", err)
+	}
+
+	if got, err := os.ReadFile(path); err != nil || string(got) != "49" {
+		t.Fatalf("token = %q, %v; want the last write, 49", got, err)
 	}
 }
 
