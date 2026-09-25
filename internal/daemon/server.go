@@ -497,7 +497,8 @@ func decodeParams(raw json.RawMessage, v any) *api.Error {
 }
 
 // writeFileAtomic writes data to a temporary file next to path and renames it
-// into place, so readers never see a partial file.
+// into place, so readers never see a partial file. Readers may hold path open
+// meanwhile (every Dial reads the token): see replaceFile.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
@@ -515,7 +516,7 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 
-	if err := os.Rename(name, path); err != nil {
+	if err := replaceFile(name, path); err != nil {
 		_ = os.Remove(name)
 
 		return err

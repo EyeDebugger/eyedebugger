@@ -81,6 +81,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before `PROGRAM`, and the sharing line of a stop also shows while an editor is connected or a
   lease request is pending.
 
+### Fixed
+
+- Windows: the daemon no longer exits during start-up ("write token: … Access is denied",
+  `DAEMON_START_FAILED`) when a client reads the token a killed daemon left behind while the new
+  one replaces it; the replace is retried for up to 2 s.
+- Windows: `run-until` reports `reached` when the adapter spells the file differently (Delve's
+  `C:/…` with forward slashes). The daemon resolves a start's `clientDir` (native API) like
+  `program` and `cwd`, so a client that sends it as an 8.3 short name (`C:\Users\RUNNER~1\…`) no
+  longer gets Go's build refused with "outside main module" (the CLI already sent it resolved).
+
 ## [0.1.2] - 2026-09-24
 
 ### Fixed

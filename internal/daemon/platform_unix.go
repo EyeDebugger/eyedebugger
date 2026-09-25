@@ -35,6 +35,9 @@ func checkPrivate(dir string, info fs.FileInfo) error {
 	return nil
 }
 
+// replaceFile renames from to to, replacing to even while it is open.
+func replaceFile(from, to string) error { return os.Rename(from, to) }
+
 // lockFile takes an exclusive, non-blocking lock on path. The OS releases it
 // when the process exits, however it exits.
 func lockFile(path string) (*os.File, error) {

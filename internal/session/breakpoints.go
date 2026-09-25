@@ -456,7 +456,7 @@ func (s *Session) RunUntil(ctx context.Context, c api.Client, spec api.Breakpoin
 		return snap, nil
 	}
 
-	reached := snap.Frame != nil && snap.Frame.File == x.target.File && snap.Frame.Line == x.target.Line
+	reached := snap.Frame != nil && snap.Frame.Line == x.target.Line && sameFile(snap.Frame.File, x.target.File)
 	snap.Reached = &reached
 
 	// Only this request's own breakpoint: another client may have started
