@@ -227,7 +227,7 @@ tasks:
       - pnpm run package
 
   ext:test:integration:
-    desc: Run the extension's integration tests in VS Code 1.100.0 and 1.139.0 (downloads VS Code; Linux needs xvfb; EYEDBG_DATA_DIR with debugpy); pass COUNT=5 before merging an extension change
+    desc: Run the extension's integration tests in VS Code 1.100.0 and 1.139.0 (downloads VS Code; Linux needs xvfb; EYEDBG_DATA_DIR with debugpy and netcoredbg, the .NET 10 SDK and the .NET helper next to eyedbg, or EYEDBG_TEST_DOTNET=0); pass COUNT=5 before merging an extension change
     dir: extensions/vscode
     env:
       EYEDBG_TEST_COUNT: '{{.COUNT | default "1"}}'

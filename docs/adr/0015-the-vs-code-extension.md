@@ -316,3 +316,90 @@ addenda below.
   URLs from the repository's root and ignores `repository.directory`, so `package` passes
   `--baseImagesUrl`/`--baseContentUrl` under `extensions/vscode`, and `check-vsix.mjs` fails on
   any packaged README image outside that prefix.
+
+## Addendum (2026-09-25, P2-M9): the .NET views
+
+- **An own activity-bar container, "EyeDebugger .NET"** (`viewsContainers.activitybar`
+  `eyedbg-dotnet`, icon the `$(pulse)` codicon — VS Code 1.100 takes a codicon there, no image
+  file) with four views: **Counters**, **Memory**, **Threads**, **CPU Trace**. Unlike Activity
+  and Clients (P2-M5), which belong to a debug session, these are used while the program *runs*
+  (counters and traces refuse a stopped one) and target any .NET process, as Rider keeps them in
+  their own tool windows; four more views in Run and Debug would crowd it. Rejected: Run and Debug
+  (ten views); the bottom panel (close call).
+- **Shown in .NET workspaces only**: every view has `"when": "eyedbg.dotnet.show"`, set at
+  activation when `workspace.findFiles('**/*.{csproj,fsproj,vbproj,sln,slnx}',
+  '**/{node_modules,bin,obj,.git}/**', 1)` finds one (a non-.NET workspace is scanned once) and by
+  **EyeDebugger: Show .NET Views**. No setting.
+- **One target for the four views**: `auto` (the active eyedbg debug session, else the only one
+  of the window, else the picker when an action needs one), a session, or a process. **Choose .NET
+  Target…** lists `eyedbg dotnet ps --json`, joined sessions first; a process with a session
+  becomes a session target. Session targets are passed as `--session=ID --as=CLIENT` — the CLI
+  then refuses a stopped (`NOT_RUNNING`) or ended (`SESSION_EXITED`) one and can't be fooled by a
+  reused pid; `--as` because the daemon records whoever asks about a session as active (the
+  default client is the agent). Processes as `--pid=N`. The command also takes `{auto: true}`,
+  `{session}` or `{pid}` (validated). Rejected: a target per view; resolving sessions to pids.
+- **A second spawn mode in `exec.ts`** (still the only file that imports `child_process`, a unit
+  test enforces it): `stream()` runs `counters --watch --json` with `spawn` (no shell, stdin
+  ignored) and splits stdout into lines (a line over 1 Mi characters kills it; stderr keeps its
+  last 4 KiB for a failure) — `execFile` buffers until exit and dies at `maxBuffer`, while a watch
+  may run 24 h. **Interrupting** (every `eyedbg dotnet` run): an abort or a timeout sends SIGINT
+  off Windows, so eyedbg runs its Ctrl-C path (it closes its helper's stdin and discards a partial
+  dump or trace), then SIGKILL 10 s later if it still runs. `execFile` hands its AbortSignal to
+  `spawn` without its `killSignal` (an abort sends SIGTERM, which eyedbg doesn't handle: the file
+  stays), so an interruptible run handles the abort itself; `execFile`'s own timeout does use
+  `killSignal`. On Windows Node ends a process forcefully whatever the signal: a cancelled dump or
+  trace leaves its partial file in eyedbg's private directory until pruning; the helper still
+  ends on its stdin's end. A fix needs eyedbg to cancel on something Node can send there (e.g.
+  its stdin closing) — out of this milestone.
+- **Timeouts are always explicit**: each run passes the CLI's own `--timeout` (ps 30 s, dump 2 m,
+  heap and threads 5 m, a trace its duration + 60 s, a trace file 5 m) and the extension waits
+  15 s longer, so the CLI's error and hint arrive first. The watch has none.
+- **Counters**: a fixed 1 s interval; gauges show value and change, sums their growth per second
+  and total since the start (a pure `CounterBoard`). **Pause ends the watch process** (no
+  diagnostics session stays in the program); Start/Resume starts a new one, after the old one
+  closed. Every change of the watch runs in one queue, and each watch has a generation, so a line
+  or an end of an older watch never touches the current one. The running state of each joined
+  session (`Tracked.running`, from `stopped`/`continued`/`terminated`/`exited` events and the
+  successful response to the client's own resume, which adapters don't announce) words the
+  message; a `NOT_RUNNING` answer for a joined session waits and starts the watch when that
+  session runs again (unless paused) — at most 3 tries per run, 1 s and 2 s apart (the daemon can
+  still say stopped just after VS Code hears it run), then "press Start"; a session left while
+  waiting ends the wait. A target change ends the watch, except the one a Start asked for through
+  the picker. A watch survives a stop at a breakpoint: samples pause and
+  resume, first as a catch-up burst.
+- **Memory**: dump (`--type=heap`) and `heap -- PATH --top=50` in one cancellable notification;
+  a type's GC root paths (`--gcroot=NAME --paths=3`, a name starting `0x` refused: the CLI would
+  read an address) run when the type is expanded (`TreeView.onDidExpandElement`) or on **Find GC
+  Roots**, once per dump and type; `getChildren` starts nothing (the API walks every node). The
+  last 3 dumps stay listed. **Open Dump File…**/**Open Trace File…** (`showOpenDialog`) analyse
+  any file, passed after `--`. The extension never passes `--out` and never reads, copies, moves
+  or deletes a dump or a trace.
+- **Threads**: grouped as the CLI's text groups them (a port of `groupThreads`, frame runs
+  collapsed "×2"); a frame with a file and line gets a command whose arguments are ids of the
+  window's own result, never a path. **Opening a frame's source** follows the helper's rule for
+  dump-named paths exactly (`isLocalAbsolute`, a port of `SourceLines.IsLocalAbsolute` tested with
+  all its cases): no two leading separators (UNC, `\\?\`, `\\.\`), on Windows a drive root, else a
+  leading `/` — checked before any file-system call (a stat of a UNC path connects to its server)
+  — then a regular file (`statSync().isFile()`), else "isn't on this machine".
+- **CPU Trace**: profile (`cpu`, `gc`) and duration (1 s–5 m) asked, or given as `{profile,
+  duration}`; a countdown in the progress notification; sections shown only when the trace has
+  them. Percentages are the CLI's: hottest and inclusive of the samples in managed code, waiting
+  of the other samples.
+- **One operation per view** (`eyedbg.dotnet.<view>.busy` swaps the title's action for Cancel;
+  a view/title command gets no argument, so each view has its own cancel command, and
+  `eyedbg.dotnet.cancel {view}` serves tests and other extensions). A cancel is no failure;
+  failures of what the user started are notified once; every string from the program or its dumps
+  is plain text without icons, tooltips are plain strings.
+- **Feature gating per view**: `dotnet.helper` (Counters, the picker), `dotnet.dump` (Memory,
+  Threads), `dotnet.trace` (CPU Trace) from `eyedbg version --json`; missing, the view says to
+  update eyedbg. They aren't `requiredFeatures`: debugging keeps working with an older eyedbg.
+- **API** (still `apiVersion: 0`): `views()` adds the four trees (items gain their `id`);
+  `dotnet()` has the target (and whether its picker is open), the watch's state and sample
+  count, each view's busy/runs/last error, and the last 20 command lines; `sessions()[].running`.
+- **Tests**: unit tests read the CLI's own JSON goldens (`internal/cli/testdata/dotnet_*_json`), so
+  a JSON change of the CLI breaks them too. The integration runner gives each VS Code run its own
+  `EYEDBG_HOME` (dumps and traces never reach `~/.eyedbg`), the adapters' directory
+  (`EYEDBG_DATA_DIR`, default `~/.eyedbg/tools`) as is, needs the helper next to `eyedbg` and
+  `eyedbg adapters doctor dotnet` to pass, and builds `testdata/apps/dotnet/breadth` once
+  (`EYEDBG_TEST_DOTNET=0` skips the .NET tests). The CI `extension` job installs the .NET SDK,
+  publishes the helper (locked restore) and installs netcoredbg.

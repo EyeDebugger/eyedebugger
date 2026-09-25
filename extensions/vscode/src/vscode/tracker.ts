@@ -9,6 +9,7 @@
 
 import type * as vscode from 'vscode';
 import { dapExitMessage } from '../core/cli';
+import { nextRunState } from '../core/dotnet';
 import { isLeaseHeld } from '../core/lease';
 import {
   type DapMessage,
@@ -105,6 +106,11 @@ export class TrackerFactory implements vscode.DebugAdapterTrackerFactory {
     }
     if (u.reveal !== undefined) {
       this.handlers.reveal(t, u.reveal);
+    }
+    const running = nextRunState(t.running, m);
+    if (running !== t.running) {
+      t.running = running;
+      this.state.fire();
     }
     if (m.type === 'event') {
       this.event(t, m);

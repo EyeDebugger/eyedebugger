@@ -1,6 +1,6 @@
 # EyeDebugger (`eyedbg`) — AI-native debugger (design)
 
-Status: v0.3 · 2026-09-25 · phase 1 (MVP) complete; phase 2: DAP facade (P2-M1), collaboration (P2-M2), VS Code extension (P2-M3, P2-M5), .NET side helper (P2-M6), .NET dumps, heap and threads (P2-M7), .NET traces (P2-M8)
+Status: v0.3 · 2026-09-25 · phase 1 (MVP) complete; phase 2: DAP facade (P2-M1), collaboration (P2-M2), VS Code extension (P2-M3, P2-M5), .NET side helper (P2-M6), .NET dumps, heap and threads (P2-M7), .NET traces (P2-M8), the extension's .NET views (P2-M9)
 
 ## 1. What and why
 
@@ -334,6 +334,16 @@ Built (P2-M5, ADR 0015 and 0014 addenda):
 - **Auto-join prompt:** in a trusted window with focus and nothing joined, `eyedbg sessions` every
   5 s; an agent's session of a program in the workspace is offered once (`eyedbg.autoJoin`).
 - **launch.json snippets** and a *Get started* walkthrough.
+
+Built (P2-M9, ADR 0015 addendum): the human side of `eyedbg dotnet …`, in an *EyeDebugger .NET*
+activity-bar container shown in .NET workspaces — **Counters** (a live `counters --watch`, values
+and changes; Pause ends the watch; a joined session stopped at a breakpoint restarts it when it
+runs), **Memory** (a heap dump's top types; a type's GC root paths on expand), **Threads** (stacks
+grouped as the CLI's text, locks; a frame's source opened only for a local absolute path of a
+regular file, the helper's rule) and **CPU Trace** (hottest methods, or GC and allocations). One
+target — the active joined session, a session or a process from `dotnet ps` — every run
+cancellable (SIGINT off Windows, so eyedbg discards a partial file), dumps and traces left in
+eyedbg's private directory. No new CLI surface.
 
 ## 10. Agent integration
 

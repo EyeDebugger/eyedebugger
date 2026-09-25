@@ -52,7 +52,8 @@ interface Manifest {
   capabilities: { untrustedWorkspaces: { supported: boolean }; virtualWorkspaces: boolean };
   contributes: {
     configuration: { properties: Record<string, Setting> };
-    views: Record<string, { id: string; name: string }[]>;
+    viewsContainers: Record<string, { id: string; title: string; icon: string }[]>;
+    views: Record<string, { id: string; name: string; when?: string }[]>;
     viewsWelcome: { view: string; contents: string }[];
     commands: { command: string; title: string; category?: string }[];
     menus: Record<string, MenuItem[]>;
@@ -87,6 +88,13 @@ test('nothing under src/core imports vscode', () => {
   }
 });
 
+test('only src/vscode/exec.ts runs processes', () => {
+  const runs =
+    /from\s+['"](node:)?child_process['"]|require\(\s*['"](node:)?child_process['"]\s*\)|import\(\s*['"](node:)?child_process['"]/;
+  const files = sources('src').filter((f) => runs.test(fs.readFileSync(path.join(root, f), 'utf8')));
+  assert.deepEqual(files, [path.join('src', 'vscode', 'exec.ts')]);
+});
+
 test('manifest invariants', () => {
   const props = manifest.contributes.configuration.properties;
   assert.equal(props['eyedbg.path']?.scope, 'machine');
@@ -111,8 +119,29 @@ test('manifest: views, settings, activation', () => {
   );
   assert.deepEqual(
     c.viewsWelcome.map((w) => w.view),
-    ['eyedbg.activity', 'eyedbg.clients'],
+    [
+      'eyedbg.activity',
+      'eyedbg.clients',
+      'eyedbg.dotnet.counters',
+      'eyedbg.dotnet.memory',
+      'eyedbg.dotnet.threads',
+      'eyedbg.dotnet.trace',
+    ],
   );
+  // The .NET views: their own container, shown in .NET workspaces (or on request).
+  assert.deepEqual(c.viewsContainers.activitybar, [
+    { id: 'eyedbg-dotnet', title: 'EyeDebugger .NET', icon: '$(pulse)' },
+  ]);
+  assert.deepEqual(
+    c.views['eyedbg-dotnet']?.map((v) => [v.id, v.when]),
+    [
+      ['eyedbg.dotnet.counters', 'eyedbg.dotnet.show'],
+      ['eyedbg.dotnet.memory', 'eyedbg.dotnet.show'],
+      ['eyedbg.dotnet.threads', 'eyedbg.dotnet.show'],
+      ['eyedbg.dotnet.trace', 'eyedbg.dotnet.show'],
+    ],
+  );
+  assert.deepEqual(Object.keys(c.views), ['debug', 'eyedbg-dotnet']);
   const props = c.configuration.properties;
   assert.deepEqual(props['eyedbg.autoJoin']?.enum, ['ask', 'never']);
   assert.equal(props['eyedbg.autoJoin']?.default, 'ask');
@@ -155,11 +184,27 @@ test('manifest: every command a menu or link names exists', () => {
   const hiddenInPalette = new Set(
     (c.menus.commandPalette ?? []).filter((i) => i.when === 'false').map((i) => i.command),
   );
+  const nodeOnly = [
+    'eyedbg.activity.open',
+    'eyedbg.dotnet.cancel',
+    'eyedbg.dotnet.memory.gcroot',
+    'eyedbg.dotnet.memory.copyPath',
+    'eyedbg.dotnet.memory.showThreads',
+    'eyedbg.dotnet.threads.openFrame',
+  ];
   for (const cmd of own) {
-    if (cmd === 'eyedbg.activity.open' || cmd.startsWith('eyedbg.clients.')) {
+    if (nodeOnly.includes(cmd) || cmd.startsWith('eyedbg.clients.')) {
       assert.ok(cmd === 'eyedbg.clients.refresh' || hiddenInPalette.has(cmd), `${cmd} shows in the palette`);
     }
   }
+  // The other .NET commands show in the palette only where the views are.
+  const palette = new Map((c.menus.commandPalette ?? []).map((i) => [i.command, i.when]));
+  for (const cmd of own) {
+    if (cmd.startsWith('eyedbg.dotnet.') && cmd !== 'eyedbg.dotnet.showViews' && !nodeOnly.includes(cmd)) {
+      assert.equal(palette.get(cmd), 'eyedbg.dotnet.show', cmd);
+    }
+  }
+  assert.equal(palette.has('eyedbg.dotnet.showViews'), false, 'Show .NET Views is always in the palette');
 });
 
 test('manifest: walkthrough media ship in the VSIX', () => {

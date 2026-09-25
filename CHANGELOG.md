@@ -121,6 +121,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`NOT_RUNNING`); one paused mid-trace fails after 30 s (`DIAGNOSTICS_TIMEOUT`); Ctrl-C discards
   the trace. Output shows names and counts, never values. New error code: `TRACE_UNSUPPORTED`
   (exit 2). `version --json` features add `"dotnet.trace"`.
+- The VS Code extension's .NET views (P2-M9, ADR 0015 addendum): an *EyeDebugger .NET* container
+  in the activity bar, shown in workspaces with a .NET project (or after **EyeDebugger: Show .NET
+  Views**), with **Counters** (live `eyedbg dotnet counters --watch`: values, changes, totals;
+  Pause/Resume), **Memory** (take a heap dump, top types, GC root paths when a type is expanded,
+  Show Threads of This Dump, Copy Dump Path, Open Dump File…), **Threads** (stacks grouped like the
+  CLI's text, locks with owners and waiters; click a frame to open its source) and **CPU Trace**
+  (CPU or GC trace for 1 s–5 min with a countdown, Open Trace File…). One target for all four — the
+  active eyedbg debug session, a session or a process from `eyedbg dotnet ps` (**EyeDebugger:
+  Choose .NET Target…**); every operation cancellable; dumps and traces stay in eyedbg's private
+  directory. The extension's API gains `dotnet()` and the four trees in `views()`.
 
 ### Changed
 

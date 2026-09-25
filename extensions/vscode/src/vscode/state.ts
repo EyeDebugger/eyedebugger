@@ -54,6 +54,8 @@ export class Tracked {
   unsupported = false;
   /** The last failed eyedbg/* response per command: VS Code's customRequest error loses its code. */
   readonly failures = new Map<string, { code: string; text: string; holder: string }>();
+  /** Whether the program runs (true), is stopped or ended (false), or unknown (until its first stop or run). */
+  running: boolean | undefined;
 
   constructor(
     readonly session: vscode.DebugSession,
@@ -89,6 +91,7 @@ export class Tracked {
     this.mirrors.clear();
     this.failures.clear();
     this.log.reset();
+    this.running = undefined;
   }
 }
 
@@ -127,6 +130,7 @@ export interface SessionSnapshot {
   mirrors: Mirror[];
   breakpoints: Breakpoint[];
   activity: string[];
+  running: boolean | undefined;
 }
 
 export class State implements vscode.Disposable {
@@ -288,6 +292,7 @@ export class State implements vscode.Disposable {
       mirrors: t.mirrors.all().map((m) => ({ ...m })),
       breakpoints: structuredClone(t.list),
       activity: [...t.activity],
+      running: t.running,
     }));
   }
 

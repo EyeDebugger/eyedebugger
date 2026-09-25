@@ -22,6 +22,8 @@ EyeDebugger/eyedebugger`.
 - `eyedbg` with editor support (`eyedbg version --json` lists `dap.collab`), on your `PATH` or set
   in `eyedbg.path`.
 - The debug adapter for your language, as eyedbg needs it (`eyedbg adapters ls`).
+- For the .NET views: `eyedbg` with its .NET side helper (`eyedbg version --json` lists
+  `dotnet.helper`, `dotnet.dump`, `dotnet.trace`) and the .NET runtime it runs on.
 
 ## Getting started
 
@@ -127,6 +129,45 @@ focus, and no extension can do it for it without taking your focus: after the ag
 keep the frame it last focused — that line stays highlighted too, and the Variables view shows that
 earlier stop — until you click the top frame in Call Stack.
 
+## .NET diagnostics
+
+In a workspace with a .NET project (`.csproj`, `.fsproj`, `.vbproj`, `.sln`, `.slnx`) the activity
+bar has **EyeDebugger .NET**, with four views; elsewhere run **EyeDebugger: Show .NET Views**. They
+run `eyedbg dotnet …` and show what it reports: names, sizes, counts and stacks, never the
+program's values.
+
+**Target.** All four views inspect one process, shown in their title bar: by default (`auto`) the
+program of the active eyedbg debug session, else of the only one you joined. **Choose .NET
+Target…** (the target button) lists the .NET processes of your user (`eyedbg dotnet ps`), joined
+sessions first; pick one, or go back to auto. A session is targeted as such, so eyedbg checks it
+still runs that program.
+
+- **Counters** — live runtime counters (`eyedbg dotnet counters --watch`): CPU, working set, GC
+  heap and collections, allocations, exceptions, thread pool, locks, JIT. A gauge shows its value
+  and change (`12.3 % ▲ 11.8`), a sum its growth per second and total since you started
+  (`+2,048 B/s · total 6,144 B`). Each sample shows about a second late. **Pause** ends the watch
+  (nothing stays attached to the program); **Start** starts a new one. A program stopped at a
+  breakpoint sends no samples, and a stopped one can't start a watch: when it's a session you
+  joined, the watch starts by itself when the program runs again.
+- **Memory** — **Take Heap Dump** writes a heap dump (the program is suspended while it's written)
+  and lists the types that take the most memory, with their object counts. Expand a type to see
+  why its objects are alive: up to three paths from a GC root (`static Holder.Keep`, a thread's
+  stack, a handle) to one of them, found once per dump and type. Right-click a dump for **Show
+  Threads of This Dump** and **Copy Dump Path**. **Open Dump File…** reads any `.dmp`. The last
+  three dumps stay listed.
+- **Threads** — **Capture Threads** takes a heap dump and lists every managed thread's stack,
+  grouped when identical, lock owners and waiters first, with the locks held and waited for.
+  Click a frame with a source line to open it.
+- **CPU Trace** — **Start Trace** records the program for 1 s to 5 min (it runs slower
+  meanwhile): **CPU** lists its hottest methods, exclusive and inclusive, and where it waited;
+  **GC** its collections, pauses and allocations. **Open Trace File…** reads a `.nettrace`.
+
+![Counters of a joined session, and a heap dump's Retained objects with their GC root paths](images/dotnet.png)
+
+Every operation shows its progress and can be cancelled. Dumps and traces stay in eyedbg's private
+directory (`~/.eyedbg/dumps` and `~/.eyedbg/traces`, removed after 7 days, at most 10 of each
+kept); the views show and copy their paths, and never read, copy, move or delete them.
+
 ## Settings
 
 | Setting | Default | |
@@ -149,7 +190,14 @@ earlier stop — until you click the top frame in Call Stack.
   while the window has focus and no session is joined (`eyedbg sessions`, which never starts the
   daemon); `eyedbg.autoJoin: never` stops it. It never joins without your click.
 - Text from a session (the agent's conditions, messages, names) is shown as plain text: nothing in
-  it becomes a link or markup.
+  it becomes a link or markup. So are the names a .NET program or its dumps report (types,
+  methods, modules, files, processes).
+- A heap dump holds the program's memory, secrets included. The .NET views keep dumps and traces
+  in eyedbg's private directory and never read them; `eyedbg dotnet …` only inspects processes of
+  your own user.
+- A frame's source file is the path the program's PDB recorded when it was built. The Threads view
+  opens it only if it is a local absolute path of a regular file — never a network (UNC) or device
+  path, which it doesn't even look up.
 
 ## Known limitations
 
@@ -165,3 +213,12 @@ earlier stop — until you click the top frame in Call Stack.
   has it).
 - A client's "last seen" moves with its activity; a client that only reads (`eyedbg status`,
   `eyedbg vars`) shows its new time after **Refresh**.
+- The .NET views appear in workspaces with a .NET project; elsewhere, run **EyeDebugger: Show .NET
+  Views**.
+- Counters need a running program: a program stopped at a breakpoint sends no samples, and each
+  sample shows about a second late.
+- A heap dump suspends the program while it's written (a second or more for a small program).
+- On Windows a heap dump has no source lines, so the Threads view can't open a frame's file there.
+- Cancelling a dump or a trace on Windows ends `eyedbg` at once (Windows has no Ctrl-C for it), so
+  its partial file stays in eyedbg's private directory until it's pruned (7 days, at most 10 kept).
+  Elsewhere eyedbg removes it.

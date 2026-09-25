@@ -6,10 +6,13 @@
 // commands do that, and any extension can already send eyedbg/* requests.
 
 import * as vscode from 'vscode';
+import type { DotnetStats } from './dotnet/views';
 import type { Annotation, AutoJoinStats, Notice, Reveal, SessionSnapshot, State } from './state';
 
 /** A tree view item as VS Code shows it, with its children. */
 export interface TreeSnapshot {
+  /** The item's id ('' if it has none). */
+  id: string;
   label: string;
   description: string;
   tooltip: string;
@@ -29,8 +32,17 @@ export interface EyedbgApi {
   notices(): Notice[];
   /** stops are the sessions this window launched and stopped when their debug session ended. */
   stops(): { session: string; error: string }[];
-  /** views are the Activity and Clients views' items, as shown now. */
-  views(): { activity: TreeSnapshot[]; clients: TreeSnapshot[] };
+  /** views are the Activity, Clients and .NET views' items, as shown now. */
+  views(): {
+    activity: TreeSnapshot[];
+    clients: TreeSnapshot[];
+    counters: TreeSnapshot[];
+    memory: TreeSnapshot[];
+    threads: TreeSnapshot[];
+    trace: TreeSnapshot[];
+  };
+  /** dotnet is the .NET views' state: target, watch, operations, command lines. */
+  dotnet(): DotnetStats;
   /** autoJoin is the auto-join prompt's state. */
   autoJoin(): AutoJoinStats;
   /** reveals are the last 50 stops followed (recorded before they are shown). */
@@ -60,6 +72,7 @@ function walk<T>(p: SyncTree<T>, parent?: T): TreeSnapshot[] {
   for (const n of p.getChildren(parent)) {
     const item = p.getTreeItem(n);
     out.push({
+      id: item.id ?? '',
       label: text(item.label),
       description: typeof item.description === 'string' ? item.description : '',
       tooltip: text(item.tooltip),
@@ -75,14 +88,33 @@ function walk<T>(p: SyncTree<T>, parent?: T): TreeSnapshot[] {
   return out;
 }
 
-export function api<A, C>(state: State, trees: { activity: SyncTree<A>; clients: SyncTree<C> }): EyedbgApi {
+export function api<A, C, R>(
+  state: State,
+  trees: {
+    activity: SyncTree<A>;
+    clients: SyncTree<C>;
+    counters: SyncTree<R>;
+    memory: SyncTree<R>;
+    threads: SyncTree<R>;
+    trace: SyncTree<R>;
+  },
+  dotnet: () => DotnetStats,
+): EyedbgApi {
   return {
     apiVersion: 0,
     sessions: () => state.snapshots(),
     annotations: () => state.annotations.map((a) => ({ ...a })),
     notices: () => state.notices.map((n) => ({ ...n })),
     stops: () => state.stops.map((s) => ({ ...s })),
-    views: () => ({ activity: walk(trees.activity), clients: walk(trees.clients) }),
+    views: () => ({
+      activity: walk(trees.activity),
+      clients: walk(trees.clients),
+      counters: walk(trees.counters),
+      memory: walk(trees.memory),
+      threads: walk(trees.threads),
+      trace: walk(trees.trace),
+    }),
+    dotnet,
     autoJoin: () => structuredClone(state.autoJoin),
     reveals: () => state.reveals.map((r) => ({ ...r })),
     onDidChange: state.onDidChange,

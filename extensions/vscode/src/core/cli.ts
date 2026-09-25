@@ -155,14 +155,23 @@ export function parseResult(exitCode: number, stdout: string, stderr: string): R
   if (!isRecord(value)) {
     throw new EyedbgError('INTERNAL', `eyedbg printed unexpected JSON: ${quote(stdout)}`);
   }
-  const err = value.error;
-  if (isRecord(err)) {
-    throw new EyedbgError(str(err.code) || 'INTERNAL', str(err.message) || 'eyedbg failed', str(err.hint));
+  const err = errorOf(value);
+  if (err !== undefined) {
+    throw err;
   }
   if (exitCode !== 0) {
     throw new EyedbgError('INTERNAL', `eyedbg exited with code ${exitCode}: ${quote(stderr || stdout)}`);
   }
   return value;
+}
+
+/** errorOf is the error a --json result reports ({"error": {code, message, hint}}), if any. */
+export function errorOf(value: unknown): EyedbgError | undefined {
+  const err = isRecord(value) ? value.error : undefined;
+  if (!isRecord(err)) {
+    return undefined;
+  }
+  return new EyedbgError(str(err.code) || 'INTERNAL', str(err.message) || 'eyedbg failed', str(err.hint));
 }
 
 export interface VersionInfo {

@@ -262,8 +262,9 @@ jobs:
 
   # The VS Code extension: checks, the VSIX file list, and the integration
   # suite in real VS Code (1.100.0 and 1.139.0, downloaded and checked against
-  # the update server's sha256) against the real eyedbg and debugpy, on every
-  # OS on every run. No caches; no secrets.
+  # the update server's sha256) against the real eyedbg, debugpy, netcoredbg
+  # and the .NET side helper (the .NET views' tests), on every OS on every
+  # run. No caches; no secrets.
   extension:
     name: extension (${{ matrix.os }})
     strategy:
@@ -277,6 +278,8 @@ jobs:
         shell: bash
     env:
       COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -286,6 +289,9 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
           cache: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -307,8 +313,16 @@ jobs:
           go build -trimpath -o "$RUNNER_TEMP/eyedbg-bin/" ./cmd/eyedbg ./cmd/eyedbgd
           echo "EYEDBG_DATA_DIR=$RUNNER_TEMP/eyedbg-data" >> "$GITHUB_ENV"
           echo "EYEDBG_TEST_BIN_DIR=$RUNNER_TEMP/eyedbg-bin" >> "$GITHUB_ENV"
+      # Next to eyedbg, where it looks for it (drivers/dotnet/helper.go).
+      - name: Publish the .NET helper
+        working-directory: helpers/dotnet
+        run: dotnet publish src/EyeDbg.DotnetHelper/EyeDbg.DotnetHelper.csproj -c Release -p:RestoreLockedMode=true -o "$RUNNER_TEMP/eyedbg-bin/helpers/dotnet"
       - name: Install debugpy
         run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters install debugpy"
+      - name: Install netcoredbg
+        run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters install netcoredbg"
+      - name: Doctor (dotnet)
+        run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters doctor dotnet"
       - name: Install dependencies
         working-directory: extensions/vscode
         run: pnpm install --frozen-lockfile
