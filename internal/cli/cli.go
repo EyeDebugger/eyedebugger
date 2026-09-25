@@ -135,12 +135,14 @@ const (
 func exitCode(err error) int {
 	switch api.CodeOf(err) {
 	case api.CodeNoSession, api.CodeNotStopped, api.CodeNotRunning, api.CodeSessionExited, api.CodeSessionsActive,
-		api.CodeLeaseHeld, api.CodeNotOwner:
+		api.CodeLeaseHeld, api.CodeNotOwner, api.CodeNotDotnet, api.CodeDiagnosticsDisabled,
+		api.CodeDiagnosticsTimeout:
 		return exitState
 	case api.CodeAdapterMissing, api.CodeBuildFailed, api.CodeDaemonNotRunning, api.CodeDaemonStart,
-		api.CodeVersionMismatch, api.CodeUnauthorized, api.CodeAttachFailed, api.CodeNoTestHost:
+		api.CodeVersionMismatch, api.CodeUnauthorized, api.CodeAttachFailed, api.CodeNoTestHost,
+		api.CodeHelperNotFound, api.CodeHelperMismatch:
 		return exitEnvironment
-	case api.CodeAdapterFailed, api.CodeUnsupported:
+	case api.CodeAdapterFailed, api.CodeUnsupported, api.CodeHelperFailed:
 		return exitAdapter
 	case api.CodeInvalidRequest, api.CodeUnknownMethod, api.CodeInternal, api.CodeSideEffects,
 		api.CodeAnchorNotFound, api.CodeAnchorAmbiguous:
@@ -200,10 +202,12 @@ any DAP client) through 'eyedbg dap'.
 Exit codes: 0 success (a wait that times out is a success that says so); 1 usage or internal
 error (INVALID_REQUEST, SIDE_EFFECTS, ANCHOR_NOT_FOUND, ANCHOR_AMBIGUOUS); 2 no such session, it is
 in the wrong state, or another client holds it (NO_SESSION, NOT_STOPPED, NOT_RUNNING,
-SESSION_EXITED, SESSIONS_ACTIVE, LEASE_HELD, NOT_OWNER); 3 setup problem (ADAPTER_NOT_INSTALLED,
-BUILD_FAILED, ATTACH_FAILED, NO_TEST_HOST, DAEMON_*, VERSION_MISMATCH, UNAUTHORIZED); 4 the debug
-adapter refused a request or can't do it (ADAPTER_ERROR, e.g. an expression that doesn't
-evaluate; UNSUPPORTED_BY_ADAPTER). Errors print "eyedbg: message [CODE]" and a hint on
+SESSION_EXITED, SESSIONS_ACTIVE, LEASE_HELD, NOT_OWNER), or the target process can't be inspected
+(NOT_DOTNET, DIAGNOSTICS_DISABLED, DIAGNOSTICS_TIMEOUT); 3 setup problem (ADAPTER_NOT_INSTALLED,
+BUILD_FAILED, ATTACH_FAILED, NO_TEST_HOST, DAEMON_*, VERSION_MISMATCH, UNAUTHORIZED,
+HELPER_NOT_FOUND, HELPER_MISMATCH); 4 the debug adapter or a side helper refused a request or
+can't do it (ADAPTER_ERROR, e.g. an expression that doesn't evaluate; UNSUPPORTED_BY_ADAPTER;
+HELPER_FAILED). Errors print "eyedbg: message [CODE]" and a hint on
 stderr; with --json, {"schema": 1, "error": {"code", "message", "hint"}} on stdout.`
 
 const eyedbgExample = `  eyedbg adapters install netcoredbg            # once per machine
@@ -244,6 +248,7 @@ func NewEyedbgCommand(info version.Info) *cobra.Command {
 		newLeaseCommand(info, g),
 		newEventsCommand(info, g),
 		newDapCommand(info, g),
+		newDotnetCommand(info, g),
 		newStopCommand(info, g),
 		newAdaptersCommand(g),
 		newDaemonCommand(info, g),

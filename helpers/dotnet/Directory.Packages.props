@@ -1,0 +1,13 @@
+<Project>
+    <!-- Central package management: exact versions only (no ranges or floating versions); Dependabot (nuget) updates them.
+         Licences and reasons: docs/adr/0016-a-csharp-side-helper-for-dotnet-diagnostics.md. -->
+    <PropertyGroup>
+        <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+        <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageVersion Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.745401" />
+        <PackageVersion Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.6" />
+        <PackageVersion Include="xunit.v3.mtp-off" Version="4.0.1" />
+    </ItemGroup>
+</Project>

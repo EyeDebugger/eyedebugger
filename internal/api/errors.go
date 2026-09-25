@@ -46,6 +46,25 @@ const (
 	// CodeAnchorAmbiguous: several lines of the file hold a breakpoint's
 	// anchor text.
 	CodeAnchorAmbiguous Code = "ANCHOR_AMBIGUOUS"
+	// CodeHelperNotFound: a side helper (or the runtime to run it) isn't
+	// installed where eyedbg looks for it.
+	CodeHelperNotFound Code = "HELPER_NOT_FOUND"
+	// CodeHelperMismatch: the side helper speaks another protocol version
+	// than this eyedbg.
+	CodeHelperMismatch Code = "HELPER_MISMATCH"
+	// CodeHelperFailed: the side helper crashed, exited, broke protocol or
+	// didn't finish in time.
+	CodeHelperFailed Code = "HELPER_FAILED"
+	// CodeNotDotnet: the target process has no .NET diagnostics endpoint and
+	// shows no sign of being a .NET process, or the session debugs another
+	// language.
+	CodeNotDotnet Code = "NOT_DOTNET"
+	// CodeDiagnosticsDisabled: the target is a .NET process whose
+	// diagnostics endpoint is off or out of reach.
+	CodeDiagnosticsDisabled Code = "DIAGNOSTICS_DISABLED"
+	// CodeDiagnosticsTimeout: the target didn't start a diagnostics session,
+	// or sent no data, in time (paused, stopped under a debugger, or hung).
+	CodeDiagnosticsTimeout Code = "DIAGNOSTICS_TIMEOUT"
 )
 
 // Error is a user-facing error: a stable code, a message and an optional hint

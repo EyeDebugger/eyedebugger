@@ -20,9 +20,11 @@ tasks:
     silent: true
 
   build:
-    desc: Build all binaries for this platform into ./bin
+    desc: Build all binaries for this platform into ./bin, and the .NET side helper into ./bin/helpers/dotnet when dotnet is installed
     cmds:
       - go build -trimpath -ldflags "{{.LDFLAGS}}" -o bin/ ./cmd/...
+      # A shell `if`, not Task's `if:` key (Task >= 3.48 only).
+      - if command -v dotnet >/dev/null 2>&1; then "{{.TASK_EXE}}" helper:build; else echo "dotnet not found; skipped the .NET side helper (eyedbg dotnet needs it; install the .NET 10 SDK)"; fi
 
   build:cross:
     desc: Compile every package for linux, darwin, windows x amd64, arm64 (CGO disabled)
@@ -103,15 +105,81 @@ tasks:
       - goreleaser check
 
   snapshot:
-    desc: Build release archives and the VSIX's checksum into ./dist without publishing (needs goreleaser v2, Node and pnpm)
+    desc: Build release archives (with the .NET helper) and the VSIX's checksum into ./dist without publishing (needs goreleaser v2, Node and pnpm, the .NET 10 SDK)
     cmds:
       - task: ext:package
+      - task: helper:dist
       - goreleaser release --snapshot --clean
 
   clean:
     desc: Remove build output
     cmds:
-      - rm -rf bin dist
+      - rm -rf bin dist helpers/dotnet/artifacts
+
+  # The .NET side helper (helpers/dotnet; docs/adr/0016): the .NET 10 SDK
+  # (helpers/dotnet/global.json); every dotnet command runs in helpers/dotnet.
+  # Restores are locked to packages.lock.json.
+  helper:restore:
+    desc: Restore the helper's NuGet packages (locked to the lock files)
+    dir: helpers/dotnet
+    cmds:
+      - dotnet restore --locked-mode
+
+  helper:build:
+    desc: Build the .NET side helper into ./bin/helpers/dotnet, next to eyedbg
+    dir: helpers/dotnet
+    sources:
+      - src/**/*
+      - "*.props"
+      - global.json
+      - nuget.config
+      - THIRD-PARTY-NOTICES.txt
+      - exclude: src/**/bin/**
+      - exclude: src/**/obj/**
+    generates:
+      - ../../bin/helpers/dotnet/eyedbg-dotnet-helper.dll
+    cmds:
+      - dotnet publish src/EyeDbg.DotnetHelper/EyeDbg.DotnetHelper.csproj -c Release -p:RestoreLockedMode=true -p:InformationalVersion={{trimPrefix "v" .VERSION}} -o ../../bin/helpers/dotnet
+
+  helper:dist:
+    desc: Publish the .NET side helper into helpers/dotnet/artifacts/dist for goreleaser
+    dir: helpers/dotnet
+    cmds:
+      - rm -rf artifacts/dist
+      - dotnet publish src/EyeDbg.DotnetHelper/EyeDbg.DotnetHelper.csproj -c Release -p:RestoreLockedMode=true -p:InformationalVersion={{trimPrefix "v" .VERSION}} -o artifacts/dist
+
+  helper:test:
+    desc: Run the helper's unit tests (xUnit v3)
+    dir: helpers/dotnet
+    cmds:
+      - dotnet run --project tests/EyeDbg.DotnetHelper.Tests -c Release
+
+  helper:fmt:
+    desc: Format the helper's C# (dotnet format)
+    dir: helpers/dotnet
+    cmds:
+      - dotnet format
+
+  helper:lint:
+    desc: Check the helper's formatting and build it with analyzers as errors
+    dir: helpers/dotnet
+    cmds:
+      - dotnet format --verify-no-changes
+      - dotnet build -c Release --no-restore
+
+  helper:vuln:
+    desc: Audit the helper's NuGet packages (advisories are errors)
+    dir: helpers/dotnet
+    cmds:
+      - dotnet restore --locked-mode --force -p:EyeDbgNuGetAudit=true
+
+  helper:ci:
+    desc: Run the helper checks CI runs
+    cmds:
+      - task: helper:restore
+      - task: helper:lint
+      - task: helper:test
+      - task: helper:vuln
 
   # The VS Code extension (extensions/vscode; docs/adr/0015): Node 24 LTS
   # (>= 22.13) and pnpm (corepack enable, or any pnpm >= 11, which switches
@@ -185,7 +253,8 @@ tasks:
       - task: vuln
 
   ci:
-    desc: Run the checks CI runs (Go and the VS Code extension; needs Node and pnpm — 'task ci:go' for Go only)
+    desc: Run the checks CI runs (Go, the VS Code extension and the .NET helper; needs Node and pnpm and the .NET 10 SDK — 'task ci:go' for Go only)
     cmds:
       - task: ci:go
       - task: ext:ci
+      - task: helper:ci

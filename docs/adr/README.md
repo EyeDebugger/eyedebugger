@@ -25,6 +25,7 @@ security model, major dependencies, licensing and the contribution process.
 | [0013](0013-socket-transport-and-native-manifest-languages.md) | A socket transport and three more manifest-only native languages | accepted |
 | [0014](0014-presence-lease-requests-and-shared-breakpoints.md) | Presence, lease requests and sharing breakpoints with editors | proposed |
 | [0015](0015-the-vs-code-extension.md) | The VS Code extension: toolchain, dependency policy and shared-breakpoint UX | proposed |
+| [0016](0016-a-csharp-side-helper-for-dotnet-diagnostics.md) | A C# side helper for .NET diagnostics | proposed |
 
 ## Process
 

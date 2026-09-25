@@ -39,7 +39,10 @@ func errorID(code api.Code) int {
 		return 7099
 	case api.CodeUnknownMethod, api.CodeUnauthorized, api.CodeDaemonNotRunning, api.CodeDaemonStart,
 		api.CodeVersionMismatch, api.CodeSessionsActive, api.CodeAdapterMissing, api.CodeBuildFailed,
-		api.CodeAttachFailed, api.CodeNoTestHost, api.CodeAnchorNotFound, api.CodeAnchorAmbiguous:
+		api.CodeAttachFailed, api.CodeNoTestHost, api.CodeAnchorNotFound, api.CodeAnchorAmbiguous,
+		// Side-helper codes ('eyedbg dotnet'): never a facade answer.
+		api.CodeHelperNotFound, api.CodeHelperMismatch, api.CodeHelperFailed, api.CodeNotDotnet,
+		api.CodeDiagnosticsDisabled, api.CodeDiagnosticsTimeout:
 		return 7000
 	default:
 		return 7000

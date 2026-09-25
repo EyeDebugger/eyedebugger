@@ -99,6 +99,8 @@ func (h *harness) env(overrides map[string]string) []string {
 		"EYEDBG_CLIENT":       "",
 		"EYEDBG_SESSION":      "",
 		"EYEDBG_DAEMON_PATH":  "",
+		// The .NET helper e2e tests the default lookup (next to eyedbg).
+		"EYEDBG_DOTNET_HELPER": "",
 	}
 
 	maps.Copy(all, overrides)

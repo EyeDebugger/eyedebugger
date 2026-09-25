@@ -175,3 +175,30 @@ The VS Code extension (ADR 0015) follows the same rules where they apply; these 
 - Biome formats and lints (`task ext:fmt`, `task ext:lint`); `// biome-ignore <rule>: <reason>` is
   the only suppression form.
 - Every `.ts` and `.mjs` file starts with the two-line SPDX header.
+
+## C# (helpers/dotnet)
+
+The .NET side helper (ADR 0016) follows the same rules where they apply; these are its own.
+
+- Every `dotnet` command runs in `helpers/dotnet` (its `global.json` pins the 10.0.x SDK; the
+  repository root has none, so users' projects built under a daemon started in this repository
+  keep their own SDK).
+- Every `.cs` file starts with the two-line SPDX header, enforced by IDE0073
+  (`helpers/dotnet/.editorconfig`'s `file_header_template`), at build and by `dotnet format`.
+- Analyzers at `AnalysisLevel` `10.0-recommended` (pinned, never `latest`), code style enforced at
+  build, warnings as errors; a suppression is an `.editorconfig` entry or `[SuppressMessage]` with
+  its reason. `task helper:fmt` formats; `task helper:lint` checks.
+- stdout is the protocol only: `Program` calls `Console.SetOut(Console.Error)` first and writes
+  messages through `Console.OpenStandardOutput()`, one line each, under 1 MiB.
+- Nothing read from a target process (values, memory, environment, command lines) goes into
+  stderr, exception messages or results beyond what a method's contract names (counter values);
+  messages may name a pid, a process name and an exception type.
+- `DiagnosticsClient`: only `GetPublishedProcesses` and `StartEventPipeSession[Async]` (read-only
+  diagnostics); a new call needs its own review.
+- An EventPipe stream is always drained on its own thread until the session ends; every wait on
+  the target (session start, stop) is bounded.
+- Packages: exact versions in `Directory.Packages.props`, lock files committed, restores locked
+  (`--locked-mode`, or `RestoreLockedMode` in CI), nuget.org only (`nuget.config` source mapping).
+  A package whose assembly ships needs a `THIRD-PARTY-NOTICES.txt` entry (CI checks).
+- Tests: xUnit v3 (`xunit.v3.mtp-off`), run as a program (`task helper:test`); table-driven
+  (`[Theory]`), no sleeps — gate on tasks and cancellation, like the Go side.

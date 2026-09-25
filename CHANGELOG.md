@@ -77,9 +77,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs `eyedbg sessions` every 5 s while the window has focus and nothing is joined);
   `launch.json` snippets for Python and .NET; a *Get started* walkthrough; **EyeDebugger: Check
   eyedbg Installation**.
+- `eyedbg dotnet ps` and `eyedbg dotnet counters` (phase 2, ADR 0016): inspect a running .NET
+  process without pausing it. `dotnet ps` lists your processes with a .NET diagnostics endpoint
+  (pid, name, and the session debugging each). `dotnet counters [-s ID | --pid N]` samples the
+  System.Runtime counters (CPU, memory, GC, allocation, exceptions, thread pool, lock contention,
+  JIT, …) for `--duration` (default 5s) every `--interval` (default 1s) and prints per counter the
+  last value and range, or the total and rate; `--counters NAME,...` narrows them, `--watch` prints
+  each sample, about one interval after it is taken (interrupting drops the newest), `--json`
+  everywhere. Read-only (an EventPipe session inside the
+  process), your own processes only (on a shared machine another user can pose as a process's
+  diagnostics endpoint unless its TMPDIR is private; see `eyedbg help dotnet`), no control lease,
+  nothing in the session's events; a session
+  stopped at a breakpoint is refused (`NOT_RUNNING`: a stopped runtime can't start a diagnostics
+  session). New error codes: `NOT_DOTNET`, `DIAGNOSTICS_DISABLED`, `DIAGNOSTICS_TIMEOUT` (exit 2),
+  `HELPER_NOT_FOUND`, `HELPER_MISMATCH` (exit 3), `HELPER_FAILED` (exit 4). `version --json`
+  features add `"dotnet.helper"`.
+- The .NET side helper `eyedbg-dotnet-helper` (`helpers/dotnet`, C#, runs on .NET 8 or later) ships
+  in every release archive under `helpers/dotnet/`, with `THIRD-PARTY-NOTICES.txt` for the MIT
+  licensed Microsoft assemblies it carries; `$EYEDBG_DOTNET_HELPER` overrides where eyedbg looks
+  for it.
 
 ### Changed
 
+- CI builds, tests (on .NET 8 and 10, Linux/macOS/Windows) and audits the .NET helper (`helper`
+  job), publishes it in an unprivileged `helper-dist` job and checks every snapshot archive carries
+  it and that the extracted Linux archive runs `eyedbg dotnet ps`; release.yml builds it in an
+  unprivileged `helper` job and the release fails without it. The e2e job installs the .NET SDK on
+  every platform (the helper e2e runs where netcoredbg has no build too). `task ci` also runs
+  `helper:ci` (needs the .NET 10 SDK); `task build` builds the helper when `dotnet` is installed;
+  Dependabot updates its NuGet packages.
 - `task ci` now also runs the extension's checks (Node 24 and pnpm; `task ci:go` for Go alone),
   with `ext:*` tasks for each; CI has an `extension` job (Linux, macOS, Windows) running them and
   the extension's integration suite in VS Code 1.100.0 and 1.139.0.

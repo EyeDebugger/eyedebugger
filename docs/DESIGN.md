@@ -1,6 +1,6 @@
 # EyeDebugger (`eyedbg`) — AI-native debugger (design)
 
-Status: v0.3 · 2026-09-24 · phase 1 (MVP) complete; phase 2: DAP facade (P2-M1), collaboration (P2-M2)
+Status: v0.3 · 2026-09-25 · phase 1 (MVP) complete; phase 2: DAP facade (P2-M1), collaboration (P2-M2), VS Code extension (P2-M3, P2-M5), .NET side helper (P2-M6)
 
 ## 1. What and why
 
@@ -30,10 +30,10 @@ eyedbg CLI (stateless) ──┐
 VS Code extension (P2) ──┘                                                 │
 DAP client (VS Code, nvim-dap) ─stdio─► eyedbg dap ─ same socket: hello,   ├── DAP facade (per connection)
                                           facade.open, then DAP ──────────►│     └─► session calls
-                                                                           ├── Session ── DAP ──► adapter process
-                                                                           │   (netcoredbg | sharpdbg | debugpy | dlv | lldb-dap | js-debug)
-                                                                           └── Side helpers (JSON-RPC over stdio)
-                                                                               └── eyedbg-dotnet-helper (C#): ClrMD, EventPipe, dumps
+                                                                           └── Session ── DAP ──► adapter process
+                                                                               (netcoredbg | sharpdbg | debugpy | dlv | lldb-dap | js-debug)
+eyedbg dotnet … ─stdio, one process per command (JSON-RPC 2.0)─► side helper eyedbg-dotnet-helper (C#)
+                                                                   └─ diagnostics IPC / EventPipe ─► the target .NET process
 ```
 
 - **Language: Go.** Cross-compiles every OS/arch from one host, ~5 ms process start (matters: agents invoke the CLI many times), `google/go-dap` provides DAP types + framing (used by delve). Measured and sourced in the research notes.
@@ -47,6 +47,9 @@ DAP client (VS Code, nvim-dap) ─stdio─► eyedbg dap ─ same socket: hello,
      switches an authenticated connection on the same socket to DAP (§6, ADR 0012); requests from
      it go through the same lease, state and ownership checks as native calls, because the facade
      calls the same session methods.
+- **Side helpers are run by the CLI, not the daemon** (ADR 0016): `eyedbg dotnet …` starts the
+  helper for one call and closes it; no session state, lease or event is involved. A session only
+  names the target (its program's pid).
 
 ## 3. Core concepts
 
@@ -126,7 +129,7 @@ Design rules:
 
 - Default: compact text (tuned for LLM reading). `--json`: stable schema, versioned (`"schema": 1`).
 - Budgeting: `--budget` (default ~2k tokens for state dumps) enforced by the daemon via depth, max children per node (default 20), string truncation (default 200 chars), collection summaries (`List<Order> Count=1532 [0..19 shown]`). Truncation is always explicit (`…+1512 more, expand: eyedbg vars --expand orders`).
-- Errors: `{code, message, hint}`; codes are stable (`NO_SESSION`, `NOT_STOPPED`, `LEASE_HELD`, `UNSUPPORTED_BY_ADAPTER`, `SIDE_EFFECTS`, `ATTACH_FAILED`, `NO_TEST_HOST`, `ANCHOR_NOT_FOUND`, `ANCHOR_AMBIGUOUS`, …). Exit codes map to classes: 1 usage (incl. `SIDE_EFFECTS`, `ANCHOR_*`), 2 state, 3 setup (incl. `ATTACH_FAILED`, `NO_TEST_HOST`), 4 adapter (incl. `UNSUPPORTED_BY_ADAPTER`).
+- Errors: `{code, message, hint}`; codes are stable (`NO_SESSION`, `NOT_STOPPED`, `LEASE_HELD`, `UNSUPPORTED_BY_ADAPTER`, `SIDE_EFFECTS`, `ATTACH_FAILED`, `NO_TEST_HOST`, `ANCHOR_NOT_FOUND`, `ANCHOR_AMBIGUOUS`, `NOT_DOTNET`, `DIAGNOSTICS_DISABLED`, `DIAGNOSTICS_TIMEOUT`, `HELPER_NOT_FOUND`, `HELPER_MISMATCH`, `HELPER_FAILED`, …). Exit codes map to classes: 1 usage (incl. `SIDE_EFFECTS`, `ANCHOR_*`), 2 state (incl. a target that can't be inspected: `NOT_DOTNET`, `DIAGNOSTICS_*`), 3 setup (incl. `ATTACH_FAILED`, `NO_TEST_HOST`, `HELPER_NOT_FOUND`, `HELPER_MISMATCH`), 4 adapter or side helper (incl. `UNSUPPORTED_BY_ADAPTER`, `HELPER_FAILED`).
 - With no daemon running and autostart disabled (`EYEDBG_NO_AUTOSTART=1`): a command that needs an
   *existing* session (`status`, `bp`, `continue`, `stop`, …) reports `NO_SESSION` (exit 2) — there
   cannot be a session without a daemon, so `internal/cli/session.go`'s `call()` deliberately folds
@@ -175,7 +178,7 @@ As built (`internal/session/driver.go`): `Name()` and `Prepare(ctx, LaunchSpec) 
 - **Trust:** a user manifest names commands eyedbg runs, so it is trusted like the user's shell configuration: never read from a project; on Unix its directory, the parent and the file (checked through the opened handle) must be the user's and writable by neither group nor others (OpenSSH's `st_mode & 022` rule); nothing runs at load; argv never goes through a shell; downloads are https, size-capped and SHA-256-checked before extraction (§11). A `connect`-transport adapter's socket lives in a directory only the same user can enter and is gone, with the listener, on every return path — no TCP fallback: a same-user guard on the adapter's own side can't be relied on cross-platform (ADR 0013).
 - **Capability degradation:** the daemon caches the adapter's `initialize` capabilities; commands needing unsupported features fail with `UNSUPPORTED_BY_ADAPTER` + a hint (e.g. `memory read` on netcoredbg → "use `eyedbg dotnet heap`"). Checked today: `--if` (conditional breakpoints), `func:` (function breakpoints), exception filters (the error names the adapter's), `set` (setExpression, else setVariable); exception details (exceptionInfo) are left out silently when missing. Manifests can't override capabilities yet (schema 1 has no field for it; it would need a session hook).
 - **Stop captures** read the scopes the adapter marks `presentationHint: "locals"` when it marks any, else every cheap scope; `vars` shows every scope.
-- **Side helpers:** out-of-process, JSON-RPC over stdio, any language. Lets .NET-specific inspection live in C# while the core stays Go.
+- **Side helpers:** out-of-process, JSON-RPC over stdio, any language. Lets .NET-specific inspection live in C# while the core stays Go. As built (ADR 0016): the CLI runs one per command — `internal/helper` spawns it in its own process group, says `hello` (protocol version), makes one call whose result may follow notifications, and closes stdin to cancel or end it (killed 2 s later if it hasn't exited); internal/api's line framing (≤ 1 MiB) both ways; its stderr (last 4 KiB, sanitized) is shown only when it fails without answering. The designed `Extensions()` is, for .NET, `drivers/dotnet/helper.go`: the helper's lookup (`$EYEDBG_DOTNET_HELPER`, else `helpers/dotnet/` next to `eyedbg` or next to a symlinked `eyedbg`'s target), protocol, methods and wire types; the verbs live in `internal/cli/dotnet.go`.
 
 ## 8. Language specifics
 
@@ -186,7 +189,7 @@ As built (`internal/session/driver.go`): `Name()` and `Prepare(ctx, LaunchSpec) 
 | Default adapter | **netcoredbg** (Samsung, MIT) 3.2.0 | Binaries: linux-x64/arm64, osx-arm64 ("community supported"), win-x64. No win-arm64 / osx-x64 builds yet: .NET debugging is unavailable there (the CI .NET e2e skips them); building netcoredbg ourselves is future work. Pinned in `internal/adapters/manifests/netcoredbg.json`. |
 | Alt adapter | **SharpDbg** (MIT, C#, `dotnet tool`) | Better eval & `DebuggerDisplay`/`DebuggerTypeProxy`. Young, single maintainer. Selectable: `--adapter sharpdbg`. |
 | Forbidden | **vsdbg** | License restricts it to Microsoft IDEs. Never download, detect, or drive it. |
-| Non-pausing inspection | `eyedbg-dotnet-helper` (C#): ClrMD, DiagnosticsClient/EventPipe | `eyedbg dotnet counters`, `trace`, `dump`, `heap` (stats, top types, gcroot on a dump), `threads` for a hung process. Live-heap reads without suspension are inconsistent → default to dump-then-analyze. |
+| Non-pausing inspection | `eyedbg-dotnet-helper` (C#, `net8.0`, rolled forward): DiagnosticsClient/EventPipe; ClrMD later | Built (P2-M6, ADR 0016): `eyedbg dotnet ps` (your processes with a diagnostics endpoint, and the session debugging each) and `eyedbg dotnet counters` (System.Runtime EventCounters: summary or `--watch`; `--pid N` or the session's running program — a program stopped at a breakpoint can't start a diagnostics session, so that is refused). Later: `dump`, `heap` (stats, top types, gcroot on a dump), `threads` for a hung process, `trace`. Live-heap reads without suspension are inconsistent → default to dump-then-analyze. |
 
 Known netcoredbg gaps to surface honestly: no lambda/LINQ-lambda evaluation, no `readMemory`/`disassemble`, no `DebuggerDisplay`; no native hit counts or logpoints (emulated by the daemon, §4); `evaluate` ignores its context and always runs code, so eval can't be side-effect free — the driver refuses expressions that visibly change the program (a method call, `new`, assignment, `++`/`--`, interpolated strings) without `--allow-side-effects`, but getters, indexers and operators still run; an unhandled exception always stops the program, whatever the exception mode. A function breakpoint also stops with reason `breakpoint`, so the stop filter can't tell its stops from those of a line breakpoint on the function's first line: a `--hit`/`--log` breakpoint there decides the function breakpoint's stops too (documented in `bp add --help`). Driver `Prepare` builds with `dotnet build` unless `--no-build`; it takes no `--opt`. `attach` sends netcoredbg only the pid (Just My Code stays on); an attach failure surfaces at `configurationDone` and becomes `ATTACH_FAILED`. `test` runs `dotnet test -c Debug --tl:off` with `VSTEST_HOST_DEBUG=1 VSTEST_DEBUG_NOBP=1`, reads the `Process Id: N, Name: …` line vstest.console prints (the host runs under `dotnet`), attaches, and ends with `dotnet test`'s exit code — validated on Linux (.NET 10 SDK). Microsoft.Testing.Platform projects are refused (`NO_TEST_HOST`, hint: debug the test app with `start`), and so are xUnit v3 projects (a `PackageReference` to `xunit.v3`, `xunit.v3.core` or their `mtp-vN` flavors, in the project or a `Directory.Build.props`/`.targets` above it): their VSTest adapter runs the tests in a child of the test host, so the attached host never hits a breakpoint.
 
@@ -344,6 +347,7 @@ Built (P2-M5, ADR 0015 and 0014 addenda):
 - Redaction (§5), not implemented yet. Session recordings (`sessions/<id>.jsonl` in the private runtime dir, 0600, never overwritten, capped at 4 MiB, pruned 7 days after the session ended) hold control events only: started, client, lease, exec, continued, stopped (reason and thread only), breakpoints (conditions included), threads, exited, ended — no program output, stop text, launch arguments, environment or variable values, until redaction exists. On by default; `start --no-record` or `EYEDBG_NO_RECORD=1` turns it off.
 - `attach` only to processes owned by the same user (checked first: Linux `/proc`, other Unix `ps`, Windows the process token's SID), shown as `pid N (name)`, never by command line. For .NET the ptrace-scope/`task_for_pid` hints don't apply: CoreCLR's debugger falls back to its pipe transport when it can't read memory directly (dotnet/runtime `shimremotedatatarget.cpp`), so the real failure modes — not a started .NET runtime, `DOTNET_EnableDiagnostics=0`, another debugger attached, a different `TMPDIR`, another user — are what `ATTACH_FAILED`'s hint lists. A native (non-.NET) manifest-driven adapter's `ATTACH_FAILED` keeps the generic ptrace-scope (Linux)/`task_for_pid` (macOS) hint instead, since such an adapter typically does attach through the OS's own mechanism. `stop` detaches from an attached program, never kills it.
 - `test` passes the filter, framework and environment to `dotnet test` as argv, never through a shell, and runs it in its own process group, killed as a whole by `stop`.
+- The .NET side helper (ADR 0016) inspects only the user's own processes (the `attach` check; `dotnet ps` leaves others' out, which Windows would list), shows them as `pid N (name)` (names from other processes, and counter names and units, made fit for a terminal) and never reads a command line or memory, nor an environment beyond the TMPDIR NETCore.Client looks up on Linux to find the socket; it only lists endpoints and starts EventPipe sessions (no startup hooks, profilers, environment writes or resumes). `$EYEDBG_DOTNET_HELPER` is trusted like shell configuration (absolute paths only; on Windows a `.dll` or `.exe`, never a script); the helper is otherwise found only next to `eyedbg`. A session stopped at a breakpoint is refused before the helper starts; a paused `--pid` ends after 5 s (`DIAGNOSTICS_TIMEOUT`). The same-user check covers the pid, not its endpoint: NETCore.Client finds the endpoint by name (a socket in a temp directory on Unix, a pipe on Windows), so on a shared machine another local user can pose as it — deny, feed false data, and on Windows act with the caller's identity. A private TMPDIR closes it on Unix (macOS's default is private); on Windows only a `dotnet-diagnostic-dsrouter-PID` decoy is refused (ADR 0016).
 - Adapter manifests (§7, ADR 0011): the user's are trusted like shell configuration and permission-checked on Unix, never read from a project; downloads are pinned (https, SHA-256, size) and extracted through a staging directory that refuses escaping entries. The Python interpreter probe runs with `-c` after dropping the working directory from `sys.path`, so a cloned repository's `debugpy.py` or `sitecustomize.py` is never used; the adapter is started by path, never with `-m`. A discovered venv is run only if the user owns it and no one else can write it, and only directories the user owns are searched, so another user's `/tmp/.venv` is never run (on Windows, which has no mode bits, only directories inside the user's profile are searched).
 
 ## 12. Repo layout (Go)
@@ -359,12 +363,14 @@ internal/facade/     DAP facade: an editor's connection served as session calls 
 internal/present/    budgeting, truncation, text/JSON renderers
 internal/adapters/   manifest schema, loader and trust check, templates, installer (download + checksum), Python runtime
 internal/adapters/manifests/   bundled adapter manifests (netcoredbg, debugpy, lldb-dap-{c,cpp,rust}, delve)
-internal/proc/       process owner lookup (attach), process groups (test runs)
+internal/proc/       process owner lookup (attach, dotnet), process groups (test runs, side helpers)
+internal/helper/     side-helper runner: spawn, hello, one call with notifications, cancel/kill (helpertest: the fake helper)
 internal/cli/        command trees for all binaries (only package importing the CLI framework)
 internal/version/    build metadata (ldflags / debug.ReadBuildInfo)
 drivers/dotnet/      Driver impl
 drivers/generic/     manifest-only driver
-helpers/dotnet/      C# side helper (ClrMD, EventPipe)
+helpers/dotnet/      C# side helper (ADR 0016): src/EyeDbg.DotnetHelper (Rpc/, Methods/, Counters/, Diagnostics/),
+                     tests/ (xUnit v3), global.json, nuget.config, Directory.*.props, lock files, THIRD-PARTY-NOTICES.txt
 skill/eyedbg/SKILL.md   agent-facing usage guide, embedded in the binary (`eyedbg skill print|install`)
 internal/e2e/        CLI end-to-end tests driving the real eyedbg/eyedbgd binaries against the sample apps
 testdata/apps/       sample debuggees per language (dotnet/, python/, c/, cpp/, rust/, go/)
@@ -395,6 +401,8 @@ Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; mor
 - **P2-M2 facade collaboration** (done): presence and releasing the lease on the last editor
   disconnect, `lease request`, `eyedbg/*` custom messages, other clients' breakpoints in editors
   (column-1 mark, echoes, retracts, hiding), output replay (ADR 0014).
+- **P2-M6 .NET side helper core** (done): `helpers/dotnet` (C#, protocol 1), `internal/helper`,
+  `eyedbg dotnet ps|counters`, the helper in every release archive (ADR 0016).
 
 **More languages** (ADR 0013, run independently of phase 2's own sequencing): C, C++, Rust
 (lldb-dap, manifest-only, no schema change) and Go (Delve, manifest-only through a new
