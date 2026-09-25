@@ -53,7 +53,7 @@ func fieldError(field, format string, args ...any) error {
 // validate checks m against schema 1; the error names the first bad field.
 func (m *Manifest) validate() error {
 	checks := []func() error{
-		m.validateTop, m.validateAdapter, m.validatePython, m.validateInstall,
+		m.validateTop, m.validateAdapter, m.validatePython, m.validateDotnet, m.validateInstall,
 		m.validateLanguage, m.validateOptions, m.validateTemplates, m.validateExceptions,
 		m.validateEvalGuard,
 	}
@@ -114,8 +114,8 @@ func (m *Manifest) validateAdapter() error {
 	switch {
 	case a.ID == "":
 		return fieldError("adapter.id", "is required")
-	case a.Runtime != RuntimeNative && a.Runtime != RuntimePython:
-		return fieldError("adapter.runtime", "%q is not a runtime (\"\" for an executable, or python)", a.Runtime)
+	case a.Runtime != RuntimeNative && a.Runtime != RuntimePython && a.Runtime != RuntimeDotnet:
+		return fieldError("adapter.runtime", "%q is not a runtime (\"\" for an executable, python or dotnet)", a.Runtime)
 	case a.Entry == "":
 		return fieldError("adapter.entry", "is required")
 	}
@@ -126,8 +126,11 @@ func (m *Manifest) validateAdapter() error {
 		}
 	}
 
-	if a.Runtime == RuntimePython {
+	switch a.Runtime {
+	case RuntimePython:
 		return m.validatePythonAdapter()
+	case RuntimeDotnet:
+		return m.validateDotnetAdapter()
 	}
 
 	if err := checkNativeEntry(a.Entry); err != nil {
@@ -209,6 +212,34 @@ func (m *Manifest) validatePythonAdapter() error {
 
 	if err := checkRelative(a.Entry); err != nil {
 		return fieldError("adapter.entry", "%v", err)
+	}
+
+	return nil
+}
+
+// validateDotnetAdapter checks the adapter fields a .NET adapter has (and
+// those it must not have). Only the .NET driver runs one (drivers/dotnet),
+// so it may serve no language but a built-in one.
+func (m *Manifest) validateDotnetAdapter() error {
+	a := m.Adapter
+
+	switch {
+	case a.Path || len(a.VersionArgs) > 0:
+		return fieldError("adapter", "path and versionArgs are only for native adapters")
+	case m.Dotnet == nil:
+		return fieldError("dotnet", "is required for a dotnet adapter")
+	case m.Language != nil && !m.Language.Builtin:
+		return fieldError("adapter.runtime", "dotnet is only for an adapter the .NET driver runs (no language, or a built-in one)")
+	case a.Env != "" && !matches(envPattern, a.Env):
+		return fieldError("adapter.env", "%q must be an upper-case environment variable name", a.Env)
+	}
+
+	if err := checkRelative(a.Entry); err != nil {
+		return fieldError("adapter.entry", "%v", err)
+	}
+
+	if !strings.EqualFold(path.Ext(a.Entry), ".dll") {
+		return fieldError("adapter.entry", "%q must be the adapter's .dll", a.Entry)
 	}
 
 	return nil
@@ -297,6 +328,22 @@ func checkCommands(cmds [][]string) error {
 		if err := checkNativeEntry(c[0]); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func (m *Manifest) validateDotnet() error {
+	d := m.Dotnet
+	if d == nil {
+		return nil
+	}
+
+	switch {
+	case m.Adapter.Runtime != RuntimeDotnet:
+		return fieldError("dotnet", "is only for adapter.runtime dotnet")
+	case !matches(minVerPattern, d.MinRuntime):
+		return fieldError("dotnet.minRuntime", "%q must be X.Y", d.MinRuntime)
 	}
 
 	return nil

@@ -1,4 +1,4 @@
-session s-k3f9 (dotnet) stopped: exception (Exception thrown: 'System.InvalidOperationException' in app.dll), thread 4242
+session s-k3f9 (dotnet, netcoredbg) stopped: exception (Exception thrown: 'System.InvalidOperationException' in app.dll), thread 4242
   at Program.<Main>$() Program.cs:4
     3 | {
   > 4 |     total += i;

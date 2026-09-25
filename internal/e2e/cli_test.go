@@ -115,8 +115,11 @@ func (h *harness) env(overrides map[string]string) []string {
 		"EYEDBG_DAEMON_PATH":  "",
 		// The .NET helper e2e tests the default lookup (next to eyedbg).
 		"EYEDBG_DOTNET_HELPER": "",
-		adapters.EnvHome:       h.homeDir,
-		adapters.EnvDataDir:    h.dataDir,
+		// The dotnet case tests the default adapter (sharpdbg's passes
+		// --adapter).
+		"EYEDBG_DOTNET_ADAPTER": "",
+		adapters.EnvHome:        h.homeDir,
+		adapters.EnvDataDir:     h.dataDir,
 	}
 
 	maps.Copy(all, overrides)

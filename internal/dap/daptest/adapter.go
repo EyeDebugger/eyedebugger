@@ -452,6 +452,15 @@ func (a *adapter) evaluate(req *godap.EvaluateRequest) {
 		return
 	}
 
+	// An assignment in the repl context sets x, as SharpDbg's evaluator
+	// does (its only way to set a variable).
+	if name, value, ok := strings.Cut(req.Arguments.Expression, " = "); ok && req.Arguments.Context == "repl" {
+		err := a.prog.set(name, value)
+		a.respondOr(req, godap.EvaluateResponseBody{Result: a.prog.x, Type: typeInt}, err)
+
+		return
+	}
+
 	value, ref, ok := a.prog.evaluate(req.Arguments.Expression)
 	if !ok {
 		a.fail(req, "cannot evaluate "+req.Arguments.Expression)

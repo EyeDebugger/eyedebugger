@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
+	"unicode"
 
 	godap "github.com/google/go-dap"
 
@@ -108,7 +110,8 @@ func (s *Session) evaluate(ctx context.Context, p api.EvalParams, evalContext st
 // Set assigns p.Value (an expression) to p.Variable (a name or member path)
 // in frame p.Frame, for client c: an execution request (lease, exec event).
 // It uses the adapter's setExpression, else setVariable on the variable's
-// parent, else it is UNSUPPORTED_BY_ADAPTER.
+// parent, else, when the driver allows it (Launch.SetByEval), evaluates the
+// assignment; otherwise it is UNSUPPORTED_BY_ADAPTER.
 func (s *Session) Set(ctx context.Context, c api.Client, p api.SetParams) (api.SetResult, error) {
 	segs, err := splitPath(p.Variable)
 	if err != nil {
@@ -117,9 +120,15 @@ func (s *Session) Set(ctx context.Context, c api.Client, p api.SetParams) (api.S
 
 	s.mu.Lock()
 	caps, _ := s.capsLocked()
+	byEval := s.setByEval && !caps.SupportsSetExpression && !caps.SupportsSetVariable
 	s.mu.Unlock()
 
-	if !caps.SupportsSetExpression && !caps.SupportsSetVariable {
+	switch {
+	case byEval:
+		if err := checkAssignable(segs); err != nil {
+			return api.SetResult{}, err
+		}
+	case !caps.SupportsSetExpression && !caps.SupportsSetVariable:
 		return api.SetResult{}, s.unsupported("set variables")
 	}
 
@@ -135,6 +144,10 @@ func (s *Session) Set(ctx context.Context, c api.Client, p api.SetParams) (api.S
 	fid, err := s.frameID(ctx, p.Frame)
 	if err != nil {
 		return api.SetResult{}, err
+	}
+
+	if byEval {
+		return s.setByEvaluate(ctx, fid, joinPath(segs), p)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
@@ -153,6 +166,76 @@ func (s *Session) Set(ctx context.Context, c api.Client, p api.SetParams) (api.S
 	}
 
 	return s.setVariable(ctx, fid, segs, p)
+}
+
+// setByEvaluate assigns p.Value to path (p.Variable's segments, which
+// checkAssignable has checked, joined again) by evaluating "PATH = VALUE" in
+// the repl context at frame fid, for an adapter whose evaluator runs
+// assignments but that has neither setExpression nor setVariable. The
+// result is the assignment's value, as the adapter reports it.
+func (s *Session) setByEvaluate(ctx context.Context, fid int, path string, p api.SetParams) (api.SetResult, error) {
+	body, err := s.evalBody(ctx, fid, path+" = "+p.Value, contextRepl)
+	if err != nil {
+		return api.SetResult{}, err
+	}
+
+	return api.SetResult{Variable: p.Variable, Value: truncate(body.Result), Type: body.Type}, nil
+}
+
+// checkAssignable checks that segs (splitPath's) are a plain member path
+// when set is evaluated as an assignment: names (identifiers) and indexes
+// that are an integer or a simple string literal, so that the path itself
+// can't call anything; the value is an expression, as with setExpression.
+func checkAssignable(segs []string) error {
+	for _, seg := range segs {
+		ok := isIdentifier(seg)
+		if inner, found := strings.CutPrefix(seg, "["); found {
+			inner = strings.TrimSuffix(inner, "]")
+			ok = isIndexLiteral(inner)
+		}
+
+		if !ok {
+			return api.NewError(api.CodeInvalidRequest,
+				"with this adapter set takes a name or member path (names, [N] or [\"key\"] indexes); "+seg+" is not one",
+				"to run another assignment, use 'eyedbg eval EXPR --allow-side-effects'")
+		}
+	}
+
+	return nil
+}
+
+// isIdentifier reports whether s is a C#-style identifier: letters, digits
+// and '_', not starting with a digit, optionally after '@'.
+func isIdentifier(s string) bool {
+	s = strings.TrimPrefix(s, "@")
+	if s == "" {
+		return false
+	}
+
+	for i, r := range s {
+		if r != '_' && !unicode.IsLetter(r) && (i == 0 || !unicode.IsDigit(r)) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isIndexLiteral reports whether s is an integer or a double-quoted string
+// without quotes, backslashes or control characters inside.
+func isIndexLiteral(s string) bool {
+	if n := strings.TrimPrefix(s, "-"); n != "" && strings.Trim(n, "0123456789") == "" {
+		return true
+	}
+
+	inner, ok := strings.CutPrefix(s, `"`)
+	if !ok || !strings.HasSuffix(inner, `"`) {
+		return false
+	}
+
+	inner = strings.TrimSuffix(inner, `"`)
+
+	return !strings.ContainsFunc(inner, func(r rune) bool { return r == '"' || r == '\\' || unicode.IsControl(r) })
 }
 
 // setVariable sets the last of segs through setVariable on its parent: the

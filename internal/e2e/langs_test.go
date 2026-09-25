@@ -74,7 +74,7 @@ type langCase struct {
 func langCases(t *testing.T) []langCase {
 	t.Helper()
 
-	return []langCase{fakeCase(t), pythonCase(t), dotnetCase(t), cCase(t), goCase(t)}
+	return []langCase{fakeCase(t), pythonCase(t), dotnetCase(t), sharpdbgCase(t), cCase(t), goCase(t)}
 }
 
 // fakeCase is always on: the fake adapter is this test binary
@@ -151,9 +151,11 @@ func pythonCase(t *testing.T) langCase {
 	return lc
 }
 
-// dotnetCase needs EYEDBG_E2E=1 and a platform netcoredbg has a download
-// for; testdata/apps/dotnet/console/Program.cs has no markers, so its
-// lines are literal.
+// dotnetCase needs EYEDBG_E2E=1 and a dotnet adapter this platform
+// defaults to (requireDotnetE2E); testdata/apps/dotnet/console/Program.cs
+// has no markers, so its lines are literal. It starts with the default
+// adapter (no --adapter): netcoredbg, or SharpDbg where netcoredbg has no
+// build.
 func dotnetCase(t *testing.T) langCase {
 	t.Helper()
 
@@ -193,19 +195,61 @@ func dotnetCase(t *testing.T) langCase {
 	}
 }
 
-// requireDotnetE2E skips t unless EYEDBG_E2E=1 and netcoredbg's bundled
-// manifest has a download for this platform, or netcoredbg can otherwise be
-// found (EYEDBG_NETCOREDBG, already installed, or on PATH) — drivers/dotnet's
-// dotnetE2ESkip; duplicated here since that helper is unexported in a
-// _test.go file of another package.
+// sharpdbgCase is dotnetCase with --adapter sharpdbg, wherever SharpDbg
+// can run (requireSharpDbgE2E).
+func sharpdbgCase(t *testing.T) langCase {
+	t.Helper()
+
+	lc := dotnetCase(t)
+	startArgs := lc.startArgs
+
+	lc.name = dotnet.SharpDbg
+	lc.require = func(t *testing.T) {
+		t.Helper()
+		requireSharpDbgE2E(t)
+	}
+	lc.startArgs = func(t *testing.T) []string {
+		t.Helper()
+
+		return append(startArgs(t), "--adapter", dotnet.SharpDbg)
+	}
+
+	return lc
+}
+
+// envE2EAdapters narrows which .NET adapters the end-to-end tests run
+// with, as in drivers/dotnet: unset runs both; set (comma-separated) skips
+// an adapter not listed, naming the variable.
+const envE2EAdapters = "EYEDBG_E2E_DOTNET_ADAPTERS"
+
+// requireDotnetAdapter skips t unless EYEDBG_E2E=1, EYEDBG_E2E_LANGS allows
+// dotnet and EYEDBG_E2E_DOTNET_ADAPTERS allows adapter.
+func requireDotnetAdapter(t *testing.T, adapter string) {
+	t.Helper()
+
+	if os.Getenv(envE2E) != "1" {
+		t.Skip("set " + envE2E + "=1 (needs the .NET SDK, 'eyedbg adapters install netcoredbg' and 'eyedbg adapters install sharpdbg')")
+	}
+
+	requireLang(t, dotnet.Language)
+
+	if list := os.Getenv(envE2EAdapters); list != "" && !slices.Contains(strings.Split(list, ","), adapter) {
+		t.Skipf("%s=%s excludes %s", envE2EAdapters, list, adapter)
+	}
+}
+
+// requireDotnetE2E skips t unless the adapter a dotnet session uses here by
+// default can run (requireDotnetAdapter): netcoredbg where its bundled
+// manifest has a download for this platform or it can otherwise be found
+// (EYEDBG_NETCOREDBG, already installed, or on PATH), else SharpDbg (the
+// driver's default there, once installed), unless the driver withholds that
+// default on this platform. Uninstalled, the adapter fails the test.
 func requireDotnetE2E(t *testing.T) {
 	t.Helper()
 
 	if os.Getenv(envE2E) != "1" {
-		t.Skip("set " + envE2E + "=1 (needs the .NET SDK and 'eyedbg adapters install netcoredbg')")
+		t.Skip("set " + envE2E + "=1 (needs the .NET SDK, 'eyedbg adapters install netcoredbg' and 'eyedbg adapters install sharpdbg')")
 	}
-
-	requireLang(t, dotnet.Language)
 
 	reg := adapters.Load(adapters.LoadConfig{Bundled: adapters.Bundled(), Builtin: []string{dotnet.Language}})
 
@@ -217,8 +261,31 @@ func requireDotnetE2E(t *testing.T) {
 	_, hasDownload := m.Install.Downloads[runtime.GOOS+"/"+runtime.GOARCH]
 	_, findErr := adapters.Find(m)
 
-	if !hasDownload && findErr != nil {
-		t.Skipf("netcoredbg has no download for %s/%s, and none was otherwise found (EYEDBG_NETCOREDBG, installed, or PATH)", runtime.GOOS, runtime.GOARCH)
+	if hasDownload || findErr == nil {
+		requireDotnetAdapter(t, m.Name)
+
+		return
+	}
+
+	platform := runtime.GOOS + "/" + runtime.GOARCH
+	if reason := dotnet.SharpDbgWithheld(platform); reason != "" {
+		t.Skipf("netcoredbg has no download for %s, none was otherwise found, and SharpDbg is withheld there: %s", platform, reason)
+	}
+
+	requireDotnetAdapter(t, dotnet.SharpDbg)
+}
+
+// requireSharpDbgE2E skips t unless SharpDbg's e2e can run here
+// (requireDotnetAdapter), and the driver doesn't withhold SharpDbg on this
+// platform. Uninstalled, SharpDbg fails the test.
+func requireSharpDbgE2E(t *testing.T) {
+	t.Helper()
+
+	requireDotnetAdapter(t, dotnet.SharpDbg)
+
+	platform := runtime.GOOS + "/" + runtime.GOARCH
+	if reason := dotnet.SharpDbgWithheld(platform); reason != "" {
+		t.Skipf("SharpDbg is withheld on %s (drivers/dotnet SharpDbgWithheld): %s", platform, reason)
 	}
 }
 

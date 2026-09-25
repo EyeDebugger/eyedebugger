@@ -7,6 +7,7 @@
 //   dotnet breadth.dll wait MARKER    ticks until the file MARKER exists
 //   dotnet breadth.dll hold MARKER    like wait, keeping 5000 objects and a contended lock (Hold.cs)
 //   dotnet breadth.dll burn MARKER    a busy main thread and an allocating one until MARKER exists (Burn.cs)
+//   dotnet breadth.dll display        a [DebuggerDisplay] value and a list (Display.cs)
 var scenario = args.Length > 0 ? args[0] : "loop";
 
 switch (scenario)
@@ -28,6 +29,9 @@ switch (scenario)
         break;
     case "burn":
         Burn.Run(args[1]);
+        break;
+    case "display":
+        Display.Run();
         break;
     default:
         Console.Error.WriteLine($"unknown scenario {scenario}");

@@ -214,7 +214,12 @@ func snapshotHeader(snap api.Snapshot) string {
 
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "session %s (%s) %s", s.ID, s.Lang, s.State)
+	lang := s.Lang
+	if s.Adapter != "" {
+		lang += ", " + s.Adapter
+	}
+
+	fmt.Fprintf(&b, "session %s (%s) %s", s.ID, lang, s.State)
 
 	switch s.State {
 	case api.StateStopped:
@@ -272,7 +277,7 @@ func writeSessions(w io.Writer, list []api.SessionInfo, asJSON bool) error {
 	)
 
 	tw := tabwriter.NewWriter(&table, 0, 0, 2, ' ', 0)
-	_, _ = io.WriteString(tw, "ID\tLANG\tSTATE\tLEASE\tCONNECTED\tPROGRAM\n")
+	_, _ = io.WriteString(tw, "ID\tLANG\tADAPTER\tSTATE\tLEASE\tCONNECTED\tPROGRAM\n")
 
 	for i := range list {
 		s := &list[i]
@@ -292,7 +297,12 @@ func writeSessions(w io.Writer, list []api.SessionInfo, asJSON bool) error {
 			holder = s.Lease.Holder
 		}
 
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", s.ID, s.Lang, state, holder, connectedClients(s.Clients), s.Program)
+		adapter := s.Adapter
+		if adapter == "" {
+			adapter = "-"
+		}
+
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.ID, s.Lang, adapter, state, holder, connectedClients(s.Clients), s.Program)
 	}
 
 	_ = tw.Flush() // writes to a strings.Builder cannot fail

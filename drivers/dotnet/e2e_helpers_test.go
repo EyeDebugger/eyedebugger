@@ -45,43 +45,109 @@ func requireLang(t *testing.T, lang string) {
 	}
 }
 
-// requireE2E skips the test unless the end-to-end tests are enabled, and
-// unless netcoredbg's bundled manifest has a download for this platform or
-// netcoredbg can otherwise be found (EYEDBG_NETCOREDBG, already installed,
-// or on PATH): e2e-count=5 in CI only runs where the adapter can actually
-// run, but a self-built netcoredbg on a platform with no official download
-// (osx-x64, win-arm64) can still be validated this way.
+// envE2EAdapters narrows which .NET adapters the end-to-end tests run
+// with: unset runs both; set (comma-separated) skips an adapter not listed,
+// naming the variable (never silently).
+const envE2EAdapters = "EYEDBG_E2E_DOTNET_ADAPTERS"
+
+// e2eAdapterNames are the adapters every .NET e2e test runs with, each as
+// a subtest.
+func e2eAdapterNames() []string { return []string{"netcoredbg", dotnet.SharpDbg} }
+
+// traits is what differs between the adapters, as the tests see it
+// (docs/adr/0017's parity table).
+type traits struct {
+	// pause: pause stops the program (SharpDbg's is refused:
+	// UNSUPPORTED_BY_ADAPTER).
+	pause bool
+	// display: eval shows [DebuggerDisplay] values and runs lambdas
+	// (netcoredbg shows {Type} and can't parse a lambda).
+	display bool
+}
+
+// adapterTraits are each adapter's traits.
+func adapterTraits(adapter string) traits {
+	if adapter == dotnet.SharpDbg {
+		return traits{pause: false, display: true}
+	}
+
+	return traits{pause: true, display: false}
+}
+
+// forEachAdapter runs test as a subtest per adapter (named after it), each
+// behind requireAdapter.
+func forEachAdapter(t *testing.T, test func(t *testing.T, adapter string)) {
+	t.Helper()
+
+	for _, a := range e2eAdapterNames() {
+		t.Run(a, func(t *testing.T) {
+			requireAdapter(t, a)
+			test(t, a)
+		})
+	}
+}
+
+// requireE2E skips the test unless the end-to-end tests are enabled for
+// dotnet (EYEDBG_E2E=1, and EYEDBG_E2E_LANGS unset or naming dotnet).
 func requireE2E(t *testing.T) {
 	t.Helper()
 
 	if os.Getenv(envE2E) != "1" {
-		t.Skip("set " + envE2E + "=1 (needs the .NET SDK and 'eyedbg adapters install netcoredbg')")
+		t.Skip("set " + envE2E + "=1 (needs the .NET SDK, 'eyedbg adapters install netcoredbg' and 'eyedbg adapters install sharpdbg')")
 	}
 
 	requireLang(t, dotnet.Language)
+}
+
+// requireAdapter skips t unless adapter can run here (requireE2E first):
+// EYEDBG_E2E_DOTNET_ADAPTERS names it (or is unset), and its bundled
+// manifest has a download for this platform or it is otherwise found
+// (EYEDBG_NETCOREDBG / EYEDBG_SHARPDBG, already installed, or on PATH). An
+// adapter with a download here that isn't installed fails the test (never
+// skips): CI installs both. e2e-count=5 in CI only runs where the adapter
+// can actually run, but a self-built netcoredbg on a platform with no
+// official download (osx-x64, win-arm64) can still be validated this way.
+func requireAdapter(t *testing.T, adapter string) {
+	t.Helper()
+
+	requireE2E(t)
+
+	if list := os.Getenv(envE2EAdapters); list != "" && !slices.Contains(strings.Split(list, ","), adapter) {
+		t.Skipf("%s=%s excludes %s", envE2EAdapters, list, adapter)
+	}
 
 	reg := adapters.Load(adapters.LoadConfig{Bundled: adapters.Bundled(), Builtin: []string{dotnet.Language}})
 
-	m := reg.Language(dotnet.Language)
+	m := reg.Adapter(adapter)
 	if m == nil || m.Install == nil {
-		t.Fatal("no bundled netcoredbg manifest for dotnet (or it has no install section)")
+		t.Fatalf("no bundled %s manifest (or it has no install section)", adapter)
 	}
 
-	_, hasDownload := m.Install.Downloads[runtime.GOOS+"/"+runtime.GOARCH]
-	_, findErr := adapters.Find(m)
-	found := hasDownload || findErr == nil
+	_, hasDownload := m.DownloadFor(runtime.GOOS, runtime.GOARCH)
 
-	if skip, reason := dotnetE2ESkip(runtime.GOOS, runtime.GOARCH, found); skip {
+	found := hasDownload
+	if !found && m.Adapter.Runtime == adapters.RuntimeNative {
+		_, err := adapters.Find(m)
+		found = err == nil
+	}
+
+	if skip, reason := dotnetE2ESkip(adapter, runtime.GOOS, runtime.GOARCH, found); skip {
 		t.Skip(reason)
+	}
+
+	platform := runtime.GOOS + "/" + runtime.GOARCH
+	if reason := dotnet.SharpDbgWithheld(platform); adapter == dotnet.SharpDbg && reason != "" {
+		t.Skipf("SharpDbg is withheld on %s (drivers/dotnet SharpDbgWithheld): %s", platform, reason)
 	}
 }
 
-// dotnetE2ESkip decides whether the .NET e2e tests should skip on this
-// platform: found reports whether netcoredbg's bundled manifest has a
-// download for goos/goarch, or netcoredbg can otherwise be found.
-func dotnetE2ESkip(goos, goarch string, found bool) (skip bool, reason string) {
+// dotnetE2ESkip decides whether the .NET e2e tests with adapter should
+// skip on this platform: found reports whether its bundled manifest has a
+// download for goos/goarch, or it can otherwise be found.
+func dotnetE2ESkip(adapter, goos, goarch string, found bool) (skip bool, reason string) {
 	if !found {
-		return true, fmt.Sprintf("netcoredbg has no download for %s/%s, and none was otherwise found (EYEDBG_NETCOREDBG, installed, or PATH)", goos, goarch)
+		return true, fmt.Sprintf("%s has no download for %s/%s, and none was otherwise found (its environment variable, installed, or PATH)",
+			adapter, goos, goarch)
 	}
 
 	return false, ""
@@ -155,7 +221,7 @@ func buildApp(t *testing.T, dir, name string) string {
 }
 
 // TestDotnetE2ESkip covers dotnetE2ESkip's platform decision: only found
-// decides, goos/goarch merely shape the reason.
+// decides, the adapter and goos/goarch merely shape the reason.
 func TestDotnetE2ESkip(t *testing.T) {
 	t.Parallel()
 
@@ -173,13 +239,13 @@ func TestDotnetE2ESkip(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		skip, reason := dotnetE2ESkip(tt.goos, tt.goarch, tt.found)
+		skip, reason := dotnetE2ESkip("netcoredbg", tt.goos, tt.goarch, tt.found)
 		if skip != tt.wantSkip {
 			t.Errorf("dotnetE2ESkip(%q, %q, %v) skip = %v, want %v", tt.goos, tt.goarch, tt.found, skip, tt.wantSkip)
 		}
 
-		if skip && !strings.Contains(reason, tt.goos+"/"+tt.goarch) {
-			t.Errorf("dotnetE2ESkip(%q, %q, %v) reason = %q, want it to name the platform", tt.goos, tt.goarch, tt.found, reason)
+		if skip && (!strings.Contains(reason, tt.goos+"/"+tt.goarch) || !strings.HasPrefix(reason, "netcoredbg ")) {
+			t.Errorf("dotnetE2ESkip(%q, %q, %v) reason = %q, want it to name the adapter and the platform", tt.goos, tt.goarch, tt.found, reason)
 		}
 
 		if !skip && reason != "" {

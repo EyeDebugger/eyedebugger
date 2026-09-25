@@ -153,7 +153,9 @@ jobs:
         run: |
           set -euo pipefail
           # netcoredbg has no osx-x64 release (macos-15-intel) or win-arm64 release
-          # (windows-11-arm); the race detector doesn't support windows/arm64 either.
+          # (windows-11-arm): there the .NET debugger e2e runs with SharpDbg alone
+          # (installed on every entry; the driver's default where netcoredbg has no
+          # build, docs/adr/0017). The race detector doesn't support windows/arm64.
           # langs is EYEDBG_E2E_LANGS: "" runs every language (Linux and macOS install
           # lldb-18/xcrun's lldb-dap below); Windows has no lldb-dap story yet, so its
           # entries exclude c, cpp and rust. Delve publishes a windows/amd64 build (so
@@ -233,19 +235,24 @@ jobs:
       - name: Install netcoredbg
         if: matrix.netcoredbg
         run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters install netcoredbg"
-      - name: No .NET debugger e2e here
+      # SharpDbg (docs/adr/0017): opt-in for users, installed here on every
+      # entry so both adapters' .NET e2e runs.
+      - name: Install SharpDbg
+        run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters install sharpdbg"
+      - name: .NET debugger e2e with SharpDbg only
         if: "!matrix.netcoredbg"
         run: |
-          echo "::notice title=.NET debugger e2e skipped::netcoredbg has no $RUNNER_OS/$RUNNER_ARCH release; the .NET helper e2e runs"
-          echo "netcoredbg has no $RUNNER_OS/$RUNNER_ARCH release: .NET debugger e2e skipped; the .NET helper e2e runs" >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=.NET debugger e2e with SharpDbg only::netcoredbg has no $RUNNER_OS/$RUNNER_ARCH release; the .NET debugger e2e runs with SharpDbg (the default here), netcoredbg's subtests skip"
+          echo "netcoredbg has no $RUNNER_OS/$RUNNER_ARCH release: .NET debugger e2e runs with SharpDbg only" >> "$GITHUB_STEP_SUMMARY"
       - name: Install delve
         if: matrix.langs == '' || contains(matrix.langs, 'go')
         run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters install delve"
       - name: Doctor
         run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters doctor python"
       - name: Doctor (dotnet)
-        if: matrix.netcoredbg
         run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters doctor dotnet"
+      - name: Doctor (sharpdbg)
+        run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters doctor sharpdbg"
       - name: Doctor (c)
         if: runner.os != 'Windows'
         run: "\"$RUNNER_TEMP/eyedbg-bin/eyedbg\" adapters doctor c"

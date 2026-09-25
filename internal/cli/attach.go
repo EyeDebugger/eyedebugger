@@ -42,10 +42,11 @@ also the OS's own attach restrictions (Linux ptrace_scope, macOS task_for_pid).
 The program is never killed by eyedbg: 'eyedbg detach' (or 'eyedbg stop') ends the session and
 leaves it running. Starts the daemon if needed.
 
-Output: the session's state, like 'eyedbg start'. Exits 1 for no such process.` + dumpHelp,
+Output: the session's state, like 'eyedbg start'. Exits 1 for no such process.` + adapterHelp + dumpHelp,
 		Example: `  eyedbg attach dotnet --pid 4242
   eyedbg attach dotnet --pid 4242 --bp 'Worker.cs@"ProcessNext()"'
-  eyedbg attach dotnet --pid 4242 --exceptions all --json`,
+  eyedbg attach dotnet --pid 4242 --exceptions all --json
+  eyedbg attach dotnet --pid 4242 --adapter sharpdbg`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if pid < 1 {

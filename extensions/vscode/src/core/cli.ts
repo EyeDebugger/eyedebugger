@@ -13,6 +13,17 @@ import type { LaunchSpec, Result } from './validate';
 /** The features 'eyedbg version --json' must list for this extension. */
 export const requiredFeatures = ['dap', 'presence', 'lease.request', 'dap.collab'] as const;
 
+/** The feature a launch configuration's "adapter" needs: 'eyedbg start --adapter'. */
+export const adapterFeature = 'adapter.select';
+
+/** adapterUnsupported is the error text for a launch with "adapter" on an eyedbg without adapterFeature, else ''. */
+export function adapterUnsupported(spec: LaunchSpec, version: string, features: readonly string[]): string {
+  if (spec.adapter === undefined || features.includes(adapterFeature)) {
+    return '';
+  }
+  return `eyedbg ${version} can't choose a debug adapter ("adapter": "${spec.adapter}"): it lacks ${adapterFeature}`;
+}
+
 export function versionArgs(): string[] {
   return ['version', '--json'];
 }
@@ -37,6 +48,9 @@ export function startArgs(spec: LaunchSpec, client: string): string[] {
   }
   for (const [k, v] of spec.opts) {
     argv.push(`--opt=${k}=${v}`);
+  }
+  if (spec.adapter !== undefined) {
+    argv.push(`--adapter=${spec.adapter}`);
   }
   if (spec.exceptions !== undefined) {
     argv.push(`--exceptions=${spec.exceptions}`);

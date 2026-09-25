@@ -330,7 +330,7 @@ func daemonDrivers(ctx context.Context, reg *adapters.Registry, logger *slog.Log
 		logger.WarnContext(ctx, "adapter manifest ignored", slog.String("path", p.Path), slog.Any("error", p.Err))
 	}
 
-	drivers := []session.Driver{dotnet.NewWith(reg.Language(dotnet.Language))}
+	drivers := []session.Driver{dotnet.NewFrom(reg)}
 
 	return append(drivers, generic.Drivers(reg)...)
 }

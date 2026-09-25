@@ -13,16 +13,21 @@ import (
 )
 
 // TestDebugTests debugs a 'dotnet test' run: a breakpoint in the passing
-// test stops it, and each run ends with dotnet test's exit code.
+// test stops it, and each run ends with dotnet test's exit code, through
+// each adapter.
 func TestDebugTests(t *testing.T) {
-	requireE2E(t)
+	forEachAdapter(t, debugTests)
+}
+
+func debugTests(t *testing.T, adapter string) {
+	t.Helper()
 
 	dir := copyApp(t, "tests")
 	src := filepath.Join(dir, "CalculatorTests.cs")
 	m := newManager(t)
 
 	sess, err := m.Start(t.Context(), agent, api.StartParams{
-		Lang: "dotnet", LaunchSpec: api.LaunchSpec{Project: dir}, Test: &api.TestSpec{Filter: "Adds"},
+		Lang: "dotnet", Adapter: adapter, LaunchSpec: api.LaunchSpec{Project: dir}, Test: &api.TestSpec{Filter: "Adds"},
 		Breakpoints: []api.BreakpointSpec{{File: src, Anchor: "Assert.Equal(5, sum);"}},
 	})
 	if err != nil {
@@ -35,6 +40,10 @@ func TestDebugTests(t *testing.T) {
 		t.Errorf("a + b = %s, want 5", got)
 	}
 
+	if got := sess.Info().Adapter; got != adapter {
+		t.Errorf("test session adapter = %q, want %s", got, adapter)
+	}
+
 	snap := e2eResume(t, sess, session.ExecContinue)
 	if snap.Session.State != api.StateExited || snap.Session.ExitCode == nil || *snap.Session.ExitCode != 0 {
 		t.Fatalf("after continue: %+v, want the run exited 0", snap.Session)
@@ -45,7 +54,7 @@ func TestDebugTests(t *testing.T) {
 	}
 
 	sess, err = m.Start(t.Context(), agent, api.StartParams{
-		Lang: "dotnet", LaunchSpec: api.LaunchSpec{Project: dir, NoBuild: true}, Test: &api.TestSpec{Filter: "Fails"},
+		Lang: "dotnet", Adapter: adapter, LaunchSpec: api.LaunchSpec{Project: dir, NoBuild: true}, Test: &api.TestSpec{Filter: "Fails"},
 	})
 	if err != nil {
 		t.Fatal(err)

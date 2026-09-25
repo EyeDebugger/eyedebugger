@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  adapterUnsupported,
   checkVersion,
   dapArgs,
   dapExitMessage,
@@ -43,6 +44,7 @@ test('start: every flag bound to its value', () => {
       cwd: '-s',
       env: { A: '1', B: 'x=y --as=agent' },
       opts: { module: 'pytest' },
+      adapter: 'sharpdbg',
       exceptions: 'all',
       leasePolicy: 'human-priority',
       stopOnEntry: true,
@@ -60,6 +62,7 @@ test('start: every flag bound to its value', () => {
     '--env=A=1',
     '--env=B=x=y --as=agent',
     '--opt=module=pytest',
+    '--adapter=sharpdbg',
     '--exceptions=all',
     '--lease-policy=human-priority',
     '--stop-on-entry',
@@ -82,6 +85,16 @@ test('start: minimal, no "--" without program arguments', () => {
     '--as=human:x',
     '--json',
   ]);
+});
+
+test('start: "adapter" needs the adapter.select feature', () => {
+  const withAdapter = spec({ lang: 'dotnet', adapter: 'sharpdbg' });
+  assert.equal(adapterUnsupported(withAdapter, '1.0.0', ['dap', 'adapter.select']), '');
+  assert.equal(adapterUnsupported(spec({ lang: 'dotnet' }), '1.0.0', ['dap']), '');
+  assert.equal(
+    adapterUnsupported(withAdapter, '1.0.0', ['dap']),
+    'eyedbg 1.0.0 can\'t choose a debug adapter ("adapter": "sharpdbg"): it lacks adapter.select',
+  );
 });
 
 test('launch cwd: resolved against the folder, absolute in --cwd and the process', () => {

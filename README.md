@@ -4,10 +4,10 @@
 
 [![CI](https://github.com/EyeDebugger/eyedebugger/actions/workflows/ci.yml/badge.svg)](https://github.com/EyeDebugger/eyedebugger/actions/workflows/ci.yml)
 
-> **Alpha (v0.1).** Debug .NET (netcoredbg), Python (debugpy), C, C++, Rust (lldb-dap) and Go
-> (Delve) programs on Linux, macOS and Windows (x64 and arm64; .NET not on Intel Macs or Windows
-> on Arm; C/C++/Rust need lldb-dap on PATH or `EYEDBG_LLDB_DAP`, no managed download). Install
-> below.
+> **Alpha (v0.1).** Debug .NET (netcoredbg, or the opt-in SharpDbg), Python (debugpy), C, C++,
+> Rust (lldb-dap) and Go (Delve) programs on Linux, macOS and Windows (x64 and arm64; .NET on Intel
+> Macs and Windows on Arm through SharpDbg only, `eyedbg adapters install sharpdbg`; C/C++/Rust need
+> lldb-dap on PATH or `EYEDBG_LLDB_DAP`, no managed download). Install below.
 
 ## Why
 
@@ -24,7 +24,7 @@ eyedbg CLI (stateless) ──┐
                          ├── local IPC (JSON-RPC 2.0) ──► eyedbgd (daemon, per user)
 VS Code extension (P2) ──┘     + per-session DAP facade (P2)       │
                                                                    ├── Session ── DAP ──► adapter process
-                                                                   │   (netcoredbg | debugpy | lldb-dap | delve; sharpdbg, js-debug planned)
+                                                                   │   (netcoredbg | sharpdbg | debugpy | lldb-dap | delve; js-debug planned)
                                                                    └── Side helpers (JSON-RPC over stdio)
                                                                        └── eyedbg-dotnet-helper (C#): ClrMD, EventPipe, dumps
 ```
@@ -52,7 +52,8 @@ Full design: [docs/DESIGN.md](docs/DESIGN.md).
 7. ✅ Second language via manifest only: Python through debugpy (`eyedbg start python`), adapter manifests, `adapters ls`, `--opt`.
 
 Phase 1 (MVP) is complete. Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg
-adapter; more languages.
+adapter (done: `--adapter sharpdbg`, [ADR 0017](docs/adr/0017-sharpdbg-as-an-alternative-dotnet-adapter.md));
+more languages.
 
 More languages, done independently of phase 2's own sequencing: C, C++ and Rust via lldb-dap, and
 Go via Delve over a new socket transport (`adapter.transport: "connect"`) — manifest only, no new

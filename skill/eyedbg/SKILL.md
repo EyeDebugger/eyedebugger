@@ -75,8 +75,9 @@ eyedbg stop                                       # always, when done
 - Memory grows: `eyedbg dotnet heap` (top types; `--gcroot TYPE` says why alive). Hang or deadlock:
   `eyedbg dotnet threads` (stacks, lock owners). Both dump first, even while stopped; dumps hold the
   program's memory: private, never share them.
-- Eval can't run lambdas or LINQ; property getters run anyway. `$exception` at an exception stop.
-  An unhandled exception always stops. No .NET on Intel Macs or Windows on Arm.
+- Eval can't run lambdas or LINQ (SharpDbg can: `eyedbg adapters install sharpdbg`, then `--adapter
+  sharpdbg`; it can't pause); getters run anyway. `$exception` at an exception stop. An unhandled
+  exception always stops. Intel Macs and Windows on Arm have only SharpDbg (used once installed).
 
 ## Python
 

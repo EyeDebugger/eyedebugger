@@ -25,9 +25,11 @@ setter. The next --dump changed (or 'eyedbg vars --changed') shows the change.
 
 It changes the program, so it is an execution request: it needs the control lease (see below) and
 is logged in 'eyedbg events' (the variable's name, not the value). It uses the adapter's
-setExpression (netcoredbg) or setVariable; an adapter with neither is UNSUPPORTED_BY_ADAPTER (exit
-4); a value the adapter can't assign is ADAPTER_ERROR (exit 4). Needs a stopped program; returns
-at once.` + leaseHelp + sessionHelp,
+setExpression (netcoredbg) or setVariable; SharpDbg (dotnet --adapter sharpdbg) has neither, so
+there set evaluates "VARIABLE = VALUE" instead, and VARIABLE must be a plain name or member path
+(names, [N] and ["key"] indexes; anything else is INVALID_REQUEST, exit 1). Another adapter with
+neither is UNSUPPORTED_BY_ADAPTER (exit 4); a value the adapter can't assign is ADAPTER_ERROR (exit
+4). Needs a stopped program; returns at once.` + leaseHelp + sessionHelp,
 		Example: `  eyedbg set total 100
   eyedbg set order.Status '"Paid"'
   eyedbg set i 0 --frame 1 --json`,

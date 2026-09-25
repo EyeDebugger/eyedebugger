@@ -21,7 +21,7 @@ var renderTime = time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
 func stoppedSnapshot() api.Snapshot {
 	return api.Snapshot{
 		Session: api.SessionInfo{
-			ID: "s-k3f9", Lang: "dotnet", Program: "/work/app/bin/Debug/net10.0/app.dll", State: api.StateStopped,
+			ID: "s-k3f9", Lang: "dotnet", Adapter: "netcoredbg", Program: "/work/app/bin/Debug/net10.0/app.dll", State: api.StateStopped,
 			PID: 4242, CreatedAt: renderTime,
 			Stop:    &api.StopInfo{Reason: "breakpoint", ThreadID: 4242},
 			Lease:   &api.LeaseInfo{Policy: api.LeaseFree, Holder: "agent", Since: &renderTime},
@@ -62,7 +62,7 @@ func TestSessionRendering(t *testing.T) {
 
 	code := 0
 	exited := api.Snapshot{Session: api.SessionInfo{
-		ID: "s-k3f9", Lang: "dotnet", State: api.StateExited, ExitCode: &code, EndReason: "the program terminated",
+		ID: "s-k3f9", Lang: "dotnet", Adapter: "sharpdbg", State: api.StateExited, ExitCode: &code, EndReason: "the program terminated",
 	}}
 	running := api.Snapshot{Session: api.SessionInfo{ID: "s-k3f9", Lang: "dotnet", State: api.StateRunning}, TimedOut: true}
 	scopes := []api.Scope{{Name: "Locals", More: 3, Vars: []api.Var{

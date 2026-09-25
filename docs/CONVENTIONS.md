@@ -96,7 +96,9 @@
      script against real adapters.
   All real-adapter tests (`EYEDBG_E2E=1`) drive the sample apps in `testdata/apps`, copied to a
   temporary directory first, and find lines by their `// marker: NAME` (`# marker: NAME`) comments,
-  not by number. `drivers/dotnet` needs the .NET SDK and netcoredbg; `drivers/generic`
+  not by number. `drivers/dotnet` needs the .NET SDK, netcoredbg and SharpDbg (every test runs once
+per adapter; `EYEDBG_E2E_DOTNET_ADAPTERS` narrows them, and an adapter with no build here and none
+found skips naming why); `drivers/generic`
   (`TestPython*`) needs Python 3.10+ with debugpy (`EYEDBG_PYTHON=/path/to/venv/bin/python`) or
   `adapters install debugpy`, and `TestPythonManagedInstall` also `EYEDBG_E2E_NETWORK=1` (it
   downloads debugpy into a temporary data directory). `drivers/generic`'s `TestLldb*`/`TestCpp*`/

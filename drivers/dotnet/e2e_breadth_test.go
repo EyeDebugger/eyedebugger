@@ -41,16 +41,20 @@ func e2eResume(t *testing.T, sess *session.Session, kind string) api.Snapshot {
 }
 
 // TestBreadthLoop: an anchor breakpoint, set, eval with and without side
-// effects, and a function breakpoint, through netcoredbg.
+// effects, and a function breakpoint, through each adapter.
 func TestBreadthLoop(t *testing.T) {
-	requireE2E(t)
+	forEachAdapter(t, breadthLoop)
+}
+
+func breadthLoop(t *testing.T, adapter string) {
+	t.Helper()
 
 	dir := copyApp(t, "breadth")
 	src := filepath.Join(dir, "Program.cs")
 	body := lineOf(t, src, "loop-body")
 
 	sess, err := newManager(t).Start(t.Context(), agent, api.StartParams{
-		Lang: "dotnet", LaunchSpec: api.LaunchSpec{Project: dir, Args: []string{"loop"}},
+		Lang: "dotnet", Adapter: adapter, LaunchSpec: api.LaunchSpec{Project: dir, Args: []string{"loop"}},
 		Breakpoints: []api.BreakpointSpec{{File: src, Anchor: "total += Orders.Price(i);"}},
 	})
 	if err != nil {
@@ -120,16 +124,20 @@ func checkFunctionBreakpoint(t *testing.T, sess *session.Session) {
 }
 
 // TestBreadthHitsAndLogpoints: --hit 3 stops once, at i == 3; a logpoint
-// logs every lap and never stops.
+// logs every lap and never stops (both emulated by the session).
 func TestBreadthHitsAndLogpoints(t *testing.T) {
-	requireE2E(t)
+	forEachAdapter(t, breadthHitsAndLogpoints)
+}
+
+func breadthHitsAndLogpoints(t *testing.T, adapter string) {
+	t.Helper()
 
 	dir := copyApp(t, "breadth")
 	src := filepath.Join(dir, "Program.cs")
 	body := lineOf(t, src, "loop-body")
 
 	sess, err := newManager(t).Start(t.Context(), agent, api.StartParams{
-		Lang: "dotnet", LaunchSpec: api.LaunchSpec{Project: dir, Args: []string{"loop"}},
+		Lang: "dotnet", Adapter: adapter, LaunchSpec: api.LaunchSpec{Project: dir, Args: []string{"loop"}},
 		Breakpoints: []api.BreakpointSpec{
 			{File: src, Line: body, HitCondition: "3"},
 			{File: src, Line: body + 1, LogMessage: "i={i}"},
@@ -173,7 +181,11 @@ func TestBreadthHitsAndLogpoints(t *testing.T) {
 // TestBreadthExceptions: all stops at a caught throw, uncaught doesn't,
 // and an unhandled exception stops even with none.
 func TestBreadthExceptions(t *testing.T) {
-	requireE2E(t)
+	forEachAdapter(t, breadthExceptions)
+}
+
+func breadthExceptions(t *testing.T, adapter string) {
+	t.Helper()
 
 	dir := copyApp(t, "breadth")
 	orders := filepath.Join(dir, "Orders.cs")
@@ -184,7 +196,7 @@ func TestBreadthExceptions(t *testing.T) {
 		t.Helper()
 
 		sess, err := m.Start(t.Context(), agent, api.StartParams{
-			Lang: "dotnet", LaunchSpec: api.LaunchSpec{Project: dir, Args: []string{scenario}}, Exceptions: mode,
+			Lang: "dotnet", Adapter: adapter, LaunchSpec: api.LaunchSpec{Project: dir, Args: []string{scenario}}, Exceptions: mode,
 		})
 		if err != nil {
 			t.Fatal(err)

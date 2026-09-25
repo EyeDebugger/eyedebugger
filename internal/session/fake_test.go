@@ -49,6 +49,16 @@ type fakeDriver struct {
 	// socket, when set, puts the adapter on the connect transport and
 	// records the socket paths it was given.
 	socket *socketPaths
+	// knobs are the adapter settings its launches (and attaches) carry:
+	// AdapterName, PauseUnsupported and SetByEval.
+	knobs Launch
+}
+
+// withKnobs is l with d's adapter settings.
+func (d fakeDriver) withKnobs(l Launch) Launch {
+	l.AdapterName, l.PauseUnsupported, l.SetByEval = d.knobs.AdapterName, d.knobs.PauseUnsupported, d.knobs.SetByEval
+
+	return l
 }
 
 func (fakeDriver) Name() string { return "fake" }
@@ -102,10 +112,10 @@ func (d fakeDriver) Prepare(_ context.Context, spec LaunchSpec) (Launch, error) 
 		return Launch{}, err
 	}
 
-	return d.transport(Launch{
+	return d.transport(d.withKnobs(Launch{
 		Adapter: path, AdapterArgs: args, AdapterEnv: env, AdapterID: "fake", Program: spec.Program,
 		Arguments: pa.Map(), ExceptionFilters: d.excFilters, SideEffects: d.sideEffects,
-	}), nil
+	})), nil
 }
 
 func (d fakeDriver) PrepareAttach(_ context.Context, spec api.AttachSpec) (Launch, error) {
@@ -117,10 +127,10 @@ func (d fakeDriver) PrepareAttach(_ context.Context, spec api.AttachSpec) (Launc
 	pa := d.attach
 	pa.ProcessID = spec.PID
 
-	return d.transport(Launch{
+	return d.transport(d.withKnobs(Launch{
 		Adapter: path, AdapterArgs: args, AdapterEnv: env, AdapterID: "fake", Request: RequestAttach, PID: spec.PID,
 		Arguments: pa.Map(), AttachHint: "fake attach hint",
-	}), nil
+	})), nil
 }
 
 func (d fakeDriver) TestCommand(_ context.Context, spec TestSpec) (TestCommand, error) {

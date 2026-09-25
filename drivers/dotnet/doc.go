@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package dotnet is the .NET language driver: project detection, build, and
-// launch and attach configuration for netcoredbg (docs/DESIGN.md §8; SharpDbg
-// comes later), which it finds as the adapter manifest serving dotnet
-// describes (internal/adapters/manifests/netcoredbg.json), 'dotnet test' runs with VSTest's host debugging (testrun.go)
+// launch and attach configuration for netcoredbg (docs/DESIGN.md §8), which
+// it finds as the adapter manifest serving dotnet describes
+// (internal/adapters/manifests/netcoredbg.json), or for SharpDbg (sharpdbg.json,
+// a .dll run on the dotnet host: docs/adr/0017), chosen with --adapter
+// (WithAdapter) or by default where netcoredbg has no build, 'dotnet test' runs with VSTest's host debugging (testrun.go)
 // and the check that keeps eval from visibly changing the program
 // (SideEffects). It also finds and specifies the .NET side helper
 // (helper.go, helpers/dotnet): its lookup, protocol and wire types, which

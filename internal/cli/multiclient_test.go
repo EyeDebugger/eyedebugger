@@ -176,7 +176,7 @@ func TestSessionsWithoutDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expectOutput(t, run(t, 0, "sessions"), "s-lost  dotnet  lost", "(lost: eyedbgd exited")
+	expectOutput(t, run(t, 0, "sessions"), "s-lost  dotnet  -        lost", "(lost: eyedbgd exited")
 	expectOutput(t, run(t, exitState, "stop", "-s", "s-other"), "[NO_SESSION]")
 	expectOutput(t, run(t, 0, "stop", "-s", "s-lost"), "session s-lost forgotten (it was lost)")
 

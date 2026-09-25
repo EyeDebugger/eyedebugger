@@ -58,7 +58,10 @@ test('launch configurations: valid', () => {
     leasePolicy: 'handoff',
     exceptions: 'uncaught',
   });
-  const min = validateLaunch({ lang: 'dotnet', program: '', args: null });
+  const withAdapter = validateLaunch({ lang: 'dotnet', adapter: 'sharpdbg' });
+  assert.ok(withAdapter.ok);
+  assert.equal(withAdapter.value.adapter, 'sharpdbg');
+  const min = validateLaunch({ lang: 'dotnet', program: '', args: null, adapter: '' });
   assert.ok(min.ok);
   assert.deepEqual(min.value, { lang: 'dotnet', args: [], env: [], opts: [], stopOnEntry: false, noBuild: false });
 });
@@ -89,6 +92,10 @@ test('launch configurations: refused', () => {
     ['exceptions', { lang: 'python', exceptions: 'some' }, /"exceptions"/],
     ['stopOnEntry string', { lang: 'python', stopOnEntry: 'yes' }, /"stopOnEntry"/],
     ['noBuild without program', { lang: 'dotnet', noBuild: true }, /"noBuild" needs "program"/],
+    ['flag adapter', { lang: 'dotnet', adapter: '--as=agent' }, /"adapter"/],
+    ['upper adapter', { lang: 'dotnet', adapter: 'SharpDbg' }, /"adapter"/],
+    ['long adapter', { lang: 'dotnet', adapter: `s${long}` }, /"adapter"/],
+    ['number adapter', { lang: 'dotnet', adapter: 1 }, /"adapter"/],
   ];
   for (const [name, cfg, want] of cases) {
     const r = validateLaunch(cfg);
