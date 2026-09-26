@@ -30,8 +30,6 @@ export interface EyedbgApi {
   annotations(): Annotation[];
   /** notices are the last 50 notifications the extension showed. */
   notices(): Notice[];
-  /** stops are the sessions this window launched and stopped when their debug session ended. */
-  stops(): { session: string; error: string }[];
   /** views are the Activity, Clients and .NET views' items, as shown now. */
   views(): {
     activity: TreeSnapshot[];
@@ -105,7 +103,6 @@ export function api<A, C, R>(
     sessions: () => state.snapshots(),
     annotations: () => state.annotations.map((a) => ({ ...a })),
     notices: () => state.notices.map((n) => ({ ...n })),
-    stops: () => state.stops.map((s) => ({ ...s })),
     views: () => ({
       activity: walk(trees.activity),
       clients: walk(trees.clients),

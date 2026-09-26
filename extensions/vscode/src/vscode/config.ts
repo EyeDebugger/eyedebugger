@@ -1,34 +1,22 @@
 // Copyright The EyeDebugger Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// The eyedbg debug type's configurations (docs/adr/0015): attach joins a
-// running session (picked when not named); launch runs 'eyedbg start' and
-// becomes an attach to the new session; dynamic configurations list the
-// running sessions.
+// The eyedbg debug type's configurations (docs/adr/0015, 0019): attach
+// joins a running session (picked when not named); launch stays a launch,
+// validated here, which 'eyedbg dap --launch' turns into a new session;
+// dynamic configurations list the running sessions.
 
-import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import * as vscode from 'vscode';
-import {
-  adapterUnsupported,
-  isLive,
-  launchCwd,
-  parseSessions,
-  parseStarted,
-  sessionsArgs,
-  startArgs,
-} from '../core/cli';
+import { adapterUnsupported, isLive, launchCwd, launchUnsupported, parseSessions, sessionsArgs } from '../core/cli';
 import { clientId } from '../core/identity';
 import { EyedbgError, type SessionInfo } from '../core/protocol';
 import { joinConfigName, sessionPickItem } from '../core/render';
-import { checkSessionId, validateLaunch } from '../core/validate';
+import { checkSessionId, type LaunchSpec, launchConfiguration, validateLaunch } from '../core/validate';
 import { type Eyedbg, isDirectory, timeouts } from './exec';
 import type { State } from './state';
 
 export const debugType = 'eyedbg';
-
-/** launchToken is the resolved configuration's key into State.launched. */
-export const launchToken = '__eyedbgLaunch';
 
 function osUser(): string | undefined {
   try {
@@ -81,10 +69,9 @@ export class ConfigurationProvider implements vscode.DebugConfigurationProvider 
     // A debugServer would bypass the descriptor factory (and so the
     // eyedbg binary check): never honoured for this type.
     delete config.debugServer;
-    delete config[launchToken];
     try {
       if (config.request === 'launch') {
-        return await this.launch(folder, config, token);
+        return await this.launch(folder, config);
       }
       if (config.request === 'attach') {
         return await this.attach(config, token);
@@ -137,91 +124,45 @@ export class ConfigurationProvider implements vscode.DebugConfigurationProvider 
     return { ...config, session: chosen.id };
   }
 
+  /**
+   * launch validates a launch configuration and hands it on as the launch
+   * request's arguments, exactly as validated; the descriptor factory runs
+   * 'eyedbg dap --launch' for it. Nothing is started here.
+   */
   private async launch(
     folder: vscode.WorkspaceFolder | undefined,
     config: vscode.DebugConfiguration,
-    token: vscode.CancellationToken | undefined,
-  ): Promise<vscode.DebugConfiguration | undefined> {
-    const v = validateLaunch(config);
-    if (!v.ok) {
-      throw new EyedbgError('INVALID_REQUEST', v.error);
-    }
-    const resolved = launchCwd(v.value, folder?.uri.fsPath, process.platform);
-    if (!resolved.ok) {
-      throw new EyedbgError('INVALID_REQUEST', resolved.error);
-    }
-    const { spec, cwd } = resolved.value;
+  ): Promise<vscode.DebugConfiguration> {
+    const { spec } = launchSpec(config, folder?.uri.fsPath);
     if (spec.cwd !== undefined && !isDirectory(spec.cwd)) {
       throw new EyedbgError('INVALID_REQUEST', `"cwd" ${JSON.stringify(spec.cwd)} is not a directory`);
     }
-    if (spec.adapter !== undefined) {
-      const { version, features } = await this.eyedbg.check();
-      const unsupported = adapterUnsupported(spec, version, features);
-      if (unsupported !== '') {
-        throw new EyedbgError('VERSION_MISMATCH', unsupported, 'update eyedbg');
-      }
+    const { version, features } = await this.eyedbg.check();
+    const unsupported = launchUnsupported(version, features) || adapterUnsupported(spec, version, features);
+    if (unsupported !== '') {
+      throw new EyedbgError('VERSION_MISMATCH', unsupported, 'update eyedbg');
     }
-    const argv = startArgs(spec, client());
-    // No auto-join prompt for the session being started.
-    this.state.launching++;
-    this.state.fire();
-    let started: SessionInfo;
-    try {
-      started = await this.start(argv, spec.lang, cwd, token);
-    } finally {
-      this.state.launching--;
-      this.state.fire(); // a canceled launch returns before the fire below: re-arm the poller
-    }
-    const key = randomUUID();
-    this.state.launched.set(key, started.id);
-    this.state.fire();
-    this.state.log.info(`started session ${started.id} (${spec.lang})`);
-    return { ...config, request: 'attach', session: started.id, [launchToken]: key };
+    return { ...launchConfiguration(config, spec), request: 'launch' } as vscode.DebugConfiguration;
   }
+}
 
-  /** start runs 'eyedbg start', cancellable from its progress notification. */
-  private async start(
-    argv: string[],
-    lang: string,
-    cwd: string | undefined,
-    token: vscode.CancellationToken | undefined,
-  ): Promise<SessionInfo> {
-    return vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: `EyeDebugger: starting a ${lang} session`,
-        cancellable: true,
-      },
-      async (_progress, cancel) => {
-        const abort = new AbortController();
-        const subs = [cancel.onCancellationRequested(() => abort.abort())];
-        if (token !== undefined) {
-          subs.push(token.onCancellationRequested(() => abort.abort()));
-        }
-        try {
-          return parseStarted(
-            await this.eyedbg.run(argv, {
-              timeoutMs: timeouts.start,
-              signal: abort.signal,
-              ...(cwd !== undefined ? { cwd } : {}),
-            }),
-          );
-        } catch (e) {
-          if (e instanceof EyedbgError && e.code === 'CANCELED') {
-            void this.state.show(
-              'warning',
-              "Canceled starting the eyedbg session; if it had started already, it still runs (see 'eyedbg sessions').",
-            );
-          }
-          throw e;
-        } finally {
-          for (const s of subs) {
-            s.dispose();
-          }
-        }
-      },
-    );
+/**
+ * launchSpec validates a launch configuration and resolves its cwd against
+ * folder: the spec (its cwd absolute) and where 'eyedbg dap --launch' runs.
+ */
+export function launchSpec(
+  config: Record<string, unknown>,
+  folder: string | undefined,
+): { spec: LaunchSpec; cwd: string | undefined } {
+  const v = validateLaunch(config);
+  if (!v.ok) {
+    throw new EyedbgError('INVALID_REQUEST', v.error);
   }
+  const resolved = launchCwd(v.value, folder, process.platform);
+  if (!resolved.ok) {
+    throw new EyedbgError('INVALID_REQUEST', resolved.error);
+  }
+  return resolved.value;
 }
 
 /** DynamicProvider offers one configuration per running session (Run and Debug's list). */

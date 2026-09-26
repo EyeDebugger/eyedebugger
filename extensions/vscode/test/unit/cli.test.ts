@@ -8,15 +8,15 @@ import {
   checkVersion,
   dapArgs,
   dapExitMessage,
+  dapLaunchArgs,
   isLive,
   launchCwd,
+  launchFeature,
+  launchUnsupported,
   parseResult,
   parseSessions,
-  parseStarted,
   redact,
   sessionsArgs,
-  startArgs,
-  stopArgs,
   versionArgs,
 } from '../../src/core/cli';
 import { EyedbgError } from '../../src/core/protocol';
@@ -31,63 +31,23 @@ function spec(cfg: Record<string, unknown>) {
 test('simple command lines', () => {
   assert.deepEqual(versionArgs(), ['version', '--json']);
   assert.deepEqual(sessionsArgs(), ['sessions', '--json']);
-  assert.deepEqual(stopArgs('s-7f3k', 'human:ana'), ['stop', '--session=s-7f3k', '--as=human:ana', '--json']);
   assert.deepEqual(dapArgs('s-7f3k', 'human:ana'), ['dap', '--session=s-7f3k', '--as=human:ana']);
 });
 
-test('start: every flag bound to its value', () => {
-  const argv = startArgs(
-    spec({
-      lang: 'python',
-      program: '--as=agent',
-      project: '/p',
-      cwd: '-s',
-      env: { A: '1', B: 'x=y --as=agent' },
-      opts: { module: 'pytest' },
-      adapter: 'sharpdbg',
-      exceptions: 'all',
-      leasePolicy: 'human-priority',
-      stopOnEntry: true,
-      noBuild: true,
-      args: ['--as=agent', '--', '-x'],
-    }),
-    'human:ana',
+test('launch: the descriptor argv holds no configuration value', () => {
+  assert.deepEqual(dapLaunchArgs('human:ana'), ['dap', '--launch', '--as=human:ana']);
+});
+
+test('launch: needs the dap.launch feature', () => {
+  assert.equal(launchFeature, 'dap.launch');
+  assert.equal(launchUnsupported('1.2.0', ['dap', 'dap.launch']), '');
+  assert.equal(
+    launchUnsupported('1.0.0', ['dap', 'presence']),
+    "eyedbg 1.0.0 can't start a session from a launch configuration: it lacks dap.launch",
   );
-  assert.deepEqual(argv, [
-    'start',
-    'python',
-    '--program=--as=agent',
-    '--project=/p',
-    '--cwd=-s',
-    '--env=A=1',
-    '--env=B=x=y --as=agent',
-    '--opt=module=pytest',
-    '--adapter=sharpdbg',
-    '--exceptions=all',
-    '--lease-policy=human-priority',
-    '--stop-on-entry',
-    '--no-build',
-    '--dump=none',
-    '--as=human:ana',
-    '--json',
-    '--',
-    '--as=agent',
-    '--',
-    '-x',
-  ]);
 });
 
-test('start: minimal, no "--" without program arguments', () => {
-  assert.deepEqual(startArgs(spec({ lang: 'dotnet' }), 'human:x'), [
-    'start',
-    'dotnet',
-    '--dump=none',
-    '--as=human:x',
-    '--json',
-  ]);
-});
-
-test('start: "adapter" needs the adapter.select feature', () => {
+test('launch: "adapter" needs the adapter.select feature', () => {
   const withAdapter = spec({ lang: 'dotnet', adapter: 'sharpdbg' });
   assert.equal(adapterUnsupported(withAdapter, '1.0.0', ['dap', 'adapter.select']), '');
   assert.equal(adapterUnsupported(spec({ lang: 'dotnet' }), '1.0.0', ['dap']), '');
@@ -97,9 +57,9 @@ test('start: "adapter" needs the adapter.select feature', () => {
   );
 });
 
-test('launch cwd: resolved against the folder, absolute in --cwd and the process', () => {
+test('launch cwd: resolved against the folder, absolute in the spec and the process', () => {
   const cases: [string, Record<string, unknown>, string | undefined, string | undefined, string | undefined][] = [
-    // platform, config, folder, want cwd (process), want --cwd= (undefined: none)
+    // platform, config, folder, want cwd (process), want spec.cwd (undefined: none)
     ['linux', { cwd: 'src' }, '/w', '/w/src', '/w/src'],
     ['linux', { cwd: '../other/./x' }, '/w/a', '/w/other/x', '/w/other/x'],
     ['linux', { cwd: '/abs' }, '/w', '/abs', '/abs'],
@@ -117,12 +77,7 @@ test('launch cwd: resolved against the folder, absolute in --cwd and the process
     const r = launchCwd(spec({ lang: 'python', ...cfg }), folder, platform);
     assert.ok(r.ok, JSON.stringify([platform, cfg, folder]));
     assert.equal(r.value.cwd, wantCwd, JSON.stringify([platform, cfg, folder]));
-    const argv = startArgs(r.value.spec, 'human:x');
-    assert.equal(
-      argv.find((a) => a.startsWith('--cwd=')),
-      wantFlag === undefined ? undefined : `--cwd=${wantFlag}`,
-      JSON.stringify([platform, cfg, folder]),
-    );
+    assert.equal(r.value.spec.cwd, wantFlag, JSON.stringify([platform, cfg, folder]));
   }
   const r = launchCwd(spec({ lang: 'python', cwd: 'src' }), undefined, 'linux');
   assert.ok(!r.ok);
@@ -234,8 +189,6 @@ test('sessions and start results', () => {
   assert.equal(isLive({ ...sessions[0], state: 'exited' } as never), false);
   assert.equal(isLive({ ...sessions[0], state: 'lost' } as never), false);
   assert.equal(isLive({ ...sessions[0], state: 'running' } as never), true);
-  assert.equal(parseStarted({ session: { id: 's-x1', state: 'stopped' } }).id, 's-x1');
-  assert.throws(() => parseStarted({}), EyedbgError);
 });
 
 test('dap exit codes', () => {
@@ -244,4 +197,12 @@ test('dap exit codes', () => {
   assert.match(dapExitMessage(1, 's-a'), /Lost the connection/);
   assert.match(dapExitMessage(undefined, 's-a'), /exit code unknown/);
   assert.match(dapExitMessage(0, 's-a'), /ended/);
+  // A launch connection has no session id yet.
+  assert.match(dapExitMessage(3, ''), /couldn't start its daemon.*'eyedbg daemon stop' and try again/);
+  assert.match(dapExitMessage(1, ''), /^Lost the connection to the eyedbg daemon \(exit code 1\)/);
+  assert.match(dapExitMessage(undefined, ''), /exit code unknown/);
+  assert.match(dapExitMessage(0, ''), /ended before the session started/);
+  for (const code of [0, 1, 3, undefined]) {
+    assert.doesNotMatch(dapExitMessage(code, ''), /session {2}|session \(/, String(code));
+  }
 });

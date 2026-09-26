@@ -1,22 +1,21 @@
 // Copyright The EyeDebugger Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// EyeDebugger for VS Code (docs/adr/0015): join an eyedbg session — or
-// start one — as a human client, through 'eyedbg dap'.
+// EyeDebugger for VS Code (docs/adr/0015, 0019): join an eyedbg session —
+// or start one — as a human client, through 'eyedbg dap'.
 
 import * as vscode from 'vscode';
-import { stopArgs } from './core/cli';
 import { errorNotice } from './core/render';
-import { checkSessionId, isSessionId } from './core/validate';
+import { checkSessionId } from './core/validate';
 import { ActivityUi } from './vscode/activity';
 import { AdapterFactory } from './vscode/adapter';
 import { api, type EyedbgApi } from './vscode/api';
 import { AutoJoin } from './vscode/autojoin';
 import { BreakpointsUi } from './vscode/breakpoints';
 import { ClientsUi } from './vscode/clients';
-import { ConfigurationProvider, client, DynamicProvider, debugType, launchToken } from './vscode/config';
+import { ConfigurationProvider, DynamicProvider, debugType } from './vscode/config';
 import { DotnetUi } from './vscode/dotnet/views';
-import { Eyedbg, timeouts } from './vscode/exec';
+import { Eyedbg } from './vscode/exec';
 import { Follow } from './vscode/follow';
 import { LeaseUi } from './vscode/lease';
 import { State } from './vscode/state';
@@ -73,35 +72,19 @@ export function activate(context: vscode.ExtensionContext): EyedbgApi {
     }
   };
 
-  // A session this window launched is stopped when its debug session ends,
-  // unless VS Code is restarting it (then it joins the same session again).
-  const terminated = async (session: vscode.DebugSession): Promise<void> => {
+  // A debug session's entry ends with it, unless VS Code is restarting it
+  // (a new adapter connection follows). A launched session needs no stop
+  // here: its connection's terminate ended it, and the facade forgets a
+  // launched session that has exited when its connection ends (ADR 0019).
+  const terminated = (session: vscode.DebugSession): void => {
     if (session.type !== debugType) {
       return;
     }
-    const restarting = state.restarting.delete(session.id);
-    if (restarting) {
+    if (state.restarting.delete(session.id)) {
       return;
     }
     state.end(session.id);
     breakpoints.refresh();
-    const token: unknown = session.configuration[launchToken];
-    const id: unknown = session.configuration.session;
-    if (typeof token !== 'string' || !isSessionId(id) || state.launched.get(token) !== id) {
-      return;
-    }
-    state.launched.delete(token);
-    try {
-      await eyedbg.run(stopArgs(id, client()), { timeoutMs: timeouts.short });
-      state.stops.push({ session: id, error: '' });
-      log.info(`stopped session ${id}`);
-    } catch (e) {
-      const text = e instanceof Error ? e.message : String(e);
-      const code = typeof (e as { code?: unknown }).code === 'string' ? (e as { code: string }).code : '';
-      state.stops.push({ session: id, error: code || text });
-      void state.show('warning', `Couldn't stop eyedbg session ${id}: ${errorNotice(code, text)}`);
-    }
-    state.fire();
   };
 
   context.subscriptions.push(
@@ -122,7 +105,7 @@ export function activate(context: vscode.ExtensionContext): EyedbgApi {
     ),
     vscode.debug.registerDebugAdapterDescriptorFactory(debugType, new AdapterFactory(eyedbg)),
     vscode.debug.registerDebugAdapterTrackerFactory(debugType, tracker),
-    vscode.debug.onDidTerminateDebugSession((s) => void terminated(s)),
+    vscode.debug.onDidTerminateDebugSession((s) => terminated(s)),
     vscode.commands.registerCommand('eyedbg.joinSession', (a?: unknown) =>
       join(typeof a === 'object' && a !== null ? (a as { session?: unknown }).session : undefined),
     ),

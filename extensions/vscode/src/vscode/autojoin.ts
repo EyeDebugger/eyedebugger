@@ -86,8 +86,7 @@ export class AutoJoin implements vscode.Disposable {
       setting: vscode.workspace.getConfiguration('eyedbg').get<string>('autoJoin', 'ask'),
       focused: this.assumeFocused || vscode.window.state.focused,
       folders: folders().length,
-      joined: this.state.all().length > 0,
-      launching: this.state.launching > 0,
+      joined: this.state.active(),
       failing: this.failing,
     });
   }
@@ -100,9 +99,6 @@ export class AutoJoin implements vscode.Disposable {
     // A session joined or launched here is never offered.
     for (const t of this.state.all()) {
       this.skip.add(t.eyedbgId);
-    }
-    for (const id of this.state.launched.values()) {
-      this.skip.add(id);
     }
     const p = this.plan();
     if (!p.poll) {

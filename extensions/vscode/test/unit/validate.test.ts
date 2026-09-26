@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { checkSessionId, isSessionId, validateLaunch } from '../../src/core/validate';
+import { checkSessionId, isSessionId, launchConfiguration, launchKeys, validateLaunch } from '../../src/core/validate';
 
 test('session ids', () => {
   const cases: [unknown, boolean][] = [
@@ -104,4 +104,86 @@ test('launch configurations: refused', () => {
       assert.match(r.error, want, name);
     }
   }
+});
+
+function launched(cfg: Record<string, unknown>): Record<string, unknown> {
+  const r = validateLaunch(cfg);
+  assert.ok(r.ok, r.ok ? '' : r.error);
+  return launchConfiguration(cfg, r.value);
+}
+
+test('launch arguments: every eyedbg key as validated, VS Code keys kept', () => {
+  const cfg = {
+    type: 'eyedbg',
+    request: 'launch',
+    name: 'x',
+    __sessionId: 'abc',
+    lang: 'python',
+    program: '/w/app.py',
+    project: '',
+    cwd: null,
+    args: ['--as=agent'],
+    env: { A: '1' },
+    stopOnEntry: true,
+    leasePolicy: 'handoff',
+    adapter: '',
+  };
+  assert.deepEqual(launched(cfg), {
+    type: 'eyedbg',
+    request: 'launch',
+    name: 'x',
+    __sessionId: 'abc',
+    lang: 'python',
+    program: '/w/app.py',
+    args: ['--as=agent'],
+    env: { A: '1' },
+    opts: {},
+    stopOnEntry: true,
+    noBuild: false,
+    leasePolicy: 'handoff',
+  });
+  assert.equal(cfg.project, '', 'the configuration itself is unchanged');
+  assert.deepEqual(launched({ lang: 'dotnet' }), {
+    lang: 'dotnet',
+    args: [],
+    env: {},
+    opts: {},
+    stopOnEntry: false,
+    noBuild: false,
+  });
+});
+
+test('launch arguments: keys differing from an eyedbg key only in case are dropped', () => {
+  const out = launched({
+    lang: 'python',
+    LANG: 'dotnet',
+    Program: '/etc/x',
+    PROJECT: '/p',
+    Cwd: '/',
+    ARGS: ['x'],
+    Env: { A: '1' },
+    oPTS: { a: 'b' },
+    StopOnEntry: false,
+    nobuild: true,
+    LeasePolicy: 'free',
+    EXCEPTIONS: 'all',
+    Adapter: 'sharpdbg',
+    Session: 's-1',
+  });
+  const lower = new Set(launchKeys.map((k) => k.toLowerCase()));
+  for (const k of Object.keys(out)) {
+    assert.ok(!lower.has(k.toLowerCase()) || (launchKeys as readonly string[]).includes(k), k);
+  }
+  assert.equal(out.lang, 'python');
+  assert.equal(out.program, undefined);
+  assert.equal(out.Session, 's-1', 'not an eyedbg key');
+});
+
+test('launch arguments: a "__proto__" key stays a plain key', () => {
+  const cfg = JSON.parse('{"lang":"python","__proto__":{"polluted":1},"env":{"__proto__":"x"}}');
+  const out = launched(cfg);
+  assert.equal(Object.getPrototypeOf(out), Object.prototype);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(out, '__proto__')?.value, { polluted: 1 });
+  assert.equal(Object.getOwnPropertyDescriptor(out.env, '__proto__')?.value, 'x');
+  assert.match(JSON.stringify(out), /"env":\{"__proto__":"x"\}/);
 });

@@ -67,12 +67,16 @@ Add `"session": "s-7f3k"` to join a given one. Disconnecting leaves the session 
 }
 ```
 
-This runs `eyedbg start` as you and joins the new session; the agent can join it too (`eyedbg
-sessions`). Other properties: `project`, `cwd` (relative: to the workspace folder), `env`, `opts`
-(language options), `noBuild`, `leasePolicy` (`free`, `handoff`, `human-priority`), `exceptions`
-(`all`, `uncaught`, `none`) and, for dotnet, `adapter` (`netcoredbg`, the default, or `sharpdbg`
-once `eyedbg adapters install sharpdbg` has fetched it; SharpDbg can't pause).
-Stopping the debug session stops the eyedbg session.
+VS Code runs `eyedbg dap --launch` as its debug adapter and sends the configuration as a DAP
+`launch`: the session starts as you (you hold control), a .NET build's output streams to the Debug
+Console while it runs, and your breakpoints are in place before the program starts. The agent can
+join it too (`eyedbg sessions`). Other properties: `project`, `cwd` (relative: to the workspace
+folder), `env`, `opts` (language options), `noBuild`, `leasePolicy` (`free`, `handoff`,
+`human-priority`), `exceptions` (`all`, `uncaught`, `none`) and, for dotnet, `adapter`
+(`netcoredbg`, the default, or `sharpdbg` once `eyedbg adapters install sharpdbg` has fetched it;
+SharpDbg can't pause). A property name in another case (`Program`) is dropped. Stop ends the
+session and removes it from `eyedbg sessions`; Restart starts the program again, as a new session.
+Launching needs an eyedbg that lists `dap.launch` in `eyedbg version --json`.
 
 ### launch.json snippets
 
@@ -202,7 +206,8 @@ kept); the views show and copy their paths, and never read, copy, move or delete
 
 ## Known limitations
 
-- Restart re-joins the session; it doesn't restart the program.
+- The exception filters (All / Uncaught) are offered for every launch, also for a language whose
+  debug adapter can't serve one: choosing it then says so in the Debug Console.
 - When a step is refused, VS Code shows its own error beside the extension's notice.
 - After the agent's stop, VS Code may keep the frame it last focused (its line stays highlighted
   and the Variables view shows that earlier stop) until you click the top frame in Call Stack.

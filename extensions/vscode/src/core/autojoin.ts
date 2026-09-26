@@ -62,10 +62,8 @@ export interface PlanInput {
   focused: boolean;
   /** How many file: workspace folders the window has. */
   folders: number;
-  /** The window has an eyedbg debug session. */
+  /** The window has an eyedbg debug session (a launch's too, before its session exists). */
   joined: boolean;
-  /** The window is starting a session ('eyedbg start'). */
-  launching: boolean;
   /** The last poll failed. */
   failing: boolean;
 }
@@ -74,7 +72,7 @@ export type Plan = { poll: false } | { poll: true; delayMs: number };
 
 /** plan says whether to look for sessions, and how long after the previous look finished. */
 export function plan(i: PlanInput): Plan {
-  if (i.setting !== 'ask' || !i.focused || i.folders === 0 || i.joined || i.launching) {
+  if (i.setting !== 'ask' || !i.focused || i.folders === 0 || i.joined) {
     return { poll: false };
   }
   return { poll: true, delayMs: i.failing ? failureDelayMs : pollDelayMs };

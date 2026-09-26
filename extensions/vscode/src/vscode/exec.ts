@@ -30,7 +30,6 @@ const stderrTail = 4096;
 
 export const timeouts = {
   short: 30_000,
-  start: 600_000,
 } as const;
 
 /** isDirectory reports whether p is an existing directory. */
