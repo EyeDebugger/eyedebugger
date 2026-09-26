@@ -182,7 +182,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Windows: the daemon no longer exits during start-up ("write token: … Access is denied",
   `DAEMON_START_FAILED`) when a client reads the token a killed daemon left behind while the new
-  one replaces it; the replace is retried for up to 2 s.
+  one replaces it; clients now open the token sharing delete, and the daemon replaces it with a
+  POSIX-semantics rename, so the replace no longer waits on (or fails because of) readers. The
+  2 s retry remains, as a backstop, for readers that don't share delete (an older `eyedbg` binary
+  mid-upgrade, antivirus, indexers) and for filesystems where POSIX rename falls back to a plain
+  one (FAT, older Windows).
 - Windows: `run-until` reports `reached` when the adapter spells the file differently (Delve's
   `C:/…` with forward slashes). The daemon resolves a start's `clientDir` (native API) like
   `program` and `cwd`, so a client that sends it as an 8.3 short name (`C:\Users\RUNNER~1\…`) no

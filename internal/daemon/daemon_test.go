@@ -346,6 +346,10 @@ func TestStaleFilesAreReplaced(t *testing.T) {
 // for the new one reads that. On Windows a rename can't replace an open
 // file, so replaceFile retries; without that, about every other write here
 // failed with "Access is denied" and the daemon exited during start-up.
+// TestWriteFileAtomicWhileRead models Dial: readers use readShared, the same
+// way Dial reads the token, in a tight loop with no pause. On Windows this
+// no longer waits for a gap between reads (see replaceFile/openShared); on
+// Unix it always passed.
 func TestWriteFileAtomicWhileRead(t *testing.T) {
 	t.Parallel()
 
@@ -367,7 +371,7 @@ func TestWriteFileAtomicWhileRead(t *testing.T) {
 				case <-stop:
 					return
 				default:
-					_, _ = os.ReadFile(path)
+					_, _ = readShared(path)
 				}
 			}
 		}()
@@ -390,6 +394,38 @@ func TestWriteFileAtomicWhileRead(t *testing.T) {
 
 	if got, err := os.ReadFile(path); err != nil || string(got) != "49" {
 		t.Fatalf("token = %q, %v; want the last write, 49", got, err)
+	}
+}
+
+// TestWriteFileAtomicWhileOpen holds the file open, sharing delete
+// (openShared), across a writeFileAtomic: on Windows this proves the
+// POSIX-semantics rename succeeds against such a handle, deterministically
+// (no timing). On Unix it passes trivially, since rename never blocks on an
+// open file there.
+func TestWriteFileAtomicWhileOpen(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	held, err := openShared(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+
+	if err := writeFileAtomic(path, []byte("new"), 0o600); err != nil {
+		t.Fatalf("writeFileAtomic while the file is open: %v", err)
+	}
+
+	if got, err := readShared(path); err != nil || string(got) != "new" {
+		t.Fatalf("token = %q, %v; want %q", got, err, "new")
+	}
+
+	if got, err := io.ReadAll(held); err != nil || string(got) != "old" {
+		t.Fatalf("the held handle read = %q, %v; want the pre-replace content %q", got, err, "old")
 	}
 }
 

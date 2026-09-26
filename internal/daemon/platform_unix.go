@@ -38,6 +38,10 @@ func checkPrivate(dir string, info fs.FileInfo) error {
 // replaceFile renames from to to, replacing to even while it is open.
 func replaceFile(from, to string) error { return os.Rename(from, to) }
 
+// openShared opens path for reading. Unix rename already replaces an open
+// file without disturbing readers, so there is nothing special to ask for.
+func openShared(path string) (*os.File, error) { return os.Open(path) }
+
 // lockFile takes an exclusive, non-blocking lock on path. The OS releases it
 // when the process exits, however it exits.
 func lockFile(path string) (*os.File, error) {
