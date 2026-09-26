@@ -211,11 +211,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line … it stops there unconditionally" note is gone; function breakpoints keep the
   unconditional merge, noted "shares its function with another client's breakpoint that has a
   different condition: it stops there unconditionally".
-- A condition eyedbg evaluates (at such a line, or with `--hit`/`--log`) holds unless its value
-  reads as false (`false`, `0`, `None`, `null`, `nil`, an empty string or collection); before,
-  only a `true` result did, which skipped stops for a C comparison (`1`) and Python truthy values.
-  A condition that fails to evaluate still stops there; `bp add --help` now says that debugpy
-  ignores a failing condition it evaluates itself.
+- A condition eyedbg evaluates itself (a shared line whose clients' conditions differ) holds
+  unless its value reads as false (`false`, `0`, `None`, `null`, `nil`, an empty string or
+  collection); before, only a `true` result did, which skipped stops for a C comparison (`1`) and
+  Python truthy values. A condition that fails to evaluate still stops there; elsewhere —
+  including a lone `--hit`/`--log` breakpoint's `--if` — the adapter still decides, and
+  `bp add --help` now says that debugpy ignores a failing condition it evaluates itself.
 - `run-until` at a line where another client has a breakpoint reports `reached: false` when the
   program stopped there only for that client's breakpoint (its condition held, the run-until's
   `--if` didn't); the missed line names the condition (`did not reach Program.cs:9 with i == 3`).

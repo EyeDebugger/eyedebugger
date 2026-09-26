@@ -121,8 +121,9 @@ type StopInfo struct {
 	// the stop (logpoints never; one with a hit count only when its count
 	// matches). Absent: eyedbg didn't decide the stop — every breakpoint at
 	// the stop's line held (the adapter checked their shared condition), the
-	// stop isn't at a line breakpoint, or eyedbg couldn't read where it
-	// stopped (it keeps such a stop).
+	// stop isn't at a line breakpoint, eyedbg couldn't read where it stopped
+	// (it keeps such a stop), or a step or pause ended there with no
+	// breakpoint wanting it (Description says so instead).
 	Breakpoints []StopBreakpoint `json:"breakpoints,omitempty"`
 }
 
