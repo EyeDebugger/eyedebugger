@@ -388,6 +388,7 @@ func (s *Session) prepareHost(ctx context.Context, att Attacher, pid int) (Launc
 	s.pid = pid
 	s.excFilters, s.sideEffects = launch.ExceptionFilters, launch.SideEffects
 	s.adapter, s.pauseUnsupported, s.setByEval = launch.AdapterName, launch.PauseUnsupported, launch.SetByEval
+	s.exitCodeUnknown = launch.ExitCodeUnknown
 
 	return launch, nil
 }

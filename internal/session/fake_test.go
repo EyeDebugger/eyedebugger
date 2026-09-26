@@ -56,13 +56,14 @@ type fakeDriver struct {
 	// records the socket paths it was given.
 	socket *socketPaths
 	// knobs are the adapter settings its launches (and attaches) carry:
-	// AdapterName, PauseUnsupported and SetByEval.
+	// AdapterName, PauseUnsupported, SetByEval and ExitCodeUnknown.
 	knobs Launch
 }
 
 // withKnobs is l with d's adapter settings.
 func (d fakeDriver) withKnobs(l Launch) Launch {
 	l.AdapterName, l.PauseUnsupported, l.SetByEval = d.knobs.AdapterName, d.knobs.PauseUnsupported, d.knobs.SetByEval
+	l.ExitCodeUnknown = d.knobs.ExitCodeUnknown
 
 	return l
 }

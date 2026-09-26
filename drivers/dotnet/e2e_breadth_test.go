@@ -154,9 +154,11 @@ func breadthHitsAndLogpoints(t *testing.T, adapter string) {
 	}
 
 	snap := e2eResume(t, sess, session.ExecContinue)
-	if snap.Session.State != api.StateExited || snap.Session.ExitCode == nil || *snap.Session.ExitCode != 0 {
-		t.Fatalf("after continue: %+v, want exited 0 (no more stops)", snap.Session)
+	if snap.Session.State != api.StateExited {
+		t.Fatalf("after continue: %+v, want exited (no more stops)", snap.Session)
 	}
+
+	expectExitCode(t, snap.Session, 0)
 
 	var logs []string
 
@@ -218,9 +220,12 @@ func breadthExceptions(t *testing.T, adapter string) {
 	}
 
 	sess = start("throw", api.ExceptionsUncaught)
-	if snap = sess.Wait(t.Context(), 0, e2eWait, api.DumpSpec{}); snap.Session.State != api.StateExited || *snap.Session.ExitCode != 0 {
-		t.Errorf("throw with uncaught: %+v, want exited 0 without stopping", snap.Session)
+	snap = sess.Wait(t.Context(), 0, e2eWait, api.DumpSpec{})
+	if snap.Session.State != api.StateExited {
+		t.Errorf("throw with uncaught: %+v, want exited without stopping", snap.Session)
 	}
+
+	expectExitCode(t, snap.Session, 0)
 
 	sess = start("crash", api.ExceptionsNone)
 	snap = sess.Wait(t.Context(), 0, e2eWait, api.DumpSpec{})

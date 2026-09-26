@@ -174,6 +174,37 @@ func TestAdapterChoice(t *testing.T) {
 			}
 
 			checkLaunch(t, launch)
+
+			if got, want := launch.ExitCodeUnknown, ExitCodeUnknown(launch.AdapterName, tt.goos); got != want {
+				t.Errorf("ExitCodeUnknown = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// TestExitCodeUnknown: only netcoredbg on macOS, any arch, is untrusted.
+func TestExitCodeUnknown(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		adapter, goos string
+		want          bool
+	}{
+		{"netcoredbg", "darwin", true},
+		{"netcoredbg", "linux", false},
+		{"netcoredbg", "windows", false},
+		{"sharpdbg", "darwin", false},
+		{"sharpdbg", "linux", false},
+		{"sharpdbg", "windows", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.adapter+"/"+tt.goos, func(t *testing.T) {
+			t.Parallel()
+
+			if got := ExitCodeUnknown(tt.adapter, tt.goos) != ""; got != tt.want {
+				t.Errorf("ExitCodeUnknown(%q, %q) = %q, want untrusted=%v", tt.adapter, tt.goos, ExitCodeUnknown(tt.adapter, tt.goos), tt.want)
+			}
 		})
 	}
 }

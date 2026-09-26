@@ -85,9 +85,11 @@ func debugConsoleApp(t *testing.T, adapter string) {
 		t.Fatal(err)
 	}
 
-	if snap.Session.State != api.StateExited || snap.Session.ExitCode == nil || *snap.Session.ExitCode != 0 {
-		t.Fatalf("after continue: %+v, want exited with code 0", snap.Session)
+	if snap.Session.State != api.StateExited {
+		t.Fatalf("after continue: %+v, want exited", snap.Session)
 	}
+
+	expectExitCode(t, snap.Session, 0)
 
 	if out := joinOutput(sess.Output(0, 0).Lines); !strings.Contains(out, "done eyedbg 6") {
 		t.Errorf("output = %q, want it to contain %q", out, "done eyedbg 6")

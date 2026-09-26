@@ -4,6 +4,7 @@
 package e2e
 
 import (
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	godap "github.com/google/go-dap"
 
+	"github.com/eyedebugger/eyedebugger/drivers/dotnet"
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/facade"
 )
@@ -239,6 +241,15 @@ func TestFacadeSessionEnds(t *testing.T) {
 
 			startAt(t, h, lc, "free")
 
+			// A session under an adapter this build doesn't trust the
+			// exit code of (dotnet.ExitCodeUnknown) never sends a DAP
+			// exited event (internal/facade/events.go): read the session's
+			// real adapter (not the test process's, which may differ from
+			// the daemon's) instead of assuming one.
+			var st snapshotEnvelope
+			h.run("--json", "status").wantCode(exitOK).decode(&st)
+			untrusted := dotnet.ExitCodeUnknown(st.Session.Adapter, runtime.GOOS) != ""
+
 			p := h.dap(humanE2E)
 			joinStopped(t, p, lc, 0)
 
@@ -246,7 +257,11 @@ func TestFacadeSessionEnds(t *testing.T) {
 			h.run("continue", "--timeout", startTimeout).wantCode(exitOK)
 
 			p.waitEvent("continued")
-			p.waitEvent("exited")
+
+			if !untrusted {
+				p.waitEvent("exited")
+			}
+
 			p.waitEvent("terminated")
 			p.ok(&godap.DisconnectRequest{Request: request("disconnect")})
 

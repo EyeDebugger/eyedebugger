@@ -322,9 +322,11 @@ func TestDotnetTraceSession(t *testing.T) {
 
 	h.run("wait", "--timeout", startTimeout, "--json").wantCode(exitOK).decode(&end)
 
-	if end.Session.State != "exited" || end.Session.ExitCode == nil || *end.Session.ExitCode != 0 {
-		t.Errorf("after the marker: %+v, want exited 0", end.Session)
+	if end.Session.State != "exited" {
+		t.Errorf("after the marker: %+v, want exited", end.Session)
 	}
+
+	expectE2EExitCode(t, end.Session, 0)
 }
 
 // TestDotnetTraceNotDotnet is case 8: this Go test process has no .NET

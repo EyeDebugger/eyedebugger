@@ -19,6 +19,7 @@ import (
 
 	"github.com/eyedebugger/eyedebugger/drivers/dotnet"
 	"github.com/eyedebugger/eyedebugger/internal/adapters"
+	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/session"
 )
 
@@ -84,6 +85,29 @@ func forEachAdapter(t *testing.T, test func(t *testing.T, adapter string)) {
 			requireAdapter(t, a)
 			test(t, a)
 		})
+	}
+}
+
+// expectExitCode checks a session's exit code against want, unless its
+// adapter's exit codes can't be trusted here (dotnet.ExitCodeUnknown): then
+// it requires none, and an end reason saying so.
+func expectExitCode(t *testing.T, info api.SessionInfo, want int) {
+	t.Helper()
+
+	if why := dotnet.ExitCodeUnknown(info.Adapter, runtime.GOOS); why != "" {
+		if info.ExitCode != nil {
+			t.Errorf("exit code = %d, want none (%s)", *info.ExitCode, why)
+		}
+
+		if !strings.Contains(info.EndReason, "exit code is unknown") {
+			t.Errorf("end reason = %q, want it to say the exit code is unknown", info.EndReason)
+		}
+
+		return
+	}
+
+	if info.ExitCode == nil || *info.ExitCode != want {
+		t.Errorf("exit code = %v, want %d", info.ExitCode, want)
 	}
 }
 

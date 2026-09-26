@@ -37,6 +37,21 @@ const Language = lang
 // (internal/adapters/manifests/sharpdbg.json; docs/adr/0017).
 const SharpDbg = "sharpdbg"
 
+// netcoredbgName is the manifest name serving dotnet natively.
+const netcoredbgName = "netcoredbg"
+
+// ExitCodeUnknown is why adapter's exit codes for goos can't be trusted, or
+// "" where they can. netcoredbg (verified: 3.2.0-1092, osx-arm64) reports
+// every launched or attached program's exit code as 0 on macOS, any arch;
+// re-check this on a netcoredbg manifest bump (docs/DESIGN.md §8).
+func ExitCodeUnknown(adapter, goos string) string {
+	if adapter == netcoredbgName && goos == "darwin" {
+		return "netcoredbg on macOS reports every program's exit code as 0"
+	}
+
+	return ""
+}
+
 // sharpdbgPauseHint is the hint of a pause refused under SharpDbg, whose
 // pause (0.1.17) stops the program without a stopped event.
 const sharpdbgPauseHint = "set a breakpoint and continue to it, or see where the threads are without stopping them with " +
@@ -293,6 +308,7 @@ func (d *Driver) launchWith(ctx context.Context, m *adapters.Manifest) (session.
 	}
 	launch.SideEffects = SideEffects
 	launch.AttachHint = attachHint
+	launch.ExitCodeUnknown = ExitCodeUnknown(m.Name, d.env.goos)
 
 	if m.Name == SharpDbg {
 		launch.PauseUnsupported = sharpdbgPauseHint

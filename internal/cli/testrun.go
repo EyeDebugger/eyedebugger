@@ -49,7 +49,9 @@ can't cancel it — it's bounded by the same 5-minute start timeout. With --bp, 
 VSTest session ends when 'dotnet test' exits, with its exit code (0: all passed, 1: a test
 failed); a launched session ends when the test app itself exits, with its own exit code
 (Microsoft.Testing.Platform frameworks: 0 pass, 2 a test failed, 8 no test matched; xUnit v3
-native: 0 pass or no test matched, 1 a test failed; see the framework's own output for others). A
+native: 0 pass or no test matched, 1 a test failed; see the framework's own output for others),
+except where the adapter's exit codes can't be trusted (see --adapter), when it ends without one
+and the output is the only way to tell. A
 build error is BUILD_FAILED; a VSTest run that ends without a test host (e.g. no test matches the
 filter) is NO_TEST_HOST, both with the end of the output. 'eyedbg stop' kills the run; detaching
 is refused.

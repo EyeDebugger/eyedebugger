@@ -70,6 +70,12 @@ type Launch struct {
 	// setVariable, evaluate "VARIABLE = VALUE" in the repl context instead
 	// of refusing: for an adapter whose evaluator runs assignments.
 	SetByEval bool
+	// ExitCodeUnknown, when set, is why this launch's adapter can't be
+	// trusted to report the program's real exit code (e.g. netcoredbg on
+	// macOS, which reports 0 for every program): the session then records
+	// no exit code for it, for launch, attach and test runs alike, and
+	// says why in its end reason.
+	ExitCodeUnknown string
 }
 
 // Request kinds for [Launch.Request].
