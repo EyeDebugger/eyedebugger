@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -35,6 +37,130 @@ func TestTail(t *testing.T) {
 
 	if got := tail("a\n\nb\nc\n", 2); got != "b\nc" {
 		t.Errorf("tail = %q, want %q", got, "b\nc")
+	}
+}
+
+// TestStreamsBuilds checks that the driver is one session.Launch streams
+// the build of: an OptionsPreparer.
+func TestStreamsBuilds(t *testing.T) {
+	t.Parallel()
+
+	if _, ok := session.Driver(NewWith(nil)).(session.OptionsPreparer); !ok {
+		t.Error("the .NET driver is not a session.OptionsPreparer")
+	}
+}
+
+// TestStreamedBuildArgs checks the streamed build's two invocations: a
+// plain Debug build, then the query for what it built.
+func TestStreamedBuildArgs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		got  []string
+		want []string
+	}{
+		{"build", streamedBuildArgs("/src/app.csproj"), []string{"build", "/src/app.csproj", "-c", "Debug", "-nologo", "-tl:off"}},
+		{"target path", targetPathArgs("/src/app.csproj"), []string{
+			"msbuild", "/src/app.csproj", "-nologo", "-getProperty:TargetPath", "-p:Configuration=Debug",
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if !slices.Equal(tt.got, tt.want) {
+				t.Errorf("args = %q, want %q", tt.got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseTargetPath checks reading the one property msbuild was asked
+// for: its bare value, or JSON.
+func TestParseTargetPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		out  string
+		want string
+		ok   bool
+	}{
+		{"bare", "/src/bin/Debug/net10.0/app.dll\n", "/src/bin/Debug/net10.0/app.dll", true},
+		{"bare, CRLF", "C:\\src\\bin\\app.dll\r\n", "C:\\src\\bin\\app.dll", true},
+		{"JSON", "{\n  \"Properties\": {\n    \"TargetPath\": \"/x.dll\"\n  }\n}\n", "/x.dll", true},
+		{"JSON without it", "{\n  \"Properties\": {}\n}\n", "", false},
+		{"empty", "\n", "", false},
+		{"more than a path", "warning: x\n/x.dll\n", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := parseTargetPath([]byte(tt.out))
+			if ok != tt.ok || (ok && got != tt.want) {
+				t.Errorf("parseTargetPath(%q) = %q, %v; want %q, %v", tt.out, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+// TestStreamedBuildErr checks the error of a streamed build that failed:
+// one that ran and failed points at its streamed output, one that didn't
+// run says why, and a canceled start is the context's error.
+func TestStreamedBuildErr(t *testing.T) {
+	t.Parallel()
+
+	// This test binary, given a flag it doesn't know, exits with code 2.
+	exitErr := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^$", "-no-such-flag").Run() //nolint:gosec // This test binary, fixed arguments.
+	if _, ok := errors.AsType[*exec.ExitError](exitErr); !ok {
+		t.Fatalf("setup: %v, want an exit error", exitErr)
+	}
+
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	tests := []struct {
+		name string
+		ctx  context.Context //nolint:containedctx // A test case's input.
+		err  error
+		code api.Code
+		msg  string
+		hint string
+	}{
+		{
+			name: "build failed", ctx: t.Context(), err: exitErr, code: api.CodeBuildFailed,
+			msg: "dotnet build /src/app.csproj failed (its output is above)", hint: "fix the build errors above, then start again",
+		},
+		{
+			name: "didn't run", ctx: t.Context(), err: exec.ErrNotFound, code: api.CodeBuildFailed,
+			msg: "dotnet build /src/app.csproj failed: " + exec.ErrNotFound.Error(), hint: "check the .NET SDK ('dotnet --info')",
+		},
+		{name: "canceled", ctx: canceled, err: exitErr, msg: "dotnet build /src/app.csproj: " + context.Canceled.Error()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := streamedBuildErr(tt.ctx, "/src/app.csproj", tt.err)
+
+			if tt.code == "" {
+				if !errors.Is(err, context.Canceled) || err.Error() != tt.msg {
+					t.Fatalf("err = %v, want %q wrapping context.Canceled", err, tt.msg)
+				}
+
+				return
+			}
+
+			e, ok := errors.AsType[*api.Error](err)
+			if !ok || e.Code != tt.code || e.Message != tt.msg || e.Hint != tt.hint {
+				t.Errorf("err = %#v, want %s %q (hint %q)", err, tt.code, tt.msg, tt.hint)
+			}
+		})
 	}
 }
 

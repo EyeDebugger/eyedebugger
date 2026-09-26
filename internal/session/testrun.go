@@ -78,7 +78,7 @@ func (m *Manager) startTest(ctx context.Context, c api.Client, drv Driver, p api
 		launch := *tc.Launch
 		launch.Program = tc.Program
 
-		return m.run(ctx, m.create(ctx, c, p, policy, launch, api.ModeTest), launch, p.Breakpoints)
+		return m.run(ctx, m.create(ctx, c, p, policy, launch, api.ModeTest), launch, p.Breakpoints, nil)
 	}
 
 	if len(p.Args) > 0 {
@@ -122,7 +122,7 @@ func (m *Manager) startTestRunner(
 		return nil, err
 	}
 
-	if _, err := m.run(ctx, s, launch, p.Breakpoints); err != nil {
+	if _, err := m.run(ctx, s, launch, p.Breakpoints, nil); err != nil {
 		return nil, err
 	}
 
