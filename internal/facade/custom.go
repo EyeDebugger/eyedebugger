@@ -15,7 +15,7 @@ import (
 
 // The facade's custom DAP messages (docs/adr/0014), for an editor extension:
 // requests it answers itself (never forwarded to the adapter) and events it
-// sends after configurationDone.
+// sends after configurationDone (eyedbg/session: before initialized).
 const (
 	// CommandLease is both a request (arguments [LeaseArguments], body
 	// [LeaseBody]) and an event (body [LeaseBody], on every lease change).
@@ -31,6 +31,10 @@ const (
 	// EventActivity is an event (body [ActivityBody]): what another client
 	// did.
 	EventActivity = "eyedbg/activity"
+	// EventSession is an event (body [SessionBody]) a launch connection
+	// sends once its launch started the session, before capabilities and
+	// initialized (docs/adr/0019).
+	EventSession = "eyedbg/session"
 )
 
 // eyedbg/lease actions.
@@ -167,6 +171,19 @@ type ActivityEvent struct {
 	Body ActivityBody `json:"body"`
 }
 
+// SessionBody is eyedbg/session's body: the id of the session the launch
+// started.
+type SessionBody struct {
+	SessionID string `json:"sessionId"`
+}
+
+// SessionEvent is the eyedbg/session event.
+type SessionEvent struct {
+	godap.Event
+
+	Body SessionBody `json:"body"`
+}
+
 // RegisterMessages registers the facade's custom requests (with their
 // responses) and events on codec, so that one codec decodes them in every
 // direction.
@@ -194,6 +211,7 @@ func RegisterMessages(codec *godap.Codec) error {
 		{CommandClients, func() godap.Message { return &ClientsEvent{} }},
 		{CommandBreakpoints, func() godap.Message { return &BreakpointsEvent{} }},
 		{EventActivity, func() godap.Message { return &ActivityEvent{} }},
+		{EventSession, func() godap.Message { return &SessionEvent{} }},
 	}
 
 	for _, e := range events {

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	godap "github.com/google/go-dap"
 
@@ -24,27 +25,58 @@ func (c *connection) dispatch(ctx context.Context, req godap.RequestMessage, in 
 	case *godap.InitializeRequest:
 		c.initialize(ctx, r)
 	case *godap.AttachRequest:
+		if c.launch != nil {
+			c.fail(ctx, req, api.NewError(api.CodeInvalidRequest,
+				"this connection launches a session: send launch, or join one with 'eyedbg dap -s ID'", ""), false)
+
+			return false
+		}
+
 		c.attach(ctx, r)
 	case *godap.LaunchRequest:
-		c.fail(ctx, req, api.NewError(api.CodeInvalidRequest,
-			"the DAP facade joins sessions: start one with 'eyedbg start'", "then attach to it"), false)
+		if c.launch == nil {
+			c.fail(ctx, req, api.NewError(api.CodeInvalidRequest,
+				"this connection joined a session: attach to it, or launch with 'eyedbg dap --launch'", ""), false)
+
+			return false
+		}
+
+		c.startLaunch(ctx, r)
 	case *godap.ConfigurationDoneRequest:
+		if c.launch != nil {
+			c.launchConfigurationDone(ctx, r, in)
+
+			return false
+		}
+
 		c.configurationDone(ctx, r)
 	case *godap.DisconnectRequest:
 		c.disconnect(ctx, r)
 
 		return true
-	default:
-		if err := c.admissible(req); err != nil {
-			c.fail(ctx, req, err, false)
-
+	case *godap.TerminateRequest:
+		if c.launch != nil && c.launchTerminate(ctx, r, in) {
 			return false
 		}
 
-		c.spawn(ctx, in, isOrdered(req), func() { c.handle(ctx, req) })
+		c.dispatchOther(ctx, req, in)
+	default:
+		c.dispatchOther(ctx, req, in)
 	}
 
 	return false
+}
+
+// dispatchOther hands a request that isn't a lifecycle one to the worker
+// or its own goroutine, once the handshake allows it.
+func (c *connection) dispatchOther(ctx context.Context, req godap.RequestMessage, in inFlight) {
+	if err := c.admissible(req); err != nil {
+		c.fail(ctx, req, err, false)
+
+		return
+	}
+
+	c.spawn(ctx, in, isOrdered(req), func() { c.handle(ctx, req) })
 }
 
 // isExecution reports whether req changes the program's execution or
@@ -101,15 +133,24 @@ func changesBreakpoints(req godap.RequestMessage) bool {
 }
 
 // admissible checks the handshake order for a request that isn't a
-// lifecycle one: after initialize and attach, and for execution requests
-// after configurationDone.
+// lifecycle one: after initialize and attach (a launch connection: once its
+// launch bound the session), and for execution requests after
+// configurationDone (a launch connection: after the launch response). A
+// refusal never says "does not support": an editor extension takes that
+// as the session not supporting the request.
 func (c *connection) admissible(req godap.RequestMessage) error {
-	switch {
-	case c.phase == phaseNew:
+	switch ph := c.phase.load(); {
+	case ph == phaseNew:
 		return api.NewError(api.CodeInvalidRequest, "send initialize first", "")
-	case c.phase == phaseInitialized:
+	case ph == phaseInitialized && c.launch != nil:
+		return api.NewError(api.CodeInvalidRequest, "send launch first", "")
+	case ph == phaseInitialized:
 		return api.NewError(api.CodeInvalidRequest, "attach to the session first", "")
-	case c.phase == phaseAttached && isExecution(req):
+	case ph == phaseLaunching:
+		return api.NewError(api.CodeInvalidRequest, "the session is still starting: wait for the initialized event", "")
+	case ph == phaseFailed:
+		return api.NewError(api.CodeInvalidRequest, "this connection's launch failed: disconnect, then launch again", "")
+	case ph == phaseAttached && isExecution(req):
 		return api.NewError(api.CodeInvalidRequest, req.GetRequest().Command+" needs configurationDone first", "")
 	default:
 		return nil
@@ -123,7 +164,7 @@ func (c *connection) initialize(ctx context.Context, r *godap.InitializeRequest)
 	a := r.Arguments
 
 	switch {
-	case c.phase != phaseNew:
+	case c.phase.load() != phaseNew:
 		c.fail(ctx, r, api.NewError(api.CodeInvalidRequest, "initialize was already sent", ""), false)
 
 		return
@@ -134,24 +175,36 @@ func (c *connection) initialize(ctx context.Context, r *godap.InitializeRequest)
 		return
 	}
 
+	if c.launch != nil {
+		// No session, no adapter yet: the forced-on set and both
+		// exception filters; the adapter's own capabilities follow as a
+		// capabilities event once the launch started it.
+		c.invalidated = a.SupportsInvalidatedEvent
+		c.phase.store(phaseInitialized)
+		c.respond(ctx, r, &godap.InitializeResponse{Body: capabilities(godap.Capabilities{}, launchExceptionModes())})
+
+		return
+	}
+
 	readyCtx, cancel := context.WithTimeout(ctx, readyTimeout)
 	defer cancel()
 
-	caps, err := c.sess.Ready(readyCtx)
+	caps, err := c.session().Ready(readyCtx)
 	if err != nil {
 		c.fail(ctx, r, err, false)
 
 		return
 	}
 
-	c.phase, c.invalidated = phaseInitialized, a.SupportsInvalidatedEvent
-	c.respond(ctx, r, &godap.InitializeResponse{Body: capabilities(caps, c.sess.SupportedExceptionModes())})
+	c.invalidated = a.SupportsInvalidatedEvent
+	c.phase.store(phaseInitialized)
+	c.respond(ctx, r, &godap.InitializeResponse{Body: capabilities(caps, c.session().SupportedExceptionModes())})
 }
 
 // attach joins the connection's session (it already is: the arguments
 // may only name it), then sends initialized.
 func (c *connection) attach(ctx context.Context, r *godap.AttachRequest) {
-	if c.phase != phaseInitialized {
+	if c.phase.load() != phaseInitialized {
 		c.fail(ctx, r, api.NewError(api.CodeInvalidRequest, "attach needs initialize first, once", ""), false)
 
 		return
@@ -169,14 +222,14 @@ func (c *connection) attach(ctx context.Context, r *godap.AttachRequest) {
 		}
 	}
 
-	if args.Session != nil && *args.Session != c.sess.ID {
+	if args.Session != nil && *args.Session != c.session().ID {
 		c.fail(ctx, r, api.NewError(api.CodeInvalidRequest,
-			"this connection joined session "+c.sess.ID+", not "+*args.Session, "run 'eyedbg dap -s ID' for another session"), false)
+			"this connection joined session "+c.session().ID+", not "+*args.Session, "run 'eyedbg dap -s ID' for another session"), false)
 
 		return
 	}
 
-	c.phase = phaseAttached
+	c.phase.store(phaseAttached)
 	if c.respond(ctx, r, &godap.AttachResponse{}) {
 		c.send(ctx, &godap.InitializedEvent{Event: event("initialized")})
 	}
@@ -190,23 +243,30 @@ func (c *connection) attach(ctx context.Context, r *godap.AttachRequest) {
 // clients and breakpoints (eyedbg/*); then it follows the log from the join
 // point. A session that exited gets its output and its end only.
 func (c *connection) configurationDone(ctx context.Context, r *godap.ConfigurationDoneRequest) {
-	if c.phase != phaseAttached {
+	if c.phase.load() != phaseAttached {
 		c.fail(ctx, r, api.NewError(api.CodeInvalidRequest, "configurationDone needs attach first, once", ""), false)
 
 		return
 	}
 
-	info, seq := c.sess.JoinPoint()
-	c.phase = phaseConfigured
+	info, seq := c.session().JoinPoint()
+	c.phase.store(phaseConfigured)
 
 	if !c.respond(ctx, r, &godap.ConfigurationDoneResponse{}) {
 		return
 	}
 
-	st := &followState{self: c.client.ID, invalidated: c.invalidated}
-
 	c.gate.Lock()
 	defer c.gate.Unlock()
+
+	c.join(ctx, info, seq)
+}
+
+// join joins the session's event log at seq, where the session was info
+// (what [session.Session.JoinPoint] returned), once the response that
+// joins was written; under the event gate. See configurationDone.
+func (c *connection) join(ctx context.Context, info api.SessionInfo, seq int) {
+	st := &followState{self: c.client.ID, invalidated: c.invalidated}
 
 	c.sendAll(ctx, c.replayOutput(seq))
 
@@ -239,7 +299,7 @@ func (c *connection) configurationDone(ctx context.Context, r *godap.Configurati
 // replayOutput returns the output events of the newest output the session
 // holds up to seq, after a console line counting the older chunks left out.
 func (c *connection) replayOutput(seq int) []godap.EventMessage {
-	lines, omitted := c.sess.OutputBefore(seq, replayChunks, replayBytes)
+	lines, omitted := c.session().OutputBefore(seq, replayChunks, replayBytes)
 	out := make([]godap.EventMessage, 0, len(lines)+1)
 
 	if omitted > 0 {
@@ -289,6 +349,10 @@ func (c *connection) handle(ctx context.Context, req godap.RequestMessage) {
 		answered = c.respond(ctx, req, resp)
 	}
 
+	if _, ok := req.(*godap.SetExceptionBreakpointsRequest); ok && answered {
+		c.afterExceptions()
+	}
+
 	if changesBreakpoints(req) {
 		c.afterBreakpoints(ctx, answered)
 	}
@@ -327,7 +391,13 @@ func (c *connection) serve(ctx context.Context, req godap.RequestMessage) (godap
 	case *godap.PauseRequest:
 		return &godap.PauseResponse{}, c.exec(ctx, session.ExecPause, r.Arguments.ThreadId)
 	case *godap.TerminateRequest:
-		return &godap.TerminateResponse{}, c.sess.Terminate(ctx, c.client)
+		if c.launch != nil {
+			// The session this connection launched: ended and forgotten,
+			// as 'eyedbg stop' does (under the lease).
+			return &godap.TerminateResponse{}, c.stopLaunched(ctx, c.session())
+		}
+
+		return &godap.TerminateResponse{}, c.session().Terminate(ctx, c.client)
 	case *godap.SetBreakpointsRequest:
 		return c.setBreakpoints(ctx, r)
 	case *godap.SetFunctionBreakpointsRequest:
@@ -337,18 +407,18 @@ func (c *connection) serve(ctx context.Context, req godap.RequestMessage) (godap
 	case *LeaseRequest:
 		return c.lease(r)
 	case *ClientsRequest:
-		info := c.sess.Info()
+		info := c.session().Info()
 
 		return &ClientsResponse{Body: ClientsBody{Clients: clientsEvent(info.Clients).Body.Clients, Lease: info.Lease}}, nil
 	case *BreakpointsRequest:
 		return c.breakpoints(ctx, r)
 	default:
-		return c.sess.Forward(ctx, c.client, req)
+		return c.session().Forward(ctx, c.client, req)
 	}
 }
 
 func (c *connection) exec(ctx context.Context, kind string, thread int) error {
-	_, err := c.sess.Exec(ctx, c.client, kind, thread)
+	_, err := c.session().Exec(ctx, c.client, kind, thread)
 
 	return err
 }
@@ -383,7 +453,7 @@ func (c *connection) setBreakpoints(ctx context.Context, r *godap.SetBreakpoints
 	if keyErr != nil {
 		key = ""
 	} else {
-		bps = c.sess.Breakpoints("")
+		bps = c.session().Breakpoints("")
 	}
 
 	classes := classify(entries, key, path, c.view, bps, c.client.ID)
@@ -406,7 +476,7 @@ func (c *connection) setBreakpoints(ctx context.Context, r *godap.SetBreakpoints
 		c.view.sourceSeen(path, key, len(own) > 0)
 	}
 
-	got, err := c.sess.ReplaceBreakpoints(ctx, c.client, path, specs, keep)
+	got, err := c.session().ReplaceBreakpoints(ctx, c.client, path, specs, keep)
 	placed := c.view.track(bpsKey{path: path}, got)
 
 	out := make([]godap.Breakpoint, len(entries))
@@ -469,7 +539,7 @@ func (c *connection) setFunctionBreakpoints(ctx context.Context, r *godap.SetFun
 		specs = append(specs, api.BreakpointSpec{Function: b.Name, Condition: b.Condition, HitCondition: b.HitCondition})
 	}
 
-	got, err := c.sess.ReplaceFunctionBreakpoints(ctx, c.client, specs)
+	got, err := c.session().ReplaceFunctionBreakpoints(ctx, c.client, specs)
 	out := c.view.track(funcBreakpoints, got)
 
 	return &godap.SetFunctionBreakpointsResponse{Body: godap.SetFunctionBreakpointsResponseBody{Breakpoints: out}}, err
@@ -479,11 +549,19 @@ func (c *connection) setFunctionBreakpoints(ctx context.Context, r *godap.SetFun
 // all if the filters name it, else uncaught, else none.
 func (c *connection) setExceptionBreakpoints(ctx context.Context, r *godap.SetExceptionBreakpointsRequest) (godap.ResponseMessage, error) {
 	mode := exceptionMode(r.Arguments.Filters)
-	if _, err := c.sess.Exceptions(ctx, c.client, api.ExceptionsParams{Mode: mode}); err != nil {
+
+	// A launch connection offered both filters before the adapter was
+	// known: a mode it can't serve is none for the client, and said once.
+	if c.launch != nil && mode != api.ExceptionsNone && !slices.Contains(c.session().SupportedExceptionModes(), mode) {
+		c.launch.unservable = mode
+		mode = api.ExceptionsNone
+	}
+
+	if _, err := c.session().Exceptions(ctx, c.client, api.ExceptionsParams{Mode: mode}); err != nil {
 		return nil, err
 	}
 
-	c.presence.ExceptionsSet(mode)
+	c.presence.Load().ExceptionsSet(mode)
 
 	return &godap.SetExceptionBreakpointsResponse{}, nil
 }
@@ -500,21 +578,21 @@ func (c *connection) lease(r *LeaseRequest) (godap.ResponseMessage, error) {
 
 	switch a.Action {
 	case LeaseActionStatus:
-		info = c.sess.Lease()
+		info = c.session().Lease()
 	case LeaseActionTake:
-		info, err = c.sess.TakeLease(c.client, a.Force)
+		info, err = c.session().TakeLease(c.client, a.Force)
 	case LeaseActionRelease:
-		info = c.sess.ReleaseLease(c.client)
+		info = c.session().ReleaseLease(c.client)
 	case LeaseActionRequest:
-		info, err = c.sess.RequestLease(c.client, a.Message)
+		info, err = c.session().RequestLease(c.client, a.Message)
 	case LeaseActionGrant:
-		info, err = c.sess.GrantLease(c.client, a.To, a.Force)
+		info, err = c.session().GrantLease(c.client, a.To, a.Force)
 	case LeaseActionPolicy:
 		if a.Policy == "" {
 			return nil, api.NewError(api.CodeInvalidRequest, CommandLease+" policy needs a policy: free, handoff or human-priority", "")
 		}
 
-		info, err = c.sess.SetLeasePolicy(c.client, a.Policy, a.Force)
+		info, err = c.session().SetLeasePolicy(c.client, a.Policy, a.Force)
 	default:
 		return nil, api.NewError(api.CodeInvalidRequest,
 			CommandLease+" needs an action: status, take, release, request, grant or policy", "")
@@ -534,18 +612,18 @@ func (c *connection) breakpoints(ctx context.Context, r *BreakpointsRequest) (go
 
 	switch a.Action {
 	case "", BreakpointsActionList:
-		return &BreakpointsResponse{Body: breakpointsBody(c.sess.Breakpoints(""))}, nil
+		return &BreakpointsResponse{Body: breakpointsBody(c.session().Breakpoints(""))}, nil
 	case BreakpointsActionRemove:
 		if a.ID < 1 {
 			return nil, api.NewError(api.CodeInvalidRequest, CommandBreakpoints+" remove needs a breakpoint id from 1", "")
 		}
 
-		removed, _, err := c.sess.RemoveBreakpoint(ctx, c.client, a.ID, a.Force)
+		removed, _, err := c.session().RemoveBreakpoint(ctx, c.client, a.ID, a.Force)
 		if err != nil {
 			return nil, err
 		}
 
-		body := breakpointsBody(c.sess.Breakpoints(""))
+		body := breakpointsBody(c.session().Breakpoints(""))
 		body.Removed = removed
 
 		return &BreakpointsResponse{Body: body}, nil
@@ -579,8 +657,8 @@ func (c *connection) fail(ctx context.Context, req godap.RequestMessage, err err
 
 	holder := ""
 
-	if api.CodeOf(err) == api.CodeLeaseHeld {
-		holder = c.sess.Lease().Holder
+	if s := c.session(); s != nil && api.CodeOf(err) == api.CodeLeaseHeld {
+		holder = s.Lease().Holder
 	}
 
 	if api.CodeOf(err) == "" {

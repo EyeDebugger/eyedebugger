@@ -73,7 +73,7 @@ func writeVersion(w io.Writer, name string, info version.Info, asJSON bool) erro
 			GoVersion: info.GoVersion,
 			Platform:  info.Platform,
 			Protocol:  api.ProtocolVersion,
-			Features:  []string{"dap", "presence", "lease.request", "dap.collab", "dotnet.helper", "dotnet.dump", "dotnet.trace", "adapter.select"},
+			Features:  []string{"dap", "presence", "lease.request", "dap.collab", "dotnet.helper", "dotnet.dump", "dotnet.trace", "adapter.select", "dap.launch"},
 		}
 		if err := json.NewEncoder(w).Encode(out); err != nil {
 			return fmt.Errorf("write version: %w", err)

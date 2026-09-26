@@ -224,13 +224,13 @@ func dapBreakpoint(b *api.Breakpoint) godap.Breakpoint {
 // with one eyedbg/breakpoints event.
 func (c *connection) follow(ctx context.Context, since int, st *followState) {
 	for {
-		res := c.sess.Follow(ctx, since)
+		res := c.session().Follow(ctx, since)
 		if ctx.Err() != nil || len(res.Events) == 0 {
 			return
 		}
 
 		if res.Dropped > 0 && !c.relay(func() []godap.EventMessage {
-			return append(resync(res.Dropped, c.sess.Info(), st), c.reconcile()...)
+			return append(resync(res.Dropped, c.session().Info(), st), c.reconcile()...)
 		}) {
 			return
 		}
@@ -276,7 +276,7 @@ func (c *connection) translate(ev *api.Event, st *followState) []godap.EventMess
 			out = append(out, leaseEvent(*ev.Lease))
 		}
 	case api.EventClient:
-		out = append(out, clientsEvent(c.sess.Info().Clients))
+		out = append(out, clientsEvent(c.session().Info().Clients))
 	case api.EventStarted, api.EventExec, api.EventContinued, api.EventStopped, api.EventOutput, api.EventThread,
 		api.EventExited, api.EventEnded, api.EventExceptions:
 	}
@@ -320,13 +320,13 @@ func (c *connection) reconcile() []godap.EventMessage {
 		return nil
 	}
 
-	return reconcile(c.view, c.client.ID, c.sess.Breakpoints(""))
+	return reconcile(c.view, c.client.ID, c.session().Breakpoints(""))
 }
 
 // breakpointsEvent is an eyedbg/breakpoints event listing every client's
 // breakpoints now.
 func (c *connection) breakpointsEvent() *BreakpointsEvent {
-	return &BreakpointsEvent{Event: event(CommandBreakpoints), Body: breakpointsBody(c.sess.Breakpoints(""))}
+	return &BreakpointsEvent{Event: event(CommandBreakpoints), Body: breakpointsBody(c.session().Breakpoints(""))}
 }
 
 // relay runs events and writes what it returns, all under the event gate;
