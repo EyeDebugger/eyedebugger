@@ -479,8 +479,9 @@ func (s *Session) onEvent(ev godap.EventMessage) {
 }
 
 // onStoppedLocked applies a stop, or hands a breakpoint stop that may be
-// one to count or log and pass to the stop filter (off this goroutine: it
-// waits for the adapter's answers).
+// one to count, log or pass, or whose line has conditions the adapter
+// didn't check, to the stop filter (off this goroutine: it waits for the
+// adapter's answers).
 func (s *Session) onStoppedLocked(e *godap.StoppedEvent) {
 	stop := api.StopInfo{
 		Reason: e.Body.Reason, ThreadID: e.Body.ThreadId, Description: e.Body.Description, Text: e.Body.Text,
@@ -494,7 +495,7 @@ func (s *Session) onStoppedLocked(e *godap.StoppedEvent) {
 		stop.Reason = reasonPause
 	}
 
-	if stop.Reason == reasonBreakpoint && s.emulatingLocked() {
+	if stop.Reason == reasonBreakpoint && s.needsFilterLocked() {
 		go s.filterStop(s.stopGen, stop)
 
 		return
@@ -1033,7 +1034,10 @@ type execRequest struct {
 type execution struct {
 	before int                // stops seen when it was accepted
 	target api.BreakpointSpec // where run-until's breakpoint landed
-	temp   *breakpoint        // run-until's temporary breakpoint, if it placed one
+	// targetID is run-until's breakpoint's id: its temporary one, or the
+	// caller's own it reused.
+	targetID int
+	temp     *breakpoint // run-until's temporary breakpoint, if it placed one
 }
 
 // execute runs an execution request under execMu, in the order: state
@@ -1056,7 +1060,7 @@ func (s *Session) execute(ctx context.Context, r execRequest) (execution, error)
 	}
 
 	if r.target != nil {
-		if x.target, x.temp, err = s.placeTarget(ctx, r.client, *r.target); err != nil {
+		if x.target, x.targetID, x.temp, err = s.placeTarget(ctx, r.client, *r.target); err != nil {
 			return execution{}, err
 		}
 	}

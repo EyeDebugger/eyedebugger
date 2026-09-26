@@ -3,9 +3,11 @@
 
 package session
 
-// sharedLineNote is set on breakpoints whose line holds other clients'
-// breakpoints with a different condition.
-const sharedLineNote = "shares its line with another client's breakpoint that has a different condition: it stops there unconditionally"
+// sharedFunctionNote is set on function breakpoints whose function holds
+// other clients' breakpoints with a different condition. Line breakpoints
+// need none: the stop filter checks each one's condition (emulate.go).
+const sharedFunctionNote = "shares its function with another client's breakpoint that has a different condition: " +
+	"it stops there unconditionally"
 
 // slotKey is where a breakpoint is requested: a function, or a line (of the
 // file whose list it is in).
@@ -26,7 +28,7 @@ type slot struct {
 
 	condition string
 	// note means the breakpoints' conditions conflict, so the slot stops
-	// unconditionally.
+	// unconditionally (at a line, the stop filter then checks each one).
 	note bool
 	bps  []*breakpoint
 }

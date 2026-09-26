@@ -4,10 +4,12 @@
 package session
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -21,7 +23,11 @@ import (
 // neither): the adapter gets a plain breakpoint, and when the program stops
 // at one while any breakpoint has a hit condition or a log message, the
 // stop filter decides, under execMu, whether the stop is published or the
-// program continues (docs/adr/0010).
+// program continues (docs/adr/0010). It also decides while some line holds
+// breakpoints whose conditions differ: the adapter's one breakpoint there
+// is unconditional, and the filter evaluates each one's own condition, so
+// the program stops when any of them would, and the stop names the
+// breakpoints it is for (api.StopInfo.Breakpoints).
 //
 // While the filter runs, the session still looks running to clients: the
 // stop is only applied (stops, state, stopped event) when published.
@@ -41,8 +47,10 @@ const reasonBreakpoint = "breakpoint"
 
 // Descriptions of stops the filter publishes for another reason.
 const (
-	stepEndedDescription = "the step ended at a breakpoint that doesn't stop here (a logpoint or an unmet hit count)"
-	pausedDescription    = "paused at a breakpoint that doesn't stop here (a logpoint or an unmet hit count)"
+	stepEndedDescription = "the step ended at a breakpoint that doesn't stop here " +
+		"(a logpoint, an unmet hit count or a condition that doesn't hold)"
+	pausedDescription = "paused at a breakpoint that doesn't stop here " +
+		"(a logpoint, an unmet hit count or a condition that doesn't hold)"
 )
 
 // hitCondition is a parsed --hit: stop at hit n only (==), from hit n on
@@ -157,13 +165,56 @@ func logError(msg, why string) error {
 // emulated reports whether b needs the stop filter.
 func (b *breakpoint) emulated() bool { return b.hit != nil || len(b.log) > 0 }
 
-// emulatingLocked reports whether any breakpoint needs the stop filter.
-func (s *Session) emulatingLocked() bool {
-	for _, list := range s.bps {
-		for _, b := range list {
-			if b.emulated() {
-				return true
-			}
+// needsFilterLocked reports whether a breakpoint stop goes through the stop
+// filter: some line breakpoint is emulated, or some line (as the adapter
+// placed it) holds line breakpoints whose conditions differ, which the
+// adapter doesn't check (its one breakpoint there is unconditional).
+// Function breakpoints never engage it: a function breakpoint's stop can't
+// be told from its location. It runs on the DAP read goroutine: no adapter
+// call, O(breakpoints).
+func (s *Session) needsFilterLocked() bool {
+	var seen map[int]string
+
+	for key, list := range s.bps {
+		if key == funcKey {
+			continue
+		}
+
+		if slices.ContainsFunc(list, (*breakpoint).emulated) {
+			return true
+		}
+
+		if len(list) < 2 {
+			continue
+		}
+
+		if seen == nil {
+			seen = make(map[int]string, len(list))
+		} else {
+			clear(seen)
+		}
+
+		if conditionsDiffer(list, seen) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// conditionsDiffer reports whether two of a file's breakpoints on one
+// placed line have different conditions; seen (empty) is scratch space.
+func conditionsDiffer(list []*breakpoint, seen map[int]string) bool {
+	for _, b := range list {
+		c, ok := seen[b.Line]
+		if !ok {
+			seen[b.Line] = b.Condition
+
+			continue
+		}
+
+		if c != b.Condition {
+			return true
 		}
 	}
 
@@ -206,7 +257,9 @@ func (s *Session) publish(gen int, stop api.StopInfo, desc string) {
 // it.
 type planRecord struct {
 	b *breakpoint
-	// condition must be evaluated: the adapter's slot didn't (it differs).
+	// condition must be evaluated: the adapter didn't check it (the
+	// breakpoints at its line don't all have the same condition). Empty:
+	// it holds.
 	condition string
 	hits      int // before this stop
 	hit       *hitCondition
@@ -215,15 +268,16 @@ type planRecord struct {
 
 // decision is what decide makes of a stop.
 type decision struct {
-	stop bool
-	hit  []*planRecord // counted a hit
-	logs []*planRecord // print their message
+	stop    bool
+	stopFor []*planRecord // want the stop; stop iff there are any
+	hit     []*planRecord // counted a hit
+	logs    []*planRecord // print their message
 }
 
 // decide is the stop filter's rule. For each record whose condition holds
 // (held[i]): a plain breakpoint stops; an emulated one counts a hit and,
 // when its hit condition holds at the new count, logs (a logpoint, which
-// never stops) or stops.
+// never stops) or stops. The program stops when any record wants it.
 func decide(records []*planRecord, held []bool) decision {
 	var d decision
 
@@ -233,7 +287,7 @@ func decide(records []*planRecord, held []bool) decision {
 		}
 
 		if r.hit == nil && len(r.log) == 0 {
-			d.stop = true
+			d.stopFor = append(d.stopFor, r)
 
 			continue
 		}
@@ -247,11 +301,40 @@ func decide(records []*planRecord, held []bool) decision {
 		if len(r.log) > 0 {
 			d.logs = append(d.logs, r)
 		} else {
-			d.stop = true
+			d.stopFor = append(d.stopFor, r)
 		}
 	}
 
+	d.stop = len(d.stopFor) > 0
+
 	return d
+}
+
+// toEvaluate returns the conditions the filter evaluates for records: each
+// distinct text once, in order of first appearance.
+func toEvaluate(records []*planRecord) []string {
+	var conds []string
+
+	for _, r := range records {
+		if r.condition != "" && !slices.Contains(conds, r.condition) {
+			conds = append(conds, r.condition)
+		}
+	}
+
+	return conds
+}
+
+// attribution returns the breakpoints records are, sorted by id, in a
+// fresh slice (a published stop shares it: it is never changed after).
+func attribution(records []*planRecord) []api.StopBreakpoint {
+	out := make([]api.StopBreakpoint, len(records))
+	for i, r := range records {
+		out[i] = api.StopBreakpoint{ID: r.b.ID, Owner: r.b.Owner}
+	}
+
+	slices.SortFunc(out, func(a, b api.StopBreakpoint) int { return cmp.Compare(a.ID, b.ID) })
+
+	return out
 }
 
 // filterStop decides a breakpoint stop of generation gen. It runs on its own
@@ -285,12 +368,7 @@ func (s *Session) filterStop(gen int, stop api.StopInfo) {
 		return
 	}
 
-	held := make([]bool, len(records))
-	for i, r := range records {
-		held[i] = r.condition == "" || s.conditionHolds(ctx, frames[0].id, r.condition)
-	}
-
-	d := decide(records, held)
+	d := decide(records, s.held(ctx, frames[0].id, records))
 	messages := make([]string, len(d.logs))
 
 	for i, r := range d.logs {
@@ -307,6 +385,9 @@ func (s *Session) filterStop(gen int, stop api.StopInfo) {
 	}
 
 	desc := s.publishReasonLocked(d.stop)
+	if d.stop {
+		stop.Breakpoints = attribution(d.stopFor)
+	}
 	s.mu.Unlock()
 
 	if d.stop || desc != "" {
@@ -314,6 +395,26 @@ func (s *Session) filterStop(gen int, stop api.StopInfo) {
 	} else {
 		s.autoContinue(ctx, gen, stop)
 	}
+}
+
+// held evaluates records' conditions in frame fid, each distinct text once,
+// and reports which hold. Every one, without short-circuit: hit counts and
+// the attribution need each (as each owner alone would have had it
+// evaluated).
+func (s *Session) held(ctx context.Context, fid int, records []*planRecord) []bool {
+	conds := toEvaluate(records)
+	results := make(map[string]bool, len(conds))
+
+	for _, c := range conds {
+		results[c] = s.conditionHolds(ctx, fid, c)
+	}
+
+	held := make([]bool, len(records))
+	for i, r := range records {
+		held[i] = r.condition == "" || results[r.condition]
+	}
+
+	return held
 }
 
 // publishReasonLocked is the description of a stop the filter publishes
@@ -405,7 +506,12 @@ func (s *Session) planStop(fr api.Frame) []*planRecord {
 }
 
 // planLocked returns the line breakpoints at fr.Line that at accepts, and
-// every file key.
+// every file key. Per file, the breakpoints at that line are one group: if
+// their conditions are all the same, the adapter checked it (none is
+// evaluated); otherwise its breakpoint there is unconditional and each
+// breakpoint's own condition is evaluated. The group is by the line the
+// adapter placed them on, not the one requested: two lines it moved onto
+// one are one breakpoint there.
 func (s *Session) planLocked(fr api.Frame, at func(*breakpoint) bool) (records []*planRecord, keys []string) {
 	for key, list := range s.bps {
 		if key == funcKey {
@@ -413,27 +519,21 @@ func (s *Session) planLocked(fr api.Frame, at func(*breakpoint) bool) (records [
 		}
 
 		keys = append(keys, key)
-
-		var conds map[slotKey]string
+		start := len(records)
 
 		for _, b := range list {
 			if b.Line != fr.Line || !at(b) {
 				continue
 			}
 
-			if conds == nil {
-				conds = map[slotKey]string{}
-				for _, sl := range slotsFor(list) {
-					conds[sl.slotKey] = sl.condition
-				}
-			}
+			records = append(records, &planRecord{b: b, condition: b.Condition, hits: b.Hits, hit: b.hit, log: b.log})
+		}
 
-			r := &planRecord{b: b, hits: b.Hits, hit: b.hit, log: b.log}
-			if b.Condition != conds[b.key()] {
-				r.condition = b.Condition
+		group := records[start:]
+		if !slices.ContainsFunc(group, func(r *planRecord) bool { return r.condition != group[0].condition }) {
+			for _, r := range group {
+				r.condition = ""
 			}
-
-			records = append(records, r)
 		}
 	}
 
@@ -467,13 +567,38 @@ func sameFile(a, b string) bool {
 	return err == nil && os.SameFile(ia, ib)
 }
 
-// conditionHolds evaluates a breakpoint condition at the stop: it holds if
-// it is true, and if it fails to evaluate (as adapters treat a failing
-// condition: stop and let the user see).
+// conditionHolds evaluates a breakpoint condition at the stop: it holds
+// unless its value reads as false (truthy), and if it fails to evaluate
+// (stop and let the user see). Neither the text nor the value is logged:
+// they are debuggee data.
 func (s *Session) conditionHolds(ctx context.Context, fid int, cond string) bool {
 	value, err := s.evalRaw(ctx, fid, cond)
 
-	return err != nil || strings.EqualFold(strings.TrimSpace(value), "true")
+	return err != nil || truthy(value)
+}
+
+// truthy reports whether an adapter's evaluate text of a condition holds.
+// It fails open: the text is false only when it reads as false in some
+// language — false, None, null, nil, an empty string or collection
+// literal, or a number equal to 0 — and anything else, the empty text
+// included, holds (a missed stop is silent, an extra one is not).
+func truthy(value string) bool {
+	text := strings.TrimSpace(value)
+
+	switch strings.ToLower(text) {
+	case "false", "none", "null", "nil", "''", `""`, "[]", "{}", "()", "set()":
+		return false
+	}
+
+	if n, err := strconv.ParseInt(text, 0, 64); err == nil {
+		return n != 0
+	}
+
+	if f, err := strconv.ParseFloat(text, 64); err == nil {
+		return f != 0 // NaN holds
+	}
+
+	return true
 }
 
 // renderLog renders a logpoint message, evaluating its expressions.

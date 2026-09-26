@@ -15,9 +15,11 @@
 //   - breakpoints, each owned by the client that added it; per file they are
 //     merged into one DAP source breakpoint per line, and function
 //     breakpoints into one per name (slotsFor). Anchors resolve to a line
-//     when added (anchor.go); hit counts and logpoints are emulated by a stop
-//     filter that decides, under execMu, whether a breakpoint stop is
-//     published or continued (emulate.go);
+//     when added (anchor.go); hit counts and logpoints are emulated, and
+//     the conditions of a line whose breakpoints' conditions differ are
+//     each evaluated, by a stop filter that decides, under execMu, whether
+//     a breakpoint stop is published — naming the breakpoints it is for —
+//     or continued (emulate.go);
 //   - exception modes, one per client, sent to the adapter as the union of
 //     their filters (exceptions.go);
 //   - the control lease: execution-changing requests (continue, steps, pause,

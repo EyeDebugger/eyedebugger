@@ -4,6 +4,7 @@
 package session
 
 import (
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -296,5 +297,159 @@ func TestPauseDuringFilterPublishes(t *testing.T) {
 
 	if lines := logpointLines(s); len(lines) != 1 {
 		t.Errorf("logpoint output = %q, want it logged once", lines)
+	}
+}
+
+// stopsFor continues until the program exits and returns the lap of every
+// stop and the owners of the breakpoints it was for (nil: not attributed).
+func stopsFor(t *testing.T, s *Session) (laps []int, owners [][]string) {
+	t.Helper()
+
+	for {
+		snap := resume(t, s, agentC, ExecContinue)
+		if snap.Session.State == api.StateExited {
+			return laps, owners
+		}
+
+		if snap.Session.State != api.StateStopped || snap.TimedOut || snap.Session.Stop == nil {
+			t.Fatalf("snapshot = %+v, want stopped or exited", snap.Session)
+		}
+
+		n, err := strconv.Atoi(evalValue(t, s, "lap"))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		laps = append(laps, n)
+		owners = append(owners, ownersOf(snap.Session.Stop.Breakpoints))
+	}
+}
+
+// ownersOf returns the owners of an attribution (nil for none).
+func ownersOf(bps []api.StopBreakpoint) []string {
+	var who []string
+	for _, b := range bps {
+		who = append(who, b.Owner)
+	}
+
+	return who
+}
+
+// breakpointStopOwners returns ownersOf of every logged breakpoint stop.
+func breakpointStopOwners(s *Session) [][]string {
+	var out [][]string
+
+	stops := eventsOf(s, api.EventStopped)
+	for i := range stops {
+		if stops[i].Stop.Reason == reasonBreakpoint {
+			out = append(out, ownersOf(stops[i].Stop.Breakpoints))
+		}
+	}
+
+	return out
+}
+
+// checkShared checks what a shared-line run left: logpoint lines, no
+// logged continued events, no notes, the human's hit count (when wantHits
+// is set) and the stopped events' attribution.
+func checkShared(t *testing.T, s *Session, wantFor [][]string, wantLines, wantHits int) {
+	t.Helper()
+
+	if n := len(logpointLines(s)); n != wantLines {
+		t.Errorf("%d logpoint lines, want %d", n, wantLines)
+	}
+
+	if n := len(eventsOf(s, api.EventContinued)); n != 0 {
+		t.Errorf("%d continued events: the filter's own resumes must not be logged", n)
+	}
+
+	bps := s.Breakpoints("")
+	for i := range bps {
+		if bps[i].Note != "" {
+			t.Errorf("breakpoint %d: note %q, want none", bps[i].ID, bps[i].Note)
+		}
+
+		if bps[i].Owner == humanC.ID && wantHits > 0 && bps[i].Hits != wantHits {
+			t.Errorf("human's breakpoint: %d hits, want %d", bps[i].Hits, wantHits)
+		}
+	}
+
+	// The events' stops carry the same attribution as the snapshots.
+	if fromEvents := breakpointStopOwners(s); !reflect.DeepEqual(fromEvents, wantFor) {
+		t.Errorf("stopped events for %q, want %q", fromEvents, wantFor)
+	}
+}
+
+// TestSharedConditions: each client's breakpoint at a shared line keeps its
+// own condition, hit count and log message; the program stops when any
+// wants it, and the stop names whose breakpoints it is for.
+func TestSharedConditions(t *testing.T) {
+	t.Parallel()
+
+	logC := api.Client{ID: "agent:log", Kind: api.KindAgent}
+
+	type bp struct {
+		c    api.Client
+		spec api.BreakpointSpec
+	}
+
+	var (
+		agent = func(cond string) bp { return bp{agentC, api.BreakpointSpec{Line: 2, Condition: cond}} }
+		human = func(cond string) bp { return bp{humanC, api.BreakpointSpec{Line: 2, Condition: cond}} }
+		a, h  = []string{agentC.ID}, []string{humanC.ID}
+		both  = []string{agentC.ID, humanC.ID}
+	)
+
+	tests := []struct {
+		name      string
+		bps       []bp
+		wantLaps  []int
+		wantFor   [][]string
+		wantLines int // logpoint lines
+		wantHits  int // the human's breakpoint's hit count
+	}{
+		{
+			name: "different conditions", bps: []bp{agent("lap == 2"), human("lap == 4")},
+			wantLaps: []int{2, 4}, wantFor: [][]string{a, h},
+		},
+		{
+			name: "equal conditions: the adapter decides", bps: []bp{agent("lap == 2"), human("lap == 2")},
+			wantLaps: []int{2}, wantFor: [][]string{nil},
+		},
+		{
+			name: "conditional and unconditional", bps: []bp{agent("lap == 2"), human("")},
+			wantLaps: []int{1, 2, 3, 4, 5}, wantFor: [][]string{h, both, h, h, h},
+		},
+		{
+			name:     "another's logpoint suppresses nothing",
+			bps:      []bp{agent("lap == 2"), human("lap == 4"), {logC, api.BreakpointSpec{Line: 2, LogMessage: "lap {lap}"}}},
+			wantLaps: []int{2, 4}, wantFor: [][]string{a, h}, wantLines: 5,
+		},
+		{
+			name: "a condition that fails to evaluate stops", bps: []bp{agent("lap == 2"), human("nosuch")},
+			wantLaps: []int{1, 2, 3, 4, 5}, wantFor: [][]string{h, both, h, h, h},
+		},
+		{
+			name: "hit count and condition", bps: []bp{{humanC, api.BreakpointSpec{Line: 2, HitCondition: "2"}}, agent("lap == 4")},
+			wantLaps: []int{2, 4}, wantFor: [][]string{h, a}, wantHits: 5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := lapsSession(t, fakeDriver{})
+			for _, b := range tt.bps {
+				addSpec(t, s, b.c, b.spec)
+			}
+
+			laps, owners := stopsFor(t, s)
+			if !slices.Equal(laps, tt.wantLaps) || !reflect.DeepEqual(owners, tt.wantFor) {
+				t.Fatalf("stopped at laps %v for %q, want %v for %q", laps, owners, tt.wantLaps, tt.wantFor)
+			}
+
+			checkShared(t, s, tt.wantFor, tt.wantLines, tt.wantHits)
+		})
 	}
 }

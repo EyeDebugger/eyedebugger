@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"time"
 
@@ -456,7 +457,13 @@ func (s *Session) RunUntil(ctx context.Context, c api.Client, spec api.Breakpoin
 		return snap, nil
 	}
 
+	// At the target, but stopped for other breakpoints there only (their
+	// condition held, the run-until's didn't): not reached.
 	reached := snap.Frame != nil && snap.Frame.Line == x.target.Line && sameFile(snap.Frame.File, x.target.File)
+	if st := snap.Session.Stop; reached && st != nil && len(st.Breakpoints) > 0 {
+		reached = slices.ContainsFunc(st.Breakpoints, func(b api.StopBreakpoint) bool { return b.ID == x.targetID })
+	}
+
 	snap.Reached = &reached
 
 	// Only this request's own breakpoint: another client may have started
@@ -474,8 +481,8 @@ func (s *Session) RunUntil(ctx context.Context, c api.Client, spec api.Breakpoin
 // placeTarget places run-until's breakpoint at spec: c's own breakpoint at
 // that line if it has one that stops (no hit condition or log message),
 // else a new temporary one of c's (returned as temp). It returns where the
-// adapter placed it.
-func (s *Session) placeTarget(ctx context.Context, c api.Client, spec api.BreakpointSpec) (at api.BreakpointSpec, temp *breakpoint, err error) {
+// adapter placed it, and its id.
+func (s *Session) placeTarget(ctx context.Context, c api.Client, spec api.BreakpointSpec) (at api.BreakpointSpec, id int, temp *breakpoint, err error) {
 	s.mu.Lock()
 
 	var target *breakpoint
@@ -497,7 +504,7 @@ func (s *Session) placeTarget(ctx context.Context, c api.Client, spec api.Breakp
 		if err := s.syncBreakpoints(ctx, spec.File); err != nil {
 			_, _, _ = s.removeBreakpoints(ctx, c.ID, stillTemporary(temp))
 
-			return api.BreakpointSpec{}, nil, err
+			return api.BreakpointSpec{}, 0, nil, err
 		}
 	}
 
@@ -508,7 +515,7 @@ func (s *Session) placeTarget(ctx context.Context, c api.Client, spec api.Breakp
 		s.logBreakpointLocked("added", c.ID, temp)
 	}
 
-	return api.BreakpointSpec{File: target.File, Line: target.Line, Condition: target.Condition}, temp, nil
+	return api.BreakpointSpec{File: target.File, Line: target.Line, Condition: target.Condition}, target.ID, temp, nil
 }
 
 // stillTemporary matches temp while it is still temporary: a bp add by its

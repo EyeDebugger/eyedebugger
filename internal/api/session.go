@@ -116,6 +116,20 @@ type StopInfo struct {
 	// AllThreadsStopped is the adapter's word that every thread stopped,
 	// not only ThreadID.
 	AllThreadsStopped bool `json:"allThreadsStopped,omitempty"`
+	// Breakpoints are the breakpoints the program stopped for, by id, when
+	// eyedbg decided the stop: each held (its condition, if any) and wants
+	// the stop (logpoints never; one with a hit count only when its count
+	// matches). Absent: eyedbg didn't decide the stop — every breakpoint at
+	// the stop's line held (the adapter checked their shared condition), the
+	// stop isn't at a line breakpoint, or eyedbg couldn't read where it
+	// stopped (it keeps such a stop).
+	Breakpoints []StopBreakpoint `json:"breakpoints,omitempty"`
+}
+
+// StopBreakpoint names a breakpoint a stop is for, and its owner.
+type StopBreakpoint struct {
+	ID    int    `json:"id"`
+	Owner string `json:"owner"`
 }
 
 // SessionInfo summarizes a session.

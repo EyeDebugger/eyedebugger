@@ -260,7 +260,8 @@ func TestSameLineBreakpointsShareASlot(t *testing.T) {
 		t.Errorf("conditional and unconditional: %q, want 5", got)
 	}
 
-	// Conflicting conditions: unconditional, with a note on both.
+	// Conflicting conditions: unconditional at the adapter (the stop filter
+	// checks each), and no note.
 	addBP(t, s, agentC, file, 7, "line == 7")
 	addBP(t, s, humanC, file, 7, "line == 8")
 
@@ -269,8 +270,8 @@ func TestSameLineBreakpointsShareASlot(t *testing.T) {
 	}
 
 	for _, b := range s.Breakpoints("") {
-		if wantNote := b.RequestedLine == 7; (b.Note == sharedLineNote) != wantNote {
-			t.Errorf("breakpoint %d at %d: note %q", b.ID, b.RequestedLine, b.Note)
+		if b.Note != "" {
+			t.Errorf("breakpoint %d at %d: note %q, want none", b.ID, b.RequestedLine, b.Note)
 		}
 	}
 
@@ -462,14 +463,29 @@ func TestOutputCaps(t *testing.T) {
 // present512KiBPlus is the output cap plus room for the result's framing.
 const present512KiBPlus = 512<<10 + 1024
 
+// holdsProgramData reports whether a recorded event holds what recordings
+// leave out: output, text, a stop's text, description or attribution.
+func holdsProgramData(e api.Event) bool {
+	return e.Kind == api.EventOutput || e.Text != "" ||
+		(e.Stop != nil && (e.Stop.Text != "" || e.Stop.Description != "" || e.Stop.Breakpoints != nil))
+}
+
 func TestRecordingIsMinimal(t *testing.T) {
 	t.Parallel()
 
 	store := newStubStore()
 	s := start(t, newTestManager(t, store), agentC, api.StartParams{LaunchSpec: api.LaunchSpec{StopOnEntry: true, Args: []string{"lines=3"}}})
 
+	// The human's differing condition makes the stop an attributed one.
 	addBP(t, s, agentC, s.Program, 2, "")
-	expectStopped(t, resume(t, s, agentC, ExecContinue), "breakpoint", 2)
+	addBP(t, s, humanC, s.Program, 2, "false")
+
+	snap := resume(t, s, agentC, ExecContinue)
+	expectStopped(t, snap, "breakpoint", 2)
+
+	if len(snap.Session.Stop.Breakpoints) != 1 {
+		t.Fatalf("stop = %+v, want it attributed", snap.Session.Stop)
+	}
 
 	if snap := resume(t, s, agentC, ExecContinue); snap.Session.State != api.StateExited {
 		t.Fatalf("state = %s, want exited", snap.Session.State)
@@ -487,7 +503,7 @@ func TestRecordingIsMinimal(t *testing.T) {
 			t.Fatalf("recording line %q: %v", line, err)
 		}
 
-		if e.Kind == api.EventOutput || e.Text != "" || (e.Stop != nil && (e.Stop.Text != "" || e.Stop.Description != "")) {
+		if holdsProgramData(e) {
 			t.Errorf("recorded program data: %s", line)
 		}
 

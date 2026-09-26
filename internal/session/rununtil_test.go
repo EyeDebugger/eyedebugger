@@ -4,6 +4,7 @@
 package session
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -143,5 +144,48 @@ func TestNextExecutionRemovesTimedOutRunUntil(t *testing.T) {
 	removed := s.log.query(api.EventsParams{Since: since, Kinds: []api.EventKind{api.EventBreakpoint}}).Events
 	if len(removed) != 1 || removed[0].Action != "removed" || removed[0].Client != humanC.ID || removed[0].Breakpoint.Owner != agentC.ID {
 		t.Errorf("breakpoint events = %+v, want the human removing the agent's temporary one", removed)
+	}
+}
+
+// TestRunUntilSharedLine: a run-until to a line where another client's
+// breakpoint stops first is not reached there; the next one is.
+func TestRunUntilSharedLine(t *testing.T) {
+	t.Parallel()
+
+	s := lapsSession(t, fakeDriver{})
+	h := addSpec(t, s, humanC, api.BreakpointSpec{Line: 2, Condition: "lap == 2"})
+
+	until := func() (api.Snapshot, int) {
+		t.Helper()
+
+		snap, err := s.RunUntil(t.Context(), agentC, api.BreakpointSpec{File: s.Program, Line: 2, Condition: "lap == 3"}, 0, testWait, api.DumpSpec{})
+		if err != nil {
+			t.Fatalf("run-until: %v", err)
+		}
+
+		expectStopped(t, snap, "breakpoint", 2)
+
+		lap, err := strconv.Atoi(evalValue(t, s, "lap"))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return snap, lap
+	}
+
+	snap, lap := until()
+	if st := snap.Session.Stop; lap != 2 || snap.Reached == nil || *snap.Reached ||
+		len(st.Breakpoints) != 1 || st.Breakpoints[0].ID != h.ID {
+		t.Fatalf("first run-until: lap %d, reached %v, for %+v; want lap 2, not reached, for the human's %d", lap, snap.Reached, st.Breakpoints, h.ID)
+	}
+
+	snap, lap = until()
+	if st := snap.Session.Stop; lap != 3 || snap.Reached == nil || !*snap.Reached ||
+		len(st.Breakpoints) != 1 || st.Breakpoints[0].Owner != agentC.ID || st.Breakpoints[0].ID == h.ID {
+		t.Fatalf("second run-until: lap %d, reached %v, for %+v; want lap 3, reached, for the agent's temporary one", lap, snap.Reached, st.Breakpoints)
+	}
+
+	if len(temporaries(s)) != 0 {
+		t.Errorf("temporaries left: %+v", temporaries(s))
 	}
 }
