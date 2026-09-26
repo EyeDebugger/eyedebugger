@@ -10,7 +10,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -65,7 +64,7 @@ func line(t *testing.T, id int64, method string, params any) string {
 func hello(t *testing.T, p Paths) api.HelloParams {
 	t.Helper()
 
-	token, err := os.ReadFile(p.Token)
+	token, err := readShared(p.Token)
 	if err != nil {
 		t.Fatal(err)
 	}

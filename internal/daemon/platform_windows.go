@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"time"
 )
@@ -48,19 +49,48 @@ const errSharingViolation syscall.Errno = 32
 // retries these errors for as long, for the same reason.
 const replaceTimeout = 2 * time.Second
 
-// replaceFile renames from to to, replacing to. Windows refuses to replace
-// a file another process has open (ERROR_ACCESS_DENIED, even when it was
-// opened with FILE_SHARE_DELETE; ERROR_SHARING_VIOLATION), and clients
-// open the token on every Dial: a daemon started while one polls for it,
-// after the last daemon was killed and left its token behind, would fail
-// to start. Readers hold the file only for as long as a read takes, so the
-// rename is retried, with a growing pause, for up to replaceTimeout.
+// openShared opens path for reading in a way that lets replaceFile replace
+// it while the returned file is still open: os.OpenInRoot uses
+// FILE_SHARE_DELETE, unlike os.Open. Callers that read the token (every
+// Dial) must use this, not os.Open/os.ReadFile, or replaceFile falls back to
+// its retry loop for the whole time they hold it open.
+func openShared(path string) (*os.File, error) {
+	return os.OpenInRoot(filepath.Dir(path), filepath.Base(path))
+}
+
+// replaceFile renames from to to, replacing to. from and to must be in the
+// same directory (writeFileAtomic's precondition; enforced here because
+// replaceFile needs one *os.Root on that directory).
+//
+// Windows refuses a plain rename over a file another process has open
+// (ERROR_ACCESS_DENIED, even against a FILE_SHARE_DELETE handle;
+// ERROR_SHARING_VIOLATION). os.Root.Rename instead asks for POSIX rename
+// semantics (FILE_RENAME_POSIX_SEMANTICS): NTFS allows that even while a
+// reader holds the file open, as long as the reader opened it sharing
+// delete (openShared does; os.Open/os.ReadFile don't). Where POSIX rename
+// isn't supported (FAT, older Windows), the stdlib falls back to a plain
+// rename, so the retry loop below remains as a backstop for readers we
+// don't control (an older eyedbg binary mid-upgrade, antivirus, indexers)
+// and for that fallback path.
 func replaceFile(from, to string) error {
+	fromDir, toDir := filepath.Dir(from), filepath.Dir(to)
+	if fromDir != toDir {
+		return fmt.Errorf("replace %s with %s: not in the same directory", to, from)
+	}
+
+	root, err := os.OpenRoot(toDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+
+	fromBase, toBase := filepath.Base(from), filepath.Base(to)
+
 	deadline := time.Now().Add(replaceTimeout)
 	pause := time.Millisecond
 
 	for {
-		err := os.Rename(from, to)
+		err := root.Rename(fromBase, toBase)
 		if !inUse(err) || time.Now().Add(pause).After(deadline) {
 			return err
 		}

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"time"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
@@ -30,7 +29,7 @@ type Client struct {
 // Dial connects to a running daemon and authenticates. It never starts one:
 // if none is running it returns an *api.Error with [api.CodeDaemonNotRunning].
 func Dial(ctx context.Context, p Paths, info version.Info) (*Client, error) {
-	token, err := os.ReadFile(p.Token)
+	token, err := readShared(p.Token)
 	if err != nil {
 		return nil, notRunning(err)
 	}

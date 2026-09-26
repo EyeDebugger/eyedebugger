@@ -496,10 +496,29 @@ func decodeParams(raw json.RawMessage, v any) *api.Error {
 	return nil
 }
 
+// readShared reads path the way a concurrent writeFileAtomic expects: through
+// openShared, so the read doesn't block the replace (see replaceFile). Every
+// reader of a file writeFileAtomic writes — the token, on every Dial — must
+// use this instead of os.ReadFile.
+func readShared(path string) ([]byte, error) {
+	f, err := openShared(path)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	return data, nil
+}
+
 // writeFileAtomic writes data to a temporary file next to path and renames it
 // into place, so readers never see a partial file. Readers may hold path open
-// meanwhile (every Dial reads the token): see replaceFile.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+// meanwhile (every Dial reads the token, via readShared): see replaceFile.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error { //nolint:unparam // perm mirrors os.WriteFile's signature; every current caller wants 0o600, but the function is general-purpose.
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
