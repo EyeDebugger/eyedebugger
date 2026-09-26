@@ -143,14 +143,24 @@ func (d *Driver) testLaunchCommand(
 		return session.TestCommand{}, err
 	}
 
-	fixed := testDialectArgs(pickDialect(kind, props), spec.Filter)
+	return buildTestLaunch(launch, host, project, target, pickDialect(kind, props), spec), nil
+}
+
+// buildTestLaunch is the pure part of testLaunchCommand, once target (the
+// built self-hosting test app) and its dialect are known: launch.Arguments'
+// argv is the dialect's fixed arguments (FILTER's own option among them),
+// then spec's own "-- " arguments verbatim (D5); cwd is project's directory;
+// env is the daemon's opt-outs overlaid by spec's own (D7). Program names
+// the fixed and filter arguments only — never the "-- " ones (D14).
+func buildTestLaunch(launch session.Launch, host, project, target string, dialect testDialect, spec session.TestSpec) session.TestCommand {
+	fixed := testDialectArgs(dialect, spec.Filter)
 
 	launch.Arguments = launchArguments(host, target, filepath.Dir(project), session.LaunchSpec{
 		Args: append(slices.Clone(fixed), spec.Args...),
 		Env:  testLaunchEnv(spec.Env),
 	})
 
-	return session.TestCommand{Program: launchTestProgram(target, fixed), Launch: &launch}, nil
+	return session.TestCommand{Program: launchTestProgram(target, fixed), Launch: &launch}
 }
 
 // shellArg is s as a hint shows it for pasting into a shell: single-quoted
@@ -184,7 +194,7 @@ func testCommand(host, project string, spec session.TestSpec) session.TestComman
 
 // testBaseArgs are the arguments every VSTest run gets.
 func testBaseArgs(project string) []string {
-	return []string{"test", project, "-c", "Debug", "--nologo", "--tl:off", "--disable-build-servers"}
+	return []string{"test", project, "-c", dotnetConfig, "--nologo", "--tl:off", "--disable-build-servers"}
 }
 
 // testArgs adds spec's choices to the base arguments. Each value is its own
@@ -302,13 +312,50 @@ func readStripped(path string) (data []byte, ok bool) {
 // attaches to (so a VSTest run refuses it; the launch path debugs it
 // directly instead).
 func usesXunitV3(project string) bool {
+	return matchesUpward(project, xunitV3Ref)
+}
+
+// usesTUnit reports whether project references TUnit or TUnit.Engine,
+// itself or through a Directory.Build.props or .targets above it.
+func usesTUnit(project string) bool {
+	return matchesUpward(project, tunitRef)
+}
+
+// usesVSTest reports whether project, or a Directory.Build.props or
+// .targets above it, sets <UseVSTest>true, which switches MSTest.Sdk back
+// to VSTest. Checked across every upward file (not only the one that sets
+// the MSTest.Sdk marker): the usual place for a repo-wide property is a
+// shared Directory.Build.props, not the project file itself.
+func usesVSTest(project string) bool {
+	return matchesUpward(project, useVSTestRe)
+}
+
+// matchesUpward reports whether re matches project or a Directory.Build.props
+// or .targets above it.
+func matchesUpward(project string, re *regexp.Regexp) bool {
 	for _, f := range upwardFiles(project) {
-		if data, ok := readStripped(f); ok && xunitV3Ref.Match(data) {
+		if data, ok := readStripped(f); ok && re.Match(data) {
 			return true
 		}
 	}
 
 	return false
+}
+
+// testKind is which dialect project needs ([pickDialect]), from what it
+// references — independent of which marker below made detectLaunch launch
+// it directly (D3/D4/D6): a project can reference xUnit v3 or TUnit while a
+// global.json, DOTNET_TEST_RUNNER or an explicit MTP marker is what
+// triggers the launch.
+func testKind(project string) detectedKind {
+	switch {
+	case usesXunitV3(project):
+		return detectXunitV3
+	case usesTUnit(project):
+		return detectTUnit
+	default:
+		return detectOther
+	}
 }
 
 // detectLaunch decides, before any build, whether project's tests should be
@@ -319,13 +366,17 @@ func usesXunitV3(project string) bool {
 // ([pickDialect]); the build afterwards confirms IsTestingPlatformApplication
 // and, for xUnit v3, whether it was switched to the MTP runner.
 func detectLaunch(project string, env map[string]string) (reason string, kind detectedKind) {
+	kind = testKind(project)
+
 	if usesMTP(filepath.Dir(project), env) {
-		return "global.json or " + envTestRunner + " selects " + mtpRunner, detectOther
+		return "global.json or " + envTestRunner + " selects " + mtpRunner, kind
 	}
 
 	if usesXunitV3(project) {
-		return "it references xunit.v3", detectXunitV3
+		return "it references xunit.v3", kind
 	}
+
+	vstest := usesVSTest(project)
 
 	for _, f := range upwardFiles(project) {
 		data, ok := readStripped(f)
@@ -334,15 +385,15 @@ func detectLaunch(project string, env map[string]string) (reason string, kind de
 		}
 
 		if m := testMarkerRe.FindSubmatch(data); m != nil {
-			return "it sets " + string(m[1]), detectOther
+			return "it sets " + string(m[1]), kind
 		}
 
-		if mstestSdkRe.Match(data) && !useVSTestRe.Match(data) {
-			return "it uses MSTest.Sdk", detectOther
+		if mstestSdkRe.Match(data) && !vstest {
+			return "it uses MSTest.Sdk", kind
 		}
 
 		if tunitRef.Match(data) {
-			return "it references TUnit", detectTUnit
+			return "it references TUnit", kind
 		}
 	}
 
@@ -357,12 +408,12 @@ func evaluateTestBuild(ctx context.Context, host, project, f string, noBuild boo
 	var args []string
 
 	if noBuild {
-		args = []string{"msbuild", project, "-nologo", "-p:Configuration=Debug"}
+		args = []string{"msbuild", project, msbuildNoLogo, "-p:Configuration=" + dotnetConfig}
 		if f != "" {
 			args = append(args, "-p:TargetFramework="+f)
 		}
 	} else {
-		args = []string{"build", project, "-c", "Debug", "-nologo"}
+		args = []string{"build", project, "-c", dotnetConfig, msbuildNoLogo}
 		if f != "" {
 			args = append(args, "-f", f)
 		}
@@ -374,6 +425,17 @@ func evaluateTestBuild(ctx context.Context, host, project, f string, noBuild boo
 		args = append(args, "-getProperty:"+p)
 	}
 
+	return buildQuery(ctx, host, project, args, !noBuild)
+}
+
+// buildQuery runs host with args — a 'dotnet build' or 'dotnet msbuild'
+// invocation ending in one or more -getProperty: entries — and returns the
+// evaluated properties; checkResult also requires -getTargetResult:Build's
+// Result to be Success. require lists properties the query also treats as
+// failed if empty (a plain build's TargetPath must be; the test launch
+// path's own multi-targeting check needs to see an empty one instead, so it
+// passes none). Shared by build (Prepare's exact query) and evaluateTestBuild.
+func buildQuery(ctx context.Context, host, project string, args []string, checkResult bool, require ...string) (map[string]string, error) {
 	cmd := exec.CommandContext(ctx, host, args...)
 	cmd.Env = append(os.Environ(), "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_NOLOGO=1")
 
@@ -383,7 +445,14 @@ func evaluateTestBuild(ctx context.Context, host, project, f string, noBuild boo
 
 	runErr := cmd.Run()
 
-	props, ok := parseBuildProperties(stdout.Bytes(), !noBuild)
+	props, ok := parseBuildProperties(stdout.Bytes(), checkResult)
+
+	for _, p := range require {
+		if props[p] == "" {
+			ok = false
+		}
+	}
+
 	if runErr != nil || !ok {
 		return nil, api.NewError(api.CodeBuildFailed, "dotnet "+args[0]+" "+project+" failed:\n"+
 			tail(withoutResultJSON(stdout.String())+stderr.String(), buildOutputLines), "fix the build errors above, then start again")

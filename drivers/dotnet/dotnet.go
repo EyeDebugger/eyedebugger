@@ -4,13 +4,10 @@
 package dotnet
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -23,6 +20,15 @@ import (
 
 // buildOutputLines is how much of a failed build's output is reported.
 const buildOutputLines = 40
+
+// dotnetConfig is the build configuration eyedbg always builds and runs
+// tests in: Debug, never Release, so symbols and unoptimized code stay
+// available to the debugger.
+const dotnetConfig = "Debug"
+
+// msbuildNoLogo suppresses the SDK's banner on 'dotnet build'/'dotnet
+// msbuild' (distinct from VSTest's own '--nologo').
+const msbuildNoLogo = "-nologo"
 
 // Names netcoredbg and the CLI know .NET by.
 const (
@@ -430,35 +436,14 @@ func findProject(path string) (string, error) {
 
 // build runs dotnet build in Debug and returns the built program's path.
 func build(ctx context.Context, host, project string) (string, error) {
-	cmd := exec.CommandContext(ctx, host, "build", project, "-c", "Debug", "-nologo",
-		"-getProperty:TargetPath", "-getTargetResult:Build")
-	cmd.Env = append(os.Environ(), "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_NOLOGO=1")
+	args := []string{"build", project, "-c", dotnetConfig, msbuildNoLogo, "-getProperty:" + propTargetPath, "-getTargetResult:Build"}
 
-	var stdout, stderr bytes.Buffer
-
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
-
-	var result struct {
-		Properties struct {
-			TargetPath string `json:"TargetPath"` //nolint:tagliatelle // MSBuild's property name.
-		} `json:"Properties"` //nolint:tagliatelle // MSBuild's JSON shape.
-		TargetResults struct {
-			Build struct {
-				Result string `json:"Result"` //nolint:tagliatelle // MSBuild's JSON shape.
-			} `json:"Build"` //nolint:tagliatelle // MSBuild's JSON shape.
-		} `json:"TargetResults"` //nolint:tagliatelle // MSBuild's JSON shape.
+	props, err := buildQuery(ctx, host, project, args, true, propTargetPath)
+	if err != nil {
+		return "", err
 	}
 
-	jsonErr := json.Unmarshal(stdout.Bytes(), &result)
-	if runErr != nil || jsonErr != nil || result.TargetResults.Build.Result != "Success" || result.Properties.TargetPath == "" {
-		return "", api.NewError(api.CodeBuildFailed, "dotnet build "+project+" failed:\n"+
-			tail(withoutResultJSON(stdout.String())+stderr.String(), buildOutputLines), "fix the build errors above, then start again")
-	}
-
-	return result.Properties.TargetPath, nil
+	return props[propTargetPath], nil
 }
 
 // FindHost locates the dotnet host: $DOTNET_HOST_PATH, PATH, $DOTNET_ROOT,

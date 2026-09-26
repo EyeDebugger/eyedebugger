@@ -310,9 +310,27 @@ func TestDetectLaunch(t *testing.T) {
 			wantReason: "MSTest.Sdk", wantKind: detectOther,
 		},
 		{name: "MSTest.Sdk with UseVSTest true", project: `<Project Sdk="MSTest.Sdk"><PropertyGroup><UseVSTest>true</UseVSTest></PropertyGroup></Project>`},
+		{
+			name: "MSTest.Sdk, UseVSTest true in Directory.Build.props (F1)", project: `<Project Sdk="MSTest.Sdk"></Project>`,
+			buildProps: `<Project><PropertyGroup><UseVSTest>true</UseVSTest></PropertyGroup></Project>`,
+		},
 		{name: "TUnit.Assertions alone", project: ref("TUnit.Assertions")},
 		{name: "TUnit", project: ref("TUnit"), wantReason: "TUnit", wantKind: detectTUnit},
 		{name: "TUnit.Engine", project: ref("TUnit.Engine"), wantReason: "TUnit", wantKind: detectTUnit},
+		{
+			name: "TUnit ref, global.json/env MTP selects the dialect (F2)", project: ref("TUnit"),
+			env: map[string]string{envTestRunner: mtpRunner}, wantReason: mtpRunner, wantKind: detectTUnit,
+		},
+		{
+			name: "xunit.v3 ref, global.json/env MTP selects the dialect (F2)", project: ref("xunit.v3"),
+			env: map[string]string{envTestRunner: mtpRunner}, wantReason: mtpRunner, wantKind: detectXunitV3,
+		},
+		{
+			name: "TUnit ref, TestingPlatformDotnetTestSupport marker selects the dialect (F2)",
+			project: `<Project><ItemGroup><PackageReference Include="TUnit" Version="1.0.0" /></ItemGroup>` +
+				`<PropertyGroup><TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport></PropertyGroup></Project>`,
+			wantReason: "TestingPlatformDotnetTestSupport", wantKind: detectTUnit,
+		},
 	}
 
 	for _, tt := range tests {
@@ -504,6 +522,118 @@ func TestLaunchTestProgram(t *testing.T) {
 		if got := launchTestProgram(target, tt.fixed); got != tt.want {
 			t.Errorf("launchTestProgram(%q, %v) = %q, want %q", target, tt.fixed, got, tt.want)
 		}
+	}
+}
+
+func TestBuildTestLaunch(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	project := filepath.Join(root, "src", "tests.csproj")
+	target := filepath.Join(root, "src", "bin", "Debug", "net10.0", "tests.dll")
+
+	tests := []struct {
+		name     string
+		dialect  testDialect
+		spec     session.TestSpec
+		wantArgs []string // after target, the whole "args" argv
+		wantProg string
+	}{
+		{
+			name:     "MTP, no filter, no extra args",
+			dialect:  dialectMTP,
+			wantArgs: nil,
+			wantProg: "dotnet tests.dll",
+		},
+		{
+			name:     "MTP, filter only",
+			dialect:  dialectMTP,
+			spec:     session.TestSpec{TestSpec: api.TestSpec{Filter: "Adds"}},
+			wantArgs: []string{"--filter", "Adds"},
+			wantProg: "dotnet tests.dll --filter Adds",
+		},
+		{
+			name:     "MTP, filter then '--' args (D5 order: fixed, filter, then extra verbatim)",
+			dialect:  dialectMTP,
+			spec:     session.TestSpec{TestSpec: api.TestSpec{Filter: "Adds"}, LaunchSpec: api.LaunchSpec{Args: []string{"-method", "*Adds"}}},
+			wantArgs: []string{"--filter", "Adds", "-method", "*Adds"},
+			wantProg: "dotnet tests.dll --filter Adds",
+		},
+		{
+			name:     "xUnit native, no filter, extra args",
+			dialect:  dialectXunitNative,
+			spec:     session.TestSpec{LaunchSpec: api.LaunchSpec{Args: []string{"-v"}}},
+			wantArgs: []string{"-noColor", "-v"},
+			wantProg: "dotnet tests.dll -noColor",
+		},
+		{
+			name:     "TUnit, filter only",
+			dialect:  dialectTUnit,
+			spec:     session.TestSpec{TestSpec: api.TestSpec{Filter: "Foo"}},
+			wantArgs: []string{"--treenode-filter", "Foo"},
+			wantProg: "dotnet tests.dll --treenode-filter Foo",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tc := buildTestLaunch(session.Launch{AdapterID: "netcoredbg"}, "/sdk/dotnet", project, target, tt.dialect, tt.spec)
+			checkTestLaunch(t, tc, project, target, tt.wantArgs, tt.wantProg)
+		})
+	}
+}
+
+// checkTestLaunch asserts tc, from buildTestLaunch(…, project, target, …):
+// Program, argv (target then wantArgs), cwd, and the daemon's own three
+// opt-outs among the launch env.
+func checkTestLaunch(t *testing.T, tc session.TestCommand, project, target string, wantArgs []string, wantProg string) {
+	t.Helper()
+
+	if tc.Launch == nil || tc.Launch.AdapterID != "netcoredbg" {
+		t.Fatalf("Launch = %+v, want AdapterID preserved", tc.Launch)
+	}
+
+	if tc.Program != wantProg {
+		t.Errorf("Program = %q, want %q", tc.Program, wantProg)
+	}
+
+	args, _ := tc.Launch.Arguments["args"].([]string)
+	if want := append([]string{target}, wantArgs...); !slices.Equal(args, want) {
+		t.Errorf("args = %v, want %v", args, want)
+	}
+
+	if cwd, _ := tc.Launch.Arguments["cwd"].(string); cwd != filepath.Dir(project) {
+		t.Errorf("cwd = %q, want %q", cwd, filepath.Dir(project))
+	}
+
+	env, _ := tc.Launch.Arguments["env"].(map[string]string)
+	for k, v := range map[string]string{
+		"DOTNET_CLI_TELEMETRY_OPTOUT":      "1",
+		"TESTINGPLATFORM_TELEMETRY_OPTOUT": "1",
+		"DOTNET_NOLOGO":                    "1",
+	} {
+		if env[k] != v {
+			t.Errorf("env[%s] = %q, want %q", k, env[k], v)
+		}
+	}
+}
+
+func TestBuildTestLaunchEnvOverlay(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	project := filepath.Join(root, "src", "tests.csproj")
+	target := filepath.Join(root, "src", "bin", "Debug", "net10.0", "tests.dll")
+
+	spec := session.TestSpec{LaunchSpec: api.LaunchSpec{Env: map[string]string{"DOTNET_NOLOGO": "0", "MY_VAR": "x"}}}
+
+	tc := buildTestLaunch(session.Launch{}, "/sdk/dotnet", project, target, dialectMTP, spec)
+
+	env, _ := tc.Launch.Arguments["env"].(map[string]string)
+	if env["DOTNET_NOLOGO"] != "0" || env["MY_VAR"] != "x" || env["DOTNET_CLI_TELEMETRY_OPTOUT"] != "1" {
+		t.Errorf("env overlay = %v", env)
 	}
 }
 
