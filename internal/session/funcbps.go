@@ -67,7 +67,8 @@ func (s *Session) syncFunctionBreakpoints(ctx context.Context) error {
 }
 
 // applySlotsLocked records the adapter's answer for each slot on every
-// breakpoint of that slot.
+// breakpoint of that slot. Only a function slot's conflict is noted: at a
+// line, the stop filter checks each breakpoint's own condition.
 func (*Session) applySlotsLocked(slots []slot, got []godap.Breakpoint) {
 	for i, g := range got {
 		if i >= len(slots) {
@@ -75,8 +76,8 @@ func (*Session) applySlotsLocked(slots []slot, got []godap.Breakpoint) {
 		}
 
 		note := ""
-		if slots[i].note {
-			note = sharedLineNote
+		if slots[i].note && slots[i].function != "" {
+			note = sharedFunctionNote
 		}
 
 		for _, b := range slots[i].bps {

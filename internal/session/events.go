@@ -250,6 +250,9 @@ func eventSize(e *api.Event) int {
 
 	if e.Stop != nil {
 		n += len(e.Stop.Reason) + len(e.Stop.Description) + len(e.Stop.Text)
+		for _, b := range e.Stop.Breakpoints {
+			n += len(b.Owner) + 8
+		}
 	}
 
 	if b := e.Breakpoint; b != nil {

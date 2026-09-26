@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"testing"
 
+	godap "github.com/google/go-dap"
+
 	"github.com/eyedebugger/eyedebugger/internal/api"
 )
 
@@ -121,5 +123,55 @@ func TestSlotsForFunctions(t *testing.T) {
 
 	if !reflect.DeepEqual(got, expected) {
 		t.Errorf("slotsFor = %+v, want %+v", got, expected)
+	}
+}
+
+// TestApplySlotsNotes: a line whose breakpoints' conditions conflict gets
+// no note (the stop filter checks each); a function's does.
+func TestApplySlotsNotes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		list []*breakpoint
+		want string
+	}{
+		{
+			name: "line conflict",
+			list: []*breakpoint{
+				{Breakpoint: api.Breakpoint{ID: 1, RequestedLine: 5, Owner: "agent", Condition: "a"}},
+				{Breakpoint: api.Breakpoint{ID: 2, RequestedLine: 5, Owner: "human:x", Condition: "b"}},
+			},
+		},
+		{
+			name: "function conflict",
+			list: []*breakpoint{
+				{Breakpoint: api.Breakpoint{ID: 1, Function: "Price", Owner: "agent", Condition: "a"}},
+				{Breakpoint: api.Breakpoint{ID: 2, Function: "Price", Owner: "human:x", Condition: "b"}},
+			},
+			want: sharedFunctionNote,
+		},
+		{
+			name: "function, same condition",
+			list: []*breakpoint{
+				{Breakpoint: api.Breakpoint{ID: 1, Function: "Price", Owner: "agent", Condition: "a"}},
+				{Breakpoint: api.Breakpoint{ID: 2, Function: "Price", Owner: "human:x", Condition: "a"}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			slots := slotsFor(tt.list)
+			(&Session{}).applySlotsLocked(slots, []godap.Breakpoint{{Id: 1, Verified: true, Line: 5}})
+
+			for _, b := range tt.list {
+				if b.Note != tt.want {
+					t.Errorf("breakpoint %d: note %q, want %q", b.ID, b.Note, tt.want)
+				}
+			}
+		})
 	}
 }
