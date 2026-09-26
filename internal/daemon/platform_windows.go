@@ -55,7 +55,13 @@ const replaceTimeout = 2 * time.Second
 // Dial) must use this, not os.Open/os.ReadFile, or replaceFile falls back to
 // its retry loop for the whole time they hold it open.
 func openShared(path string) (*os.File, error) {
-	return os.OpenInRoot(filepath.Dir(path), filepath.Base(path))
+	f, err := os.OpenInRoot(filepath.Dir(path), filepath.Base(path))
+	if err != nil {
+		// OpenInRoot's error names only the base name.
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+
+	return f, nil
 }
 
 // replaceFile renames from to to, replacing to. from and to must be in the

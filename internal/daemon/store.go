@@ -101,7 +101,7 @@ func (f *FileStore) Save(info api.SessionInfo) error {
 		return fmt.Errorf("encode session metadata: %w", err)
 	}
 
-	if err := writeFileAtomic(path, append(b, '\n'), 0o600); err != nil {
+	if err := writeFileAtomic(path, append(b, '\n')); err != nil {
 		return fmt.Errorf("save session metadata: %w", err)
 	}
 
