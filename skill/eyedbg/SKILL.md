@@ -80,8 +80,9 @@ eyedbg stop                                       # always, when done
   sharpdbg`; it can't pause); getters run anyway. `$exception` at an exception stop. An unhandled
   exception always stops. Intel Macs have only SharpDbg (used once installed); Windows on Arm only
   with `--adapter sharpdbg` (unverified there). On macOS, netcoredbg reports every exit code as 0:
-  a `start`/`attach`/`test` session there ends without one instead (read the output for the
-  result), unless you pass `--adapter sharpdbg`.
+  a `start`, `attach` or launched `test` (MTP/xUnit v3/TUnit) session there ends without one
+  instead (read the output for the result), unless you pass `--adapter sharpdbg`. A VSTest
+  `test` run keeps `dotnet test`'s own exit code either way.
 
 ## Python
 
