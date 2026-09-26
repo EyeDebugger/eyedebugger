@@ -150,6 +150,7 @@ on Arm by CI.
 | attach, detach | ok | ok | same attach body |
 | `test` (VSTest host attach) | ok | ok | same test command |
 | two clients, lease, event log, DAP facade | ok | ok | adapter-independent |
+| program exit code (start, attach, launched test run) | ok on Linux/Windows; always 0 on macOS | 0 when it misses the real one (a race), always 0 on attach | none reported under SharpDbg, or netcoredbg on macOS (`ExitCodeUnknown`) |
 
 Found while measuring, not SharpDbg's: under netcoredbg, `eyedbg pause` before the program's first
 stop fails (`ADAPTER_ERROR`, 0x80070057): the session sends pause's thread id 0 (none known yet),
@@ -207,3 +208,14 @@ still running instead of stopped at the entry. macos-15-intel passed every run. 
 don't default to an installed SharpDbg (the missing-netcoredbg error says to install SharpDbg and
 start with `--adapter sharpdbg`, unverified), and its SharpDbg e2e skips naming the reason. Lift the
 entry once a SharpDbg release passes there repeatedly.
+
+## Addendum (2026-09-26): SharpDbg's exit codes untrusted
+
+CI's full-matrix e2e saw launched test apps that exited 1 or 2 reported as exiting 0 under SharpDbg,
+intermittently (run 36248189223: macos-15-intel and ubuntu-24.04-arm; run 36237638520's rerun:
+macos-15-intel). SharpDbg 0.1.17 (commit 293d77f) sends `exited` from ICorDebug's ExitProcess
+callback with `Process.HasExited ? ExitCode : null`, and `null` as `exitCode: 0`: when the callback
+runs before .NET has seen the process exit, the real code is lost; attach is always `null`.
+`ExitCodeUnknown` now names SharpDbg on every platform, so its sessions end without an exit code
+(the end reason says why) instead of a possibly wrong 0; a VSTest run keeps `dotnet test`'s. Lift
+it once a SharpDbg release waits for the real exit code (re-check on every manifest bump).
