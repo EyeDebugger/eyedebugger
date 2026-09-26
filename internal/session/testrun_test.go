@@ -5,9 +5,12 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -254,5 +257,204 @@ func TestStopAfterRunDoesNotKill(t *testing.T) {
 
 	if _, err := m.Stop(t.Context(), agentC, s.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// launchedTestManager returns a manager whose fake driver launches a test
+// app of n lines directly (no runner).
+func launchedTestManager(t *testing.T, prog string, n int) *Manager {
+	t.Helper()
+
+	return newTestManagerWith(t, nil, fakeDriver{launch: &daptest.ProgramArgs{Program: prog, Lines: n}})
+}
+
+// launchedProgram is writeProgram(t, n), symlinks resolved: the fake
+// driver's Program (unlike a plain launch's, never routed through
+// checkStart's realPath) must already match how breakpoints resolve theirs.
+func launchedProgram(t *testing.T, n int) string {
+	t.Helper()
+
+	path, err := filepath.EvalSymlinks(writeProgram(t, n))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return path
+}
+
+// TestLaunchedTestRun: the driver launches a self-hosting test app under the
+// adapter, bypassing the runner+attach machinery; the session ends with the
+// app's own exit code, and the runner-only checks (session.go, manager.go)
+// don't apply to it.
+func TestLaunchedTestRun(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		code int
+	}{
+		{name: "passes"},
+		{name: "fails", code: 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) { t.Parallel(); checkLaunchedTestRun(t, tt.code) })
+	}
+}
+
+// checkLaunchedTestRun runs TestLaunchedTestRun's one case: a launched run
+// exits with code, and the session follows.
+func checkLaunchedTestRun(t *testing.T, code int) {
+	t.Helper()
+
+	prog := launchedProgram(t, 5)
+
+	var args []string
+	if code != 0 {
+		args = []string{"exitCode=" + strconv.Itoa(code)}
+	}
+
+	s, err := startTestRun(t, launchedTestManager(t, prog, 5), api.StartParams{
+		Breakpoints: []api.BreakpointSpec{{File: prog, Line: 3}},
+		LaunchSpec:  api.LaunchSpec{Args: args},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectStopped(t, s.Wait(t.Context(), 0, testWait, api.DumpSpec{}), reasonBreakpoint, 3)
+
+	if info := s.Info(); info.Mode != api.ModeTest || info.Program != "fake test Adds" {
+		t.Errorf("info = %+v, want a launched test session named after the run", info)
+	}
+
+	resume(t, s, agentC, ExecContinue)
+
+	info := waitExited(t, s)
+	if info.ExitCode == nil || *info.ExitCode != code {
+		t.Fatalf("ended = %+v, want exit code %d", info, code)
+	}
+
+	if want := fmt.Sprintf("the test run finished: the test app exited with code %d", code); info.EndReason != want {
+		t.Errorf("end reason = %q, want %q", info.EndReason, want)
+	}
+
+	// A launched run's own teardown (disconnect) races the ended event,
+	// unlike a runner's (whose host exits only once the adapter has); an
+	// "output" event may trail "ended" (as any program's last output may,
+	// session.go's own outputQuiet logic already allows for a stop). Only
+	// the control events' order is checked.
+	all := slices.DeleteFunc(kindsAndActions(eventsOf(s)), func(e string) bool { return e == "output" })
+	if !slices.Equal(all[:1], []string{"started:test"}) || !slices.Equal(all[len(all)-2:], []string{"exited", "ended"}) {
+		t.Errorf("events = %v, want started:test ... exited, ended", all)
+	}
+
+	if n := len(eventsOf(s, api.EventExited)); n != 1 {
+		t.Errorf("%d exited events, want exactly one", n)
+	}
+}
+
+// TestLaunchedTestRunArgs: the run's Args reach the launched app.
+func TestLaunchedTestRunArgs(t *testing.T) {
+	t.Parallel()
+
+	prog := launchedProgram(t, 10)
+
+	s, err := startTestRun(t, launchedTestManager(t, prog, 10), api.StartParams{
+		Breakpoints: []api.BreakpointSpec{{File: prog, Line: 5}},
+		LaunchSpec:  api.LaunchSpec{Args: []string{"lines=4"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info := waitExited(t, s)
+	if info.ExitCode == nil || *info.ExitCode != 0 {
+		t.Fatalf("ended = %+v, want exit 0 (lines=4 makes the breakpoint at 5 unreachable)", info)
+	}
+
+	out := outputText(s)
+	if !strings.Contains(out, "line 4\n") || strings.Contains(out, "line 5\n") {
+		t.Errorf("output = %q, want lines=4 to shorten the program", out)
+	}
+}
+
+// TestTestRunArgsRefused: a runner test run refuses arguments after "--".
+func TestTestRunArgsRefused(t *testing.T) {
+	t.Parallel()
+
+	m := testManager(t, fakeProgram(t), daptest.RunnerExit, 0)
+
+	_, err := startTestRun(t, m, api.StartParams{LaunchSpec: api.LaunchSpec{Args: []string{"-x"}}})
+	if api.CodeOf(err) != api.CodeInvalidRequest {
+		t.Fatalf("start = %v, want INVALID_REQUEST", err)
+	}
+
+	if n := len(m.List()); n != 0 {
+		t.Errorf("%d sessions left", n)
+	}
+}
+
+// TestStopEndsLaunchedTestRun: stopping a launched test run while it is
+// stopped ends it and sends terminateDebuggee=true, like a plain launch.
+func TestStopEndsLaunchedTestRun(t *testing.T) {
+	t.Parallel()
+
+	prog := launchedProgram(t, 5)
+	m := launchedTestManager(t, prog, 5)
+
+	s, err := startTestRun(t, m, api.StartParams{
+		Breakpoints: []api.BreakpointSpec{{File: prog, Line: 3}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectStopped(t, s.Wait(t.Context(), 0, testWait, api.DumpSpec{}), reasonBreakpoint, 3)
+
+	info, err := m.Stop(t.Context(), agentC, s.ID)
+	if err != nil || info.EndReason != "stopped by agent" {
+		t.Fatalf("stop = %+v, %v", info, err)
+	}
+
+	if out := outputText(s); !strings.Contains(out, "terminateDebuggee=true") {
+		t.Errorf("output lacks terminateDebuggee=true:\n%s", out)
+	}
+}
+
+// TestDetachRefusedForLaunchedTestRun: a launched test run can't be
+// detached from, like a runner test run.
+func TestDetachRefusedForLaunchedTestRun(t *testing.T) {
+	t.Parallel()
+
+	drv := fakeDriver{launch: &daptest.ProgramArgs{Program: launchedProgram(t, 5), Lines: 5, Hang: true}}
+	m := newTestManagerWith(t, nil, drv)
+
+	s, err := startTestRun(t, m, api.StartParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := m.Detach(t.Context(), agentC, s.ID); api.CodeOf(err) != api.CodeInvalidRequest {
+		t.Errorf("detach of a launched test run = %v, want INVALID_REQUEST", err)
+	}
+}
+
+// TestLaunchedTestRunAdapterFails: the adapter failing to start for a
+// launched test run reports the error and leaves no session (like a failed
+// plain launch, not the runner's shared-already path).
+func TestLaunchedTestRunAdapterFails(t *testing.T) {
+	t.Parallel()
+
+	drv := fakeDriver{launch: &daptest.ProgramArgs{Program: launchedProgram(t, 5), Lines: 5}, badAdapter: true}
+	m := newTestManagerWith(t, nil, drv)
+
+	_, err := startTestRun(t, m, api.StartParams{})
+	if api.CodeOf(err) != api.CodeAdapterFailed {
+		t.Fatalf("start = %v, want ADAPTER_FAILED", err)
+	}
+
+	if n := len(m.List()); n != 0 {
+		t.Errorf("%d sessions left", n)
 	}
 }

@@ -402,8 +402,8 @@ func (a *adapter) configurationDone(req godap.RequestMessage) {
 	a.prog.start(a.stopAtEntry)
 }
 
-// disconnect ends the session. An attached one first says how it was asked
-// to end (terminateDebuggee true, false or unset) in an output event.
+// disconnect ends the session. When the request said how to end it
+// (terminateDebuggee true or false), it says so first in an output event.
 func (a *adapter) disconnect(req godap.RequestMessage, raw []byte) {
 	var msg struct {
 		Arguments struct {
@@ -416,7 +416,7 @@ func (a *adapter) disconnect(req godap.RequestMessage, raw []byte) {
 		terminate = strconv.FormatBool(*msg.Arguments.TerminateDebuggee)
 	}
 
-	if a.attach != nil {
+	if terminate != "unset" {
 		a.emit("output", godap.OutputEventBody{Category: "console", Output: "fake: disconnect terminateDebuggee=" + terminate + "\n"})
 	}
 

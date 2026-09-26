@@ -52,9 +52,11 @@ type testRun struct {
 	started bool
 }
 
-// startTest starts a session that debugs a test run: the driver's test
-// command runs (visible as a starting session, so 'stop' can end a long
-// build), prints its test host's pid, and the session attaches to it.
+// startTest starts a session that debugs a test run. With a self-hosting
+// test app (TestCommand.Launch) it runs a normal launch session, mode test.
+// Otherwise the driver's test command runs (visible as a starting session,
+// so 'stop' can end a long build), prints its test host's pid, and the
+// session attaches to it.
 func (m *Manager) startTest(ctx context.Context, c api.Client, drv Driver, p api.StartParams, policy api.LeasePolicy) (*Session, error) {
 	tester, ok := drv.(Tester)
 	att, canAttach := drv.(Attacher)
@@ -72,6 +74,28 @@ func (m *Manager) startTest(ctx context.Context, c api.Client, drv Driver, p api
 		return nil, err
 	}
 
+	if tc.Launch != nil {
+		launch := *tc.Launch
+		launch.Program = tc.Program
+
+		return m.run(ctx, m.create(ctx, c, p, policy, launch, api.ModeTest), launch, p.Breakpoints)
+	}
+
+	if len(p.Args) > 0 {
+		return nil, api.NewError(api.CodeInvalidRequest,
+			"a test run takes no arguments after \"--\": "+strings.Join(p.Args, " "),
+			"only a test app eyedbg launches itself takes them; see 'eyedbg help test'")
+	}
+
+	return m.startTestRunner(ctx, c, att, p, policy, tc)
+}
+
+// startTestRunner is startTest's runner+attach path: the driver's test
+// command starts a test host (visible as a starting session, so 'stop' can
+// end a long build), and the session attaches to it once it prints its pid.
+func (m *Manager) startTestRunner(
+	ctx context.Context, c api.Client, att Attacher, p api.StartParams, policy api.LeasePolicy, tc TestCommand,
+) (*Session, error) {
 	s := m.create(ctx, c, p, policy, Launch{Program: tc.Program}, api.ModeTest)
 	s.run = &testRun{name: runnerName(tc), hostPIDs: make(chan int, 1), done: make(chan struct{})}
 
@@ -117,7 +141,7 @@ func (m *Manager) startTest(ctx context.Context, c api.Client, drv Driver, p api
 
 // testOnly refuses launch options a test run doesn't take.
 func testOnly(spec api.LaunchSpec) error {
-	return refuseOptions(spec, []string{"--program", "program arguments", "--cwd", "--stop-on-entry"}, "a test run takes no ",
+	return refuseOptions(spec, []string{"--program", "--cwd", "--stop-on-entry"}, "a test run takes no ",
 		"it builds and runs the project's tests; set breakpoints in the tests instead")
 }
 
