@@ -638,7 +638,9 @@ func TestLaunchUnservableException(t *testing.T) {
 func TestBuildOutputBounds(t *testing.T) {
 	t.Parallel()
 
-	long := strings.Repeat("é", maxBuildLine) // 2 bytes each
+	// 3 bytes each: byte maxBuildLine (4096 % 3 == 1) is inside a rune, so
+	// the cut steps back to a rune start.
+	long := strings.Repeat("€", maxBuildLine)
 	manyLines := strings.Repeat("x\n", maxBuildLines+5)
 	bigLines := strings.Repeat(strings.Repeat("y", maxBuildLine-1)+"\n", maxBuildBytes/maxBuildLine+5)
 
@@ -676,7 +678,7 @@ func checkLongLine(t *testing.T, got []string) {
 	t.Helper()
 
 	if len(got) != 2 || got[1] != "next\n" || !utf8.ValidString(got[0]) || !strings.HasSuffix(got[0], "…\n") ||
-		len(got[0]) > maxBuildLine+len("…\n") || len(got[0]) < maxBuildLine-1 {
+		len(got[0]) > maxBuildLine+len("…\n") || len(got[0]) < maxBuildLine-2 {
 		t.Errorf("got %d lines, first %d bytes, valid %v", len(got), len(got[0]), utf8.ValidString(got[0]))
 	}
 }
