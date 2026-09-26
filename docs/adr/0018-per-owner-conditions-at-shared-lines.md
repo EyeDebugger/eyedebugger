@@ -83,8 +83,9 @@ adapter's own rule applies: debugpy ignores a failing condition (verified with d
 sorted by id) names the breakpoints a stop is for: each held and wants the stop (logpoints never;
 a `--hit` one only when its count matches). It is set only when the filter decided to stop.
 Absent means eyedbg didn't decide the stop: at a line breakpoint, every breakpoint there held (the
-adapter checked their shared condition), unless eyedbg couldn't read where the program stopped,
-in which case it keeps the stop. Surfaces: a snapshot's `  stopped for breakpoint 6 of human:ijat`
+adapter checked their shared condition), unless eyedbg couldn't read where the program stopped
+(it keeps the stop), or a step or pause ended there with no breakpoint wanting it (the
+description says so). Surfaces: a snapshot's `  stopped for breakpoint 6 of human:ijat`
 line (plural `breakpoints 5 of agent, 6 of human:ijat`) and `session.stop.breakpoints` in
 `--json`; the events line `stopped: breakpoint, thread N; for breakpoint 6 of human:ijat`; and in
 the DAP facade, `hitBreakpointIds` on `stopped` (live, at the join and on a resync), so VS Code
