@@ -27,6 +27,7 @@ security model, major dependencies, licensing and the contribution process.
 | [0015](0015-the-vs-code-extension.md) | The VS Code extension: toolchain, dependency policy and shared-breakpoint UX | proposed |
 | [0016](0016-a-csharp-side-helper-for-dotnet-diagnostics.md) | A C# side helper for .NET diagnostics | proposed |
 | [0017](0017-sharpdbg-as-an-alternative-dotnet-adapter.md) | SharpDbg as an alternative .NET adapter | proposed |
+| [0018](0018-per-owner-conditions-at-shared-lines.md) | Per-owner conditions at shared breakpoint lines | proposed |
 
 ## Process
 

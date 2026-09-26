@@ -58,6 +58,9 @@ eyedbg stop                                       # always, when done
 - A stop saying `requested by human:NAME` (the human's note follows) means a human wants control:
   finish the step, then `eyedbg lease grant human:NAME`. Their lease is released when they disconnect.
 - Breakpoints are yours: `eyedbg bp ls --mine`; `eyedbg bp rm all` removes only yours.
+- At a line another client also has a breakpoint on, your `--if` still holds on its own: a stop
+  there says whose breakpoint it is for (`stopped for breakpoint 6 of human:ijat`); if yours isn't
+  named, your condition didn't hold.
 
 ## .NET
 
