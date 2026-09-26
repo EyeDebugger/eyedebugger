@@ -242,10 +242,12 @@ func (d *Driver) withheld() string {
 // SharpDbgWithheld says why sessions on platform ("os/arch") don't default
 // to an installed SharpDbg although netcoredbg has no build there: CI's
 // SharpDbg e2e fails there (--adapter sharpdbg still chooses it, unverified).
-// It is "" everywhere while CI passes on both platforms without a
-// netcoredbg build (darwin/amd64, windows/arm64; docs/adr/0017).
+// It is "" where CI passes (darwin/amd64; docs/adr/0017).
 func SharpDbgWithheld(platform string) string {
-	withheld := map[string]string{}
+	withheld := map[string]string{
+		"windows/arm64": "CI's SharpDbg e2e on windows-11-arm fails intermittently " +
+			"(start misses the first breakpoint: the program runs on, or to exit)",
+	}
 
 	return withheld[platform]
 }

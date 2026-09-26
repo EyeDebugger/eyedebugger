@@ -80,7 +80,7 @@ Chosen: the pinned nupkg and the selector interface.
 * **Default.** netcoredbg. Where netcoredbg's manifest has no download for the platform (today
   darwin/amd64 and windows/arm64), it isn't otherwise found (`EYEDBG_NETCOREDBG`, installed, PATH)
   and SharpDbg is installed, sessions use SharpDbg without `--adapter` — unless CI's SharpDbg e2e
-  fails there (`dotnet.SharpDbgWithheld`, empty while CI passes). Nothing is ever downloaded
+  fails there (`dotnet.SharpDbgWithheld`: windows/arm64, see Addendum). Nothing is ever downloaded
   unasked: SharpDbg is used only after the user's own `adapters install sharpdbg` or
   `EYEDBG_SHARPDBG`.
 * **Its gaps, handled in the session through driver settings** (`Launch.PauseUnsupported`,
@@ -113,7 +113,8 @@ Chosen: the pinned nupkg and the selector interface.
 
 ### Consequences
 
-* Good, because .NET debugging works on Intel Macs and Windows on Arm (subject to CI), and
+* Good, because .NET debugging works on Intel Macs (and on Windows on Arm with `--adapter
+  sharpdbg`, unverified: see Addendum), and
   everywhere a user wants lambdas, LINQ and `[DebuggerDisplay]` in eval.
 * Good, because the adapter choice is one optional interface: generic-driver languages are untouched,
   and a future second adapter for another language uses the same `--adapter`.
@@ -196,3 +197,13 @@ generic-driver languages (F#-script-like manifests); `eyedbg pause` under netcor
 stop (above). Related: ADR 0005 (vsdbg), ADR 0010 (exception filters, emulated hits and logpoints),
 ADR 0011 (manifests and their trust model), ADR 0016 (the .NET side helper, whose `eyedbg dotnet
 threads` is the pause hint).
+
+## Addendum (2026-09-26): SharpDbg withheld on windows/arm64
+
+CI's full-matrix e2e on windows-11-arm failed with SharpDbg in two of three runs after M10
+(runs 36161519531, first attempt, and 36210502382): `start` missed the first breakpoint —
+`TestCLI/dotnet` and `TestCLI/sharpdbg` saw the program run to exit, `TestPause/sharpdbg` saw it
+still running instead of stopped at the entry. macos-15-intel passed every run. `SharpDbgWithheld` now names windows/arm64: sessions there
+don't default to an installed SharpDbg (the missing-netcoredbg error says to install SharpDbg and
+start with `--adapter sharpdbg`, unverified), and its SharpDbg e2e skips naming the reason. Lift the
+entry once a SharpDbg release passes there repeatedly.

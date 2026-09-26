@@ -118,7 +118,13 @@ func TestAdapterChoice(t *testing.T) {
 			"run 'eyedbg adapters install netcoredbg', or set EYEDBG_NETCOREDBG",
 		},
 		{"intel mac: installed sharpdbg is the default", "", "darwin", "amd64", fakeAdapters{"missing", "found"}, false, "sharpdbg", ""},
-		{"windows arm64: installed sharpdbg is the default", "", "windows", "arm64", fakeAdapters{"missing", "found"}, false, "sharpdbg", ""},
+		{
+			"windows arm64: sharpdbg is withheld", "", "windows", "arm64",
+			fakeAdapters{"missing", "found"},
+			false, "",
+			"netcoredbg has no build for windows/arm64: run 'eyedbg adapters install sharpdbg' and start with --adapter sharpdbg (not verified here: ",
+		},
+		{"windows arm64: --adapter sharpdbg still chooses it", "sharpdbg", "windows", "arm64", fakeAdapters{"missing", "found"}, false, "sharpdbg", ""},
 		{"intel mac: a netcoredbg of your own wins", "", "darwin", "amd64", fakeAdapters{"found", "found"}, false, "netcoredbg", ""},
 		{"intel mac: a broken EYEDBG_NETCOREDBG is reported", "", "darwin", "amd64", fakeAdapters{"broken", "found"}, false, "", "EYEDBG_NETCOREDBG=/x"},
 		{

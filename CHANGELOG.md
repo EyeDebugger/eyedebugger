@@ -136,7 +136,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shipped with eyedbg: it bundles a Microsoft-licensed DAP library, not open source — see `eyedbg
   help adapters install`), run on your `dotnet` with the .NET 10+ runtime. `start`, `attach` and
   `test` take `--adapter netcoredbg|sharpdbg` (else `EYEDBG_DOTNET_ADAPTER`); where netcoredbg has
-  no build (Intel Macs, Windows on Arm) an installed SharpDbg is the default. Under SharpDbg, eval
+  no build an installed SharpDbg is the default on Intel Macs; on Windows on Arm, where its CI e2e
+  fails intermittently, only `--adapter sharpdbg` picks it (unverified). Under SharpDbg, eval
   runs lambdas and LINQ and shows `[DebuggerDisplay]` values, `set` evaluates the assignment, and
   pause is refused (`UNSUPPORTED_BY_ADAPTER`: SharpDbg stops the program without saying where).
   Adapter manifests gain `adapter.runtime: "dotnet"` and a `dotnet.minRuntime` block; `adapters

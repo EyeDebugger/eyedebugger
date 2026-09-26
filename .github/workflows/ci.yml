@@ -155,7 +155,9 @@ jobs:
           # netcoredbg has no osx-x64 release (macos-15-intel) or win-arm64 release
           # (windows-11-arm): there the .NET debugger e2e runs with SharpDbg alone
           # (installed on every entry; the driver's default where netcoredbg has no
-          # build, docs/adr/0017). The race detector doesn't support windows/arm64.
+          # build, docs/adr/0017) — except where SharpDbgWithheld names the platform
+          # (windows/arm64), whose .NET debugger e2e then skips. The race detector
+          # doesn't support windows/arm64.
           # langs is EYEDBG_E2E_LANGS: "" runs every language (Linux and macOS install
           # lldb-18/xcrun's lldb-dap below); Windows has no lldb-dap story yet, so its
           # entries exclude c, cpp and rust. Delve publishes a windows/amd64 build (so

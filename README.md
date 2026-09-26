@@ -6,7 +6,8 @@
 
 > **Alpha (v0.1).** Debug .NET (netcoredbg, or the opt-in SharpDbg), Python (debugpy), C, C++,
 > Rust (lldb-dap) and Go (Delve) programs on Linux, macOS and Windows (x64 and arm64; .NET on Intel
-> Macs and Windows on Arm through SharpDbg only, `eyedbg adapters install sharpdbg`; C/C++/Rust need
+> Macs through SharpDbg only, `eyedbg adapters install sharpdbg`, and on Windows on Arm with
+> `--adapter sharpdbg`, unverified; C/C++/Rust need
 > lldb-dap on PATH or `EYEDBG_LLDB_DAP`, no managed download). Install below.
 
 ## Why
