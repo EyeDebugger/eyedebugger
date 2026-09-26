@@ -146,6 +146,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extension's launch configuration takes `"adapter"` (it needs an eyedbg with `adapter.select`).
 - `version --json` lists the feature `adapter.select`; sessions report their adapter
   (`SessionInfo.adapter` in `--json`).
+- `eyedbg test dotnet` debugs Microsoft.Testing.Platform, xUnit v3 and TUnit test projects
+  (ADR 0010's amendment): detected before the build (a `global.json`/`DOTNET_TEST_RUNNER` naming
+  Microsoft.Testing.Platform, `EnableMSTestRunner`/`EnableNUnitRunner`/
+  `TestingPlatformDotnetTestSupport`/`IsTestingPlatformApplication`/`UseMicrosoftTestingPlatformRunner`
+  true, `MSTest.Sdk` without `UseVSTest`, a reference to `xunit.v3`/`xunit.v3.core`/their
+  `mtp-vN` flavors, or a `TUnit`/`TUnit.Engine` reference — in the project or a
+  `Directory.Build.props`/`.targets` above it), eyedbg builds the project and launches its
+  self-hosting test app directly under the adapter instead of attaching to a separate VSTest
+  host — no runner, no attach, like `eyedbg start`. FILTER becomes the app's own filter option
+  (`--filter` for the Microsoft.Testing.Platform frameworks and MTP-mode xUnit v3, xUnit v3
+  native's `-filterVSTest` on 4.0+, TUnit's `--treenode-filter`); everything after `--` reaches
+  the app's argv directly (refused for a VSTest run). The session ends with the app's own exit
+  code (0 pass / 2 a test failed / 8 no test matched for the Microsoft.Testing.Platform
+  frameworks; 0 pass or no test matched / 1 a test failed for xUnit v3 native), except where the
+  adapter's exit codes aren't trusted (see the Fixed entry below), when it ends without one. A
+  VSTest project's flow (`dotnet test`, attach to the host) is unchanged. New sample apps
+  `testdata/apps/dotnet/xunit3` and `dotnet/mstest`.
 
 ### Changed
 
@@ -192,6 +209,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `C:/…` with forward slashes). The daemon resolves a start's `clientDir` (native API) like
   `program` and `cwd`, so a client that sends it as an 8.3 short name (`C:\Users\RUNNER~1\…`) no
   longer gets Go's build refused with "outside main module" (the CLI already sent it resolved).
+- macOS: sessions under netcoredbg no longer claim exit code 0 for `start`, `attach` and launched
+  test runs regardless of the program's real exit code. netcoredbg reports every one as 0 there;
+  `exitCode` is now absent instead (`--json`'s `SessionInfo`/`Event`, both already optional: no
+  schema change) and `endReason` says it is unknown and why, with a "read the test output" hint
+  for a test run. `--adapter sharpdbg` is unaffected.
 
 ## [0.1.2] - 2026-09-24
 

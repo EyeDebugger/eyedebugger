@@ -67,6 +67,9 @@ Test runs:
 * Microsoft.Testing.Platform's `TESTINGPLATFORM_WAIT_ATTACH_DEBUGGER`.
 * Launch `dotnet test` itself under the adapter.
 * Find the host among the runner's descendants.
+* Launch the project's own self-hosting test app directly under the adapter, like `start`, instead
+  of attaching to a separate host (chosen for Microsoft.Testing.Platform, xUnit v3 and TUnit
+  projects; added 2026-09-26).
 
 Anchors when the file changes:
 
@@ -107,6 +110,14 @@ test`'s exit code; `stop` kills the group. The session exists (state starting) w
 Microsoft.Testing.Platform projects are refused with `NO_TEST_HOST` and a hint to debug the test
 app with `start`. (Amended 2026-09-24: xUnit v3 projects are refused the same way. Their VSTest
 adapter runs the tests in a child process of the test host, so a run passed without stopping.)
+(Amended 2026-09-26: superseded for both, and extended to TUnit. `test` now detects a
+Microsoft.Testing.Platform, xUnit v3 or TUnit project the same way before the build and instead
+builds it and launches its self-hosting test app directly under the adapter — no runner, no
+attach, like `start` — with FILTER mapped to the app's own filter option and `--` args passed to
+its argv verbatim; a VSTest project's host-attach flow above is unchanged. Where the driver marks
+an adapter's exit codes untrusted (netcoredbg on macOS reports every one as 0;
+`session.Launch.ExitCodeUnknown`, D8a), the launched session ends without one instead of naming a
+wrong one, for `start`/`attach` sessions too.)
 
 **Anchors resolve once.** `FILE@"TEXT"` names the one line holding TEXT (whitespace runs as one
 space, case-sensitive); several lines are `ANCHOR_AMBIGUOUS`, none `ANCHOR_NOT_FOUND` with up to
@@ -135,7 +146,9 @@ is killed.
 * Bad, because the side-effect check is a best-effort text scan: `x.ToString()` needs the flag, a
   getter with side effects doesn't, and `(f)(1)` passes as a cast.
 * Bad, because only the first test host of a multi-targeting project is debugged (a warning says
-  so; `--framework` picks one), and Microsoft.Testing.Platform needs `start`.
+  so; `--framework` picks one). (Amended 2026-09-26: Microsoft.Testing.Platform, xUnit v3 and
+  TUnit projects no longer need `start` separately — see the amendment above; multi-targeting
+  still needs `--framework` on the launch path too.)
 * Bad, because the filter attributes a stop by location only: an emulated breakpoint on a
   function's first line also decides that function's `func:` breakpoint stops.
 * Bad, because while any breakpoint is emulated, a line two clients share with different
@@ -188,7 +201,10 @@ a fake runner) and the real netcoredbg end-to-end tests in `drivers/dotnet` (`Te
 
 ## More Information
 
-Planned in `m5-breadth` (plan decisions D1, D4, D5, D8, D9). Follow-ups: `restart` re-resolving
+Planned in `m5-breadth` (plan decisions D1, D4, D5, D8, D9). Amended in `p2-mtp-tests` (2026-09-26,
+plan decisions D1–D14 with D8 superseded by D8a, plus D15/D16): Microsoft.Testing.Platform, xUnit
+v3 and TUnit test runs launched directly (superseding the "MTP test runs" follow-up below), and
+driver-marked untrusted exit codes for netcoredbg on macOS. Follow-ups: `restart` re-resolving
 every anchor against the rebuilt program; `--hit`/`--log` on function breakpoints; native
-pass-through where adapters support it; MTP test runs; per-framework test hosts; macOS and
-Windows validation of attach and test.
+pass-through where adapters support it; per-framework test hosts; macOS and Windows validation of
+attach and test.

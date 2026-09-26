@@ -43,7 +43,7 @@ decisions are recorded in `docs/adr/`.
 - `extensions/vscode/` — the VS Code extension (TypeScript, pnpm, esbuild; ADR 0015): `src/core/`
   pure and unit-tested, `src/vscode/` the glue, `test/integration/` the suite in real VS Code.
 - `testdata/apps/` — sample debuggees for e2e tests (`dotnet/console`, `dotnet/breadth`, `dotnet/tests`,
-  `python/basic`).
+  `dotnet/xunit3`, `dotnet/mstest`, `python/basic`).
 - `docs/adr/` — architecture decision records (MADR 4.0).
 
 ## Commands
