@@ -154,7 +154,7 @@ func (s *server) listen(ctx context.Context) (net.Listener, error) {
 		return nil, fmt.Errorf("remove stale socket: %w", err)
 	}
 
-	if err := writeFileAtomic(p.Token, []byte(s.token), 0o600); err != nil {
+	if err := writeFileAtomic(p.Token, []byte(s.token)); err != nil {
 		return nil, fmt.Errorf("write token: %w", err)
 	}
 
@@ -503,7 +503,7 @@ func decodeParams(raw json.RawMessage, v any) *api.Error {
 func readShared(path string) ([]byte, error) {
 	f, err := openShared(path)
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
+		return nil, err
 	}
 	defer f.Close()
 
@@ -515,10 +515,11 @@ func readShared(path string) ([]byte, error) {
 	return data, nil
 }
 
-// writeFileAtomic writes data to a temporary file next to path and renames it
-// into place, so readers never see a partial file. Readers may hold path open
-// meanwhile (every Dial reads the token, via readShared): see replaceFile.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error { //nolint:unparam // perm mirrors os.WriteFile's signature; every current caller wants 0o600, but the function is general-purpose.
+// writeFileAtomic writes data as a private (0600) file: to a temporary file
+// next to path, renamed into place, so readers never see a partial file.
+// Readers may hold path open meanwhile (every Dial reads the token, via
+// readShared): see replaceFile.
+func writeFileAtomic(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
@@ -529,7 +530,7 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error { //nolin
 	_, werr := tmp.Write(data)
 	cerr := tmp.Close()
 
-	if err := errors.Join(werr, cerr, os.Chmod(name, perm)); err != nil {
+	if err := errors.Join(werr, cerr, os.Chmod(name, 0o600)); err != nil {
 		_ = os.Remove(name)
 
 		return err

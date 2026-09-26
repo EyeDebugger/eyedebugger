@@ -341,15 +341,13 @@ func TestStaleFilesAreReplaced(t *testing.T) {
 	}
 }
 
-// A daemon replaces its token while clients read it: every Dial reads the
-// token, and after a killed daemon left its token behind a client polling
-// for the new one reads that. On Windows a rename can't replace an open
-// file, so replaceFile retries; without that, about every other write here
-// failed with "Access is denied" and the daemon exited during start-up.
-// TestWriteFileAtomicWhileRead models Dial: readers use readShared, the same
-// way Dial reads the token, in a tight loop with no pause. On Windows this
-// no longer waits for a gap between reads (see replaceFile/openShared); on
-// Unix it always passed.
+// TestWriteFileAtomicWhileRead models a daemon replacing its token while
+// clients poll it: every Dial reads the token, and after a killed daemon left
+// its token behind a client polling for the new one reads that. The readers
+// use readShared, as Dial does, in a tight loop with no pause, so on Windows
+// the POSIX rename in replaceFile never waits on them. replaceFile's retry
+// loop covers only readers that don't share delete; it isn't exercised here.
+// On Unix this always passed.
 func TestWriteFileAtomicWhileRead(t *testing.T) {
 	t.Parallel()
 
@@ -379,7 +377,7 @@ func TestWriteFileAtomicWhileRead(t *testing.T) {
 
 	var err error
 	for i := 0; i < 50 && err == nil; i++ {
-		err = writeFileAtomic(path, []byte(strconv.Itoa(i)), 0o600)
+		err = writeFileAtomic(path, []byte(strconv.Itoa(i)))
 	}
 
 	close(stop)
@@ -416,7 +414,7 @@ func TestWriteFileAtomicWhileOpen(t *testing.T) {
 	}
 	defer held.Close()
 
-	if err := writeFileAtomic(path, []byte("new"), 0o600); err != nil {
+	if err := writeFileAtomic(path, []byte("new")); err != nil {
 		t.Fatalf("writeFileAtomic while the file is open: %v", err)
 	}
 
