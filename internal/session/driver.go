@@ -5,6 +5,7 @@ package session
 
 import (
 	"context"
+	"io"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
 )
@@ -18,6 +19,22 @@ type Driver interface {
 	// Prepare builds the program if needed and describes how to debug it.
 	// Build failures should be returned with enough output to act on.
 	Prepare(ctx context.Context, spec LaunchSpec) (Launch, error)
+}
+
+// PrepareOptions are how a start wants its program prepared (see
+// [OptionsPreparer]).
+type PrepareOptions struct {
+	// Output, when set, receives the build's output as it is produced (a
+	// streamed build); it is not written to once PrepareWith returns. Nil
+	// prepares as [Driver.Prepare] does.
+	Output io.Writer
+}
+
+// OptionsPreparer is a [Driver] that can prepare a launch with
+// [PrepareOptions]. Its Prepare is PrepareWith with zero options.
+type OptionsPreparer interface {
+	// PrepareWith is [Driver.Prepare] with opts.
+	PrepareWith(ctx context.Context, spec LaunchSpec, opts PrepareOptions) (Launch, error)
 }
 
 // LaunchSpec is what the user asked to debug (see [api.LaunchSpec]).

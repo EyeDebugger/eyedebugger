@@ -108,26 +108,8 @@ func (m *Manager) Languages() []string {
 // run (p.Test). It returns once the program is running (or stopped at an
 // entry or early breakpoint, if wait allows).
 func (m *Manager) Start(ctx context.Context, c api.Client, p api.StartParams) (*Session, error) {
-	drv, ok := m.drivers[p.Lang]
-	if !ok {
-		return nil, api.NewError(api.CodeInvalidRequest, "unknown language "+p.Lang,
-			"supported: "+strings.Join(m.Languages(), ", "))
-	}
-
-	policy, err := api.ParseLeasePolicy(string(p.LeasePolicy))
+	drv, policy, p, err := m.checkedStart(p)
 	if err != nil {
-		return nil, err
-	}
-
-	if p.Attach != nil && p.Test != nil {
-		return nil, api.NewError(api.CodeInvalidRequest, "a session either attaches or runs tests, not both", "")
-	}
-
-	if p, err = checkStart(p); err != nil {
-		return nil, err
-	}
-
-	if drv, err = withAdapter(drv, p); err != nil {
 		return nil, err
 	}
 
@@ -146,7 +128,38 @@ func (m *Manager) Start(ctx context.Context, c api.Client, p api.StartParams) (*
 		return nil, err
 	}
 
-	return m.run(ctx, m.create(ctx, c, p, policy, launch, ""), launch, p.Breakpoints)
+	return m.run(ctx, m.create(ctx, c, p, policy, launch, ""), launch, p.Breakpoints, nil)
+}
+
+// checkedStart runs the checks every start makes, in order, before
+// anything is built or run: the driver, the lease policy, attach and test
+// run exclusive, [checkStart] and [withAdapter]. It returns the driver to
+// use and p as checked.
+func (m *Manager) checkedStart(p api.StartParams) (Driver, api.LeasePolicy, api.StartParams, error) {
+	drv, ok := m.drivers[p.Lang]
+	if !ok {
+		return nil, "", p, api.NewError(api.CodeInvalidRequest, "unknown language "+p.Lang,
+			"supported: "+strings.Join(m.Languages(), ", "))
+	}
+
+	policy, err := api.ParseLeasePolicy(string(p.LeasePolicy))
+	if err != nil {
+		return nil, "", p, err
+	}
+
+	if p.Attach != nil && p.Test != nil {
+		return nil, "", p, api.NewError(api.CodeInvalidRequest, "a session either attaches or runs tests, not both", "")
+	}
+
+	if p, err = checkStart(p); err != nil {
+		return nil, "", p, err
+	}
+
+	if drv, err = withAdapter(drv, p); err != nil {
+		return nil, "", p, err
+	}
+
+	return drv, policy, p, nil
 }
 
 // withAdapter is drv bound to the adapter p names (drv itself when p names
@@ -187,9 +200,10 @@ func (m *Manager) create(ctx context.Context, c api.Client, p api.StartParams, p
 	return s
 }
 
-// run starts s's adapter, shares s and configures the debuggee; a failure
-// ends s and forgets it.
-func (m *Manager) run(ctx context.Context, s *Session, launch Launch, bps []api.BreakpointSpec) (*Session, error) {
+// run starts s's adapter, shares s and configures the debuggee, calling
+// hook (nil: none) during the configuration (see [Session.configure]); a
+// failure ends s and forgets it.
+func (m *Manager) run(ctx context.Context, s *Session, launch Launch, bps []api.BreakpointSpec, hook configureHook) (*Session, error) {
 	// The adapter lives as long as the daemon, not this request.
 	if err := s.startAdapter(m.ctx, launch, m.stderr, m.connectTimeout); err != nil { //nolint:contextcheck // Deliberately not the request's context.
 		if s.run != nil { // a runner test run: shared already, end it properly
@@ -214,7 +228,7 @@ func (m *Manager) run(ctx context.Context, s *Session, launch Launch, bps []api.
 	m.add(s)
 	m.saveIfLive(s)
 
-	if err := s.configure(ctx, launch, bps); err != nil {
+	if err := s.configure(ctx, launch, bps, hook); err != nil {
 		m.fail(ctx, s, err)
 
 		return nil, err

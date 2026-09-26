@@ -274,10 +274,17 @@ func (s *Session) startAdapter(ctx context.Context, launch Launch, stderr io.Wri
 	return nil
 }
 
+// configureHook is called during a start's configuration (see
+// [Session.configure]); its error fails the start.
+type configureHook func(ctx context.Context, s *Session) error
+
 // configure runs the DAP start-up sequence: initialize, launch (or
-// attach), breakpoints (owned by the starter), exception filters,
-// configurationDone.
-func (s *Session) configure(ctx context.Context, launch Launch, bps []api.BreakpointSpec) error {
+// attach), breakpoints (owned by the starter), exception filters, hook
+// (nil: none), configurationDone. The hook runs once the adapter is
+// initialized and the starter's configuration sent, with s shared and
+// starting and no lock of s held, so it may configure s as any client
+// would; its error (or ctx ending while it runs) is returned unchanged.
+func (s *Session) configure(ctx context.Context, launch Launch, bps []api.BreakpointSpec, hook configureHook) error {
 	if err := s.initialize(ctx, launch.AdapterID); err != nil {
 		return err
 	}
@@ -307,6 +314,16 @@ func (s *Session) configure(ctx context.Context, launch Launch, bps []api.Breakp
 
 	if err := s.configurationPhase(ctx, bps); err != nil {
 		return err
+	}
+
+	if hook != nil {
+		if err := hook(ctx, s); err != nil {
+			return err
+		}
+
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("configure the session: %w", err)
+		}
 	}
 
 	if err := s.configurationDone(ctx); err != nil {

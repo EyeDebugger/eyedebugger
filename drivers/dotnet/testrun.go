@@ -413,7 +413,7 @@ func evaluateTestBuild(ctx context.Context, host, project, f string, noBuild boo
 			args = append(args, "-p:TargetFramework="+f)
 		}
 	} else {
-		args = []string{"build", project, "-c", dotnetConfig, msbuildNoLogo}
+		args = []string{dotnetBuild, project, "-c", dotnetConfig, msbuildNoLogo}
 		if f != "" {
 			args = append(args, "-f", f)
 		}
@@ -436,8 +436,7 @@ func evaluateTestBuild(ctx context.Context, host, project, f string, noBuild boo
 // path's own multi-targeting check needs to see an empty one instead, so it
 // passes none). Shared by build (Prepare's exact query) and evaluateTestBuild.
 func buildQuery(ctx context.Context, host, project string, args []string, checkResult bool, require ...string) (map[string]string, error) {
-	cmd := exec.CommandContext(ctx, host, args...)
-	cmd.Env = append(os.Environ(), "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_NOLOGO=1")
+	cmd := buildCommand(ctx, host, args)
 
 	var stdout, stderr bytes.Buffer
 
@@ -459,6 +458,16 @@ func buildQuery(ctx context.Context, host, project string, args []string, checkR
 	}
 
 	return props, nil
+}
+
+// buildCommand runs host with args (a build or msbuild query) in the
+// environment every build here gets: no telemetry, no first-run banner.
+// ctx's end kills it.
+func buildCommand(ctx context.Context, host string, args []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, host, args...)
+	cmd.Env = append(os.Environ(), "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_NOLOGO=1")
+
+	return cmd
 }
 
 // parseBuildProperties reads -getProperty's JSON; checkResult also requires

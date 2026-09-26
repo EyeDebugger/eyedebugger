@@ -39,7 +39,7 @@ func (m *Manager) startAttach(ctx context.Context, c api.Client, drv Driver, p a
 
 	launch.Request, launch.PID, launch.Program = RequestAttach, info.PID, processName(info)
 
-	return m.run(ctx, m.create(ctx, c, p, policy, launch, api.ModeAttach), launch, p.Breakpoints)
+	return m.run(ctx, m.create(ctx, c, p, policy, launch, api.ModeAttach), launch, p.Breakpoints, nil)
 }
 
 // launchOnly refuses launch options for a session that doesn't launch.
