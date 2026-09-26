@@ -77,7 +77,8 @@ eyedbg stop                                       # always, when done
   program's memory: private, never share them.
 - Eval can't run lambdas or LINQ (SharpDbg can: `eyedbg adapters install sharpdbg`, then `--adapter
   sharpdbg`; it can't pause); getters run anyway. `$exception` at an exception stop. An unhandled
-  exception always stops. Intel Macs and Windows on Arm have only SharpDbg (used once installed).
+  exception always stops. Intel Macs have only SharpDbg (used once installed); Windows on Arm only
+  with `--adapter sharpdbg` (unverified there).
 
 ## Python
 

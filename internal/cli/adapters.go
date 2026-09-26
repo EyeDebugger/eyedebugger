@@ -102,7 +102,7 @@ VSCodeDebugProtocol under the Microsoft Software License Terms (not open source)
 it to develop and test your applications, put duties on whoever redistributes it (not you, by
 installing it), forbid reverse engineering, and say the software may collect data and send it to
 Microsoft (docs/adr/0017). Install it only if you accept that; then 'eyedbg start dotnet --adapter
-sharpdbg' uses it, as do sessions where netcoredbg has no build (Intel Macs, Windows on Arm).
+sharpdbg' uses it, as do Intel Macs' sessions (no netcoredbg build; Windows on Arm: unverified).
 
 Needs network access (github.com, files.pythonhosted.org, api.nuget.org); blocks until done
 (typically seconds, at most 5m). Idempotent: an installed adapter is left as is. Prints the

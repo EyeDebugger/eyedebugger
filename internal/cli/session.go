@@ -148,8 +148,9 @@ const adapterHelp = `
 --adapter chooses the debug adapter, for dotnet only: netcoredbg (the default) or sharpdbg
 (SharpDbg, opt-in: 'eyedbg adapters install sharpdbg' downloads it from nuget.org; it needs the
 .NET 10+ runtime, and bundles a Microsoft-licensed library, see 'eyedbg help adapters install').
-EYEDBG_DOTNET_ADAPTER sets it when --adapter doesn't. Where netcoredbg has no build (Intel Macs,
-Windows on Arm) an installed SharpDbg is used without --adapter. Under SharpDbg, pause is refused
+EYEDBG_DOTNET_ADAPTER sets it when --adapter doesn't. On Intel Macs, where netcoredbg has no build,
+an installed SharpDbg is used without --adapter (on Windows on Arm, which has none either, only
+with it: unverified there). Under SharpDbg, pause is refused
 (UNSUPPORTED_BY_ADAPTER: it stops the program without saying where), 'eyedbg set' runs the
 assignment as an expression, and eval also runs lambdas and LINQ (with --allow-side-effects) and
 shows [DebuggerDisplay] values. 'eyedbg sessions' shows each session's adapter.`
