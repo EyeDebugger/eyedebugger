@@ -463,13 +463,35 @@ func (m *Manager) Stop(ctx context.Context, c api.Client, id string) (api.Sessio
 		return api.SessionInfo{}, err
 	}
 
+	return m.stop(ctx, c, s)
+}
+
+// StopSession is Stop for s itself rather than for whichever session has
+// its id now: once s was forgotten it is NO_SESSION, even when a newer
+// session reuses the id (newID only avoids live and lost ones).
+func (m *Manager) StopSession(ctx context.Context, c api.Client, s *Session) (api.SessionInfo, error) {
+	m.mu.Lock()
+	held := m.sessions[s.ID] == s
+	m.mu.Unlock()
+
+	if !held {
+		return api.SessionInfo{}, api.NewError(api.CodeNoSession, "no session "+s.ID, "see 'eyedbg sessions'")
+	}
+
+	return m.stop(ctx, c, s)
+}
+
+// stop ends s for client c and forgets it, unless it was forgotten
+// meanwhile: its id, then free, may name a newer session by now.
+func (m *Manager) stop(ctx context.Context, c api.Client, s *Session) (api.SessionInfo, error) {
 	if err := s.Terminate(ctx, c); err != nil {
 		return api.SessionInfo{}, err
 	}
 
-	m.remove(s.ID)
-	m.forget(ctx, s.ID)
-	m.logger.InfoContext(ctx, "session stopped", slog.String("session", s.ID))
+	if m.removeSession(s) {
+		m.forget(ctx, s.ID)
+		m.logger.InfoContext(ctx, "session stopped", slog.String("session", s.ID))
+	}
 
 	return s.Info(), nil
 }
@@ -546,6 +568,23 @@ func (m *Manager) remove(id string) {
 	delete(m.sessions, id)
 	m.mu.Unlock()
 	m.notify()
+}
+
+// removeSession removes s if its id still names it, and reports whether it
+// did.
+func (m *Manager) removeSession(s *Session) bool {
+	m.mu.Lock()
+	held := m.sessions[s.ID] == s
+	if held {
+		delete(m.sessions, s.ID)
+	}
+	m.mu.Unlock()
+
+	if held {
+		m.notify()
+	}
+
+	return held
 }
 
 func (m *Manager) notify() {

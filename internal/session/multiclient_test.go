@@ -153,6 +153,43 @@ func TestStopNeedsLeaseWhileLive(t *testing.T) {
 	}
 }
 
+// TestStopSessionByIdentity: stopping a session again once it was forgotten
+// never touches a newer session that reuses its id, whether the id was
+// reused before the call or while it ran.
+func TestStopSessionByIdentity(t *testing.T) {
+	t.Parallel()
+
+	m := newTestManager(t, nil)
+	old := start(t, m, agentC, api.StartParams{LaunchSpec: api.LaunchSpec{StopOnEntry: true}})
+	other := start(t, m, humanC, api.StartParams{LaunchSpec: api.LaunchSpec{StopOnEntry: true}})
+
+	if _, err := m.StopSession(t.Context(), agentC, old); err != nil {
+		t.Fatal(err)
+	}
+
+	// A newer session gets the forgotten id (newID may reissue it).
+	m.mu.Lock()
+	delete(m.sessions, other.ID)
+	m.sessions[old.ID] = other
+	m.mu.Unlock()
+
+	_, err := m.StopSession(t.Context(), agentC, old)
+	expectCode(t, err, api.CodeNoSession)
+
+	// The id reused after StopSession's check: stop must still leave it.
+	if _, err := m.stop(t.Context(), agentC, old); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := m.Get(old.ID); err != nil || got != other {
+		t.Errorf("Get(%s) = %p, %v; want the newer session %p", old.ID, got, err, other)
+	}
+
+	if st := other.Info().State; st == api.StateExited {
+		t.Errorf("newer session state = %s, want it live", st)
+	}
+}
+
 func TestStopEndsWithTheClient(t *testing.T) {
 	t.Parallel()
 
