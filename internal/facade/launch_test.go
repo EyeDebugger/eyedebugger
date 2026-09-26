@@ -183,11 +183,14 @@ func TestLaunch(t *testing.T) {
 	}
 
 	tc.ok("disconnect", "")
-	tc.waitClosed()
 
+	// Forgotten before the disconnect response, not when the connection
+	// closes: the client may list sessions as soon as it has the response.
 	if _, ok := e.listed(id); ok {
-		t.Error("the exited session is still listed after its launcher left")
+		t.Error("the exited session is still listed after its launcher's disconnect response")
 	}
+
+	tc.waitClosed()
 
 	if got := logs.containing(secret, e.prog); len(got) != 0 {
 		t.Errorf("logged %q", got)

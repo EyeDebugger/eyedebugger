@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	godap "github.com/google/go-dap"
 
@@ -118,7 +117,10 @@ func TestFacadeLaunchRunsToEnd(t *testing.T) {
 			}
 
 			launchLeave(t, p)
-			waitUnlisted(t, h, id)
+
+			if _, listed := listedSession(t, h, id); listed {
+				t.Errorf("session %s is still listed after its launcher left", id)
+			}
 		})
 	}
 }
@@ -275,24 +277,4 @@ func listedSession(t *testing.T, h *harness, id string) (api.SessionInfo, bool) 
 	}
 
 	return sessions.Sessions[i], true
-}
-
-// waitUnlisted waits, up to dapTimeout, until 'eyedbg sessions' no longer
-// lists id: the daemon forgets a launcher's exited session once the
-// launcher's connection has ended, which is after 'eyedbg dap' saw it end
-// (internal/facade Serve), so the first listing may still show it.
-func waitUnlisted(t *testing.T, h *harness, id string) {
-	t.Helper()
-
-	deadline := time.Now().Add(dapTimeout)
-
-	for {
-		if _, listed := listedSession(t, h, id); !listed {
-			return
-		}
-
-		if time.Now().After(deadline) {
-			t.Fatalf("session %s is still listed %s after its launcher left", id, dapTimeout)
-		}
-	}
 }
