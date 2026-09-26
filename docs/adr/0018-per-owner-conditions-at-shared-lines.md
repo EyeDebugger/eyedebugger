@@ -74,8 +74,10 @@ the empty text and NaN included. An evaluation error holds (the program stops, a
 did). This applies to every condition eyedbg evaluates, the emulated ones of ADR 0010 too.
 
 **Error semantics per path.** Where eyedbg evaluates a condition (a line whose conditions differ,
-or one with `--hit`/`--log`) a failing expression stops. Elsewhere the adapter's own rule applies:
-debugpy ignores a failing condition (verified with debugpy 1.8.22). `bp add --help` says both.
+whatever `--hit`/`--log` those breakpoints have) a failing expression stops. Elsewhere — including
+a lone `--hit`/`--log` breakpoint's `--if`, or one sharing a line with equal conditions — the
+adapter's own rule applies: debugpy ignores a failing condition (verified with debugpy 1.8.22).
+`bp add --help` says both.
 
 **Attribution.** `api.StopInfo.Breakpoints` (`[{id, owner}]`, `breakpoints` omitted when empty,
 sorted by id) names the breakpoints a stop is for: each held and wants the stop (logpoints never;

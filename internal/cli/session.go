@@ -892,10 +892,12 @@ its module isn't loaded yet) and may still bind later; 'eyedbg bp ls' shows the 
 
 --if EXPR stops only when EXPR, an expression in the program's language, is true there (e.g.
 'i == 3'). It is evaluated each time the line runs, so it runs code in the program. Where eyedbg
-evaluates it (a line where clients' conditions differ, see below, or one with --hit or --log), a
-value that reads as false (false, 0, None, null, nil, an empty string or collection) doesn't stop
-and anything else does, as does an expression that fails to evaluate; elsewhere the adapter
-decides (debugpy ignores an expression that fails to evaluate).
+evaluates it (a line where clients' conditions differ, see below, whatever --hit or --log those
+breakpoints have), a value that reads as false (false, 0, None, null, nil, an empty string or
+collection) doesn't stop and anything else does, as does an expression that fails to evaluate;
+elsewhere — including a lone breakpoint with --hit or --log, or one sharing a line with others
+that all have the same condition — the adapter decides (debugpy ignores an expression that fails
+to evaluate).
 
 --hit counts the times the line is reached with its --if true, and stops only at some: N (only
 the Nth time), >=N (the Nth time and after) or %N (every Nth time). --log MESSAGE makes it a

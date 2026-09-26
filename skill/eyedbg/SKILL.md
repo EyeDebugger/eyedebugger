@@ -59,8 +59,9 @@ eyedbg stop                                       # always, when done
   finish the step, then `eyedbg lease grant human:NAME`. Their lease is released when they disconnect.
 - Breakpoints are yours: `eyedbg bp ls --mine`; `eyedbg bp rm all` removes only yours.
 - At a line another client also has a breakpoint on, your `--if` still holds on its own: a stop
-  there says whose breakpoint it is for (`stopped for breakpoint 6 of human:ijat`); if yours isn't
-  named, your condition didn't hold.
+  there says whose breakpoint it is for (`stopped for breakpoint 6 of human:ijat`); when a stop
+  names breakpoints and yours isn't among them, your condition didn't hold (or its hit count
+  didn't match).
 
 ## .NET
 
