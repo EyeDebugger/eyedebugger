@@ -65,8 +65,9 @@ eyedbg stop                                       # always, when done
 - `eyedbg start dotnet` builds the project in the current directory (`--project P`,
   `--program app.dll --no-build`). Program arguments go after `--`.
 - A failing test: `eyedbg test dotnet 'Adds' --bp 'CalculatorTests.cs@"Assert.Equal"'` (VSTest;
-  ends with `dotnet test`'s exit code). xUnit v3 is refused: run the test app with
-  `eyedbg start dotnet --project tests --bp ... -- -method '*Adds'`.
+  ends with `dotnet test`'s exit code). Microsoft.Testing.Platform, xUnit v3 and TUnit projects are
+  launched directly instead (like `start`, no attach): `eyedbg test dotnet --project tests --bp
+  ... -- -method '*Adds'`; FILTER (the first arg) maps to the app's own filter option.
 - `eyedbg attach dotnet --pid N` (your own processes); `eyedbg stop` then detaches.
 - Without pausing: `eyedbg dotnet counters` samples CPU, memory, GC, thread pool and exceptions
   for 5s (`-s ID`, or `--pid N` from `eyedbg dotnet ps`). Not while stopped: continue first.
@@ -78,7 +79,9 @@ eyedbg stop                                       # always, when done
 - Eval can't run lambdas or LINQ (SharpDbg can: `eyedbg adapters install sharpdbg`, then `--adapter
   sharpdbg`; it can't pause); getters run anyway. `$exception` at an exception stop. An unhandled
   exception always stops. Intel Macs have only SharpDbg (used once installed); Windows on Arm only
-  with `--adapter sharpdbg` (unverified there).
+  with `--adapter sharpdbg` (unverified there). On macOS, netcoredbg reports every exit code as 0:
+  a `start`/`attach`/`test` session there ends without one instead (read the output for the
+  result), unless you pass `--adapter sharpdbg`.
 
 ## Python
 
