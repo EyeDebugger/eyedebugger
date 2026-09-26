@@ -180,6 +180,110 @@ func breadthHitsAndLogpoints(t *testing.T, adapter string) {
 	}
 }
 
+// TestBreadthSharedConditions: breakpoints of the agent and a human at one
+// line with different conditions each stop once, when their own condition
+// holds (eyedbg evaluates both through the adapter), and the stop names
+// whose breakpoint it is for; a third client's logpoint there logs every
+// later pass and suppresses neither stop.
+func TestBreadthSharedConditions(t *testing.T) {
+	forEachAdapter(t, breadthSharedConditions)
+}
+
+func breadthSharedConditions(t *testing.T, adapter string) {
+	t.Helper()
+
+	dir := copyApp(t, "breadth")
+	src := filepath.Join(dir, "Program.cs")
+	body := lineOf(t, src, "loop-body")
+
+	var (
+		human  = api.Client{ID: "human:e2e", Kind: api.KindHuman, Name: "e2e"}
+		logger = api.Client{ID: "agent:log", Kind: api.KindAgent}
+	)
+
+	sess, err := newManager(t).Start(t.Context(), agent, api.StartParams{
+		Lang: "dotnet", Adapter: adapter, LaunchSpec: api.LaunchSpec{Project: dir, Args: []string{"loop"}},
+		Breakpoints: []api.BreakpointSpec{{File: src, Line: body, Condition: "i == 1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectStop(t, sess.Wait(t.Context(), 0, e2eWait, api.DumpSpec{}), "breakpoint", body)
+	expectLoopIndex(t, sess, 1)
+
+	add := func(c api.Client, spec api.BreakpointSpec) api.Breakpoint {
+		t.Helper()
+
+		spec.File, spec.Line = src, body
+
+		b, err := sess.AddBreakpoint(t.Context(), c, spec)
+		if err != nil {
+			t.Fatalf("%s: bp add %+v: %v", c.ID, spec, err)
+		}
+
+		return b
+	}
+
+	before := sess.Breakpoints(agent.ID)
+
+	mine := add(agent, api.BreakpointSpec{Condition: "i == 2"})
+	if len(before) != 1 || mine.ID != before[0].ID {
+		t.Fatalf("re-added breakpoint %d, want the agent's one of %+v", mine.ID, before)
+	}
+
+	theirs := add(human, api.BreakpointSpec{Condition: "i == 4"})
+
+	snap := e2eResume(t, sess, session.ExecContinue)
+	expectStop(t, snap, "breakpoint", body)
+	expectLoopIndex(t, sess, 2)
+	expectStopFor(t, snap, api.StopBreakpoint{ID: mine.ID, Owner: agent.ID})
+
+	add(logger, api.BreakpointSpec{LogMessage: "i={i}"})
+
+	snap = e2eResume(t, sess, session.ExecContinue)
+	expectStop(t, snap, "breakpoint", body)
+	expectLoopIndex(t, sess, 4)
+	expectStopFor(t, snap, api.StopBreakpoint{ID: theirs.ID, Owner: human.ID})
+
+	snap = e2eResume(t, sess, session.ExecContinue)
+	if snap.Session.State != api.StateExited {
+		t.Fatalf("after continue: %+v, want exited (no more stops)", snap.Session)
+	}
+
+	expectExitCode(t, snap.Session, 0)
+
+	var logs []string
+
+	for _, l := range sess.Output(0, 0).Lines {
+		if l.Category == "logpoint" {
+			logs = append(logs, strings.TrimSpace(l.Text))
+		}
+	}
+
+	if want := []string{"i=3", "i=4", "i=5"}; !slices.Equal(logs, want) {
+		t.Errorf("logpoint output = %q, want %q", logs, want)
+	}
+}
+
+// expectLoopIndex checks the loop index i at the stop.
+func expectLoopIndex(t *testing.T, sess *session.Session, want int) {
+	t.Helper()
+
+	if got := e2eEval(t, sess, "i"); got != strconv.Itoa(want) {
+		t.Fatalf("stopped at i = %s, want %d", got, want)
+	}
+}
+
+// expectStopFor checks the breakpoints a stop is for.
+func expectStopFor(t *testing.T, snap api.Snapshot, want ...api.StopBreakpoint) {
+	t.Helper()
+
+	if got := snap.Session.Stop.Breakpoints; !slices.Equal(got, want) {
+		t.Errorf("stop for %+v, want %+v", got, want)
+	}
+}
+
 // TestBreadthExceptions: all stops at a caught throw, uncaught doesn't,
 // and an unhandled exception stops even with none.
 func TestBreadthExceptions(t *testing.T) {

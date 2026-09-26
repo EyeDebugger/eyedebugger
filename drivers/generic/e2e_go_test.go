@@ -196,6 +196,18 @@ func TestGoLoop(t *testing.T) {
 	}
 }
 
+// TestGoSharedConditions: per-owner conditions at a shared line on Delve
+// (sharedConditions).
+func TestGoSharedConditions(t *testing.T) {
+	app := requireGoApp(t)
+	body := app.line(t, "loop-body")
+
+	s, snap := startGo(t, goManager(t), app, "loop", api.StartParams{
+		Breakpoints: []api.BreakpointSpec{{File: app.src, Line: body, Condition: "i == 0"}},
+	})
+	sharedConditions(t, s, snap, app.src, body, 0)
+}
+
 // TestGoEntryAndExec: --stop-on-entry, and --opt mode=exec on a binary
 // built with -gcflags=all=-N -l (optimizations and inlining off, so
 // breakpoints and locals are reliable, mirroring 'dlv debug's own default).

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -340,6 +341,105 @@ func TestPythonHitsAndLogpoints(t *testing.T) {
 
 	if want := []string{"i=0", "i=1", "i=2", "i=3", "i=4"}; !slices.Equal(logs, want) {
 		t.Errorf("logpoint output = %q, want %q", logs, want)
+	}
+}
+
+// TestPythonSharedConditions: per-owner conditions at a shared line on
+// debugpy (sharedConditions).
+func TestPythonSharedConditions(t *testing.T) {
+	a := requirePython(t)
+	body := a.line(t, "loop-body")
+
+	s, snap := startPy(t, pyManager(t), a, "loop", api.StartParams{
+		Breakpoints: []api.BreakpointSpec{{File: a.src, Line: body, Condition: "i == 0"}},
+	})
+	sharedConditions(t, s, snap, a.src, body, 0)
+}
+
+// sharedConditions is S1's scenario at loop-body line body of file, whose
+// loop index i runs first..first+4, from snap: the agent's breakpoint
+// there with i == first just stopped. The agent changes its condition to
+// i == first+1 and a human adds one with i == first+3 at the same line:
+// each stops once, when its own condition holds (eyedbg evaluates both,
+// through the adapter's evaluate), and the stop names whose breakpoint it
+// is for. Another client's logpoint added there logs every later pass and
+// suppresses neither stop.
+func sharedConditions(t *testing.T, s *session.Session, snap api.Snapshot, file string, body, first int) {
+	t.Helper()
+
+	var (
+		human  = api.Client{ID: "human:e2e", Kind: api.KindHuman, Name: "e2e"}
+		logger = api.Client{ID: "agent:log", Kind: api.KindAgent}
+		cond   = func(n int) string { return "i == " + strconv.Itoa(n) }
+	)
+
+	expectStop(t, snap, "breakpoint", body)
+	expectI(t, s, first)
+
+	add := func(c api.Client, spec api.BreakpointSpec) api.Breakpoint {
+		t.Helper()
+
+		spec.File, spec.Line = file, body
+
+		b, err := s.AddBreakpoint(t.Context(), c, spec)
+		if err != nil {
+			t.Fatalf("%s: bp add %+v: %v", c.ID, spec, err)
+		}
+
+		return b
+	}
+
+	before := s.Breakpoints(agent.ID)
+
+	mine := add(agent, api.BreakpointSpec{Condition: cond(first + 1)})
+	if len(before) != 1 || mine.ID != before[0].ID {
+		t.Fatalf("re-added breakpoint %d, want the agent's one of %+v", mine.ID, before)
+	}
+
+	theirs := add(human, api.BreakpointSpec{Condition: cond(first + 3)})
+
+	snap = pyResume(t, s, session.ExecContinue)
+	expectStop(t, snap, "breakpoint", body)
+	expectI(t, s, first+1)
+	expectFor(t, snap, api.StopBreakpoint{ID: mine.ID, Owner: agent.ID})
+
+	add(logger, api.BreakpointSpec{LogMessage: "i={i}"})
+
+	snap = pyResume(t, s, session.ExecContinue)
+	expectStop(t, snap, "breakpoint", body)
+	expectI(t, s, first+3)
+	expectFor(t, snap, api.StopBreakpoint{ID: theirs.ID, Owner: human.ID})
+
+	expectExit(t, s, pyResume(t, s, session.ExecContinue), 0)
+
+	var logs []string
+
+	for _, l := range s.Output(0, 0).Lines {
+		if l.Category == "logpoint" {
+			logs = append(logs, strings.TrimSpace(l.Text))
+		}
+	}
+
+	if want := []string{"i=" + strconv.Itoa(first+2), "i=" + strconv.Itoa(first+3), "i=" + strconv.Itoa(first+4)}; !slices.Equal(logs, want) {
+		t.Errorf("logpoint output = %q, want %q", logs, want)
+	}
+}
+
+// expectI checks the loop index i at the stop.
+func expectI(t *testing.T, s *session.Session, want int) {
+	t.Helper()
+
+	if got := e2eEval(t, s, "i"); got != strconv.Itoa(want) {
+		t.Fatalf("stopped at i = %s, want %d", got, want)
+	}
+}
+
+// expectFor checks the breakpoints the stop is for.
+func expectFor(t *testing.T, snap api.Snapshot, want ...api.StopBreakpoint) {
+	t.Helper()
+
+	if got := snap.Session.Stop.Breakpoints; !slices.Equal(got, want) {
+		t.Errorf("stop for %+v, want %+v", got, want)
 	}
 }
 

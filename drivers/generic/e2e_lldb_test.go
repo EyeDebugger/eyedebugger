@@ -214,6 +214,24 @@ func TestLldbLoop(t *testing.T) {
 	}
 }
 
+// TestLldbSharedConditions: per-owner conditions at a shared line on
+// lldb-dap (sharedConditions), over c, cpp and rust.
+func TestLldbSharedConditions(t *testing.T) {
+	for _, tc := range lldbLoopCases {
+		t.Run(tc.lang, func(t *testing.T) {
+			requireLldb(t, tc.lang)
+
+			app := tc.compile(t)
+			body := app.line(t, "loop-body")
+
+			s, snap := startNative(t, pyManager(t), tc.lang, app, "loop", api.StartParams{
+				Breakpoints: []api.BreakpointSpec{{File: app.src, Line: body, Condition: "i == 0"}},
+			})
+			sharedConditions(t, s, snap, app.src, body, 0)
+		})
+	}
+}
+
 // TestLldbEnvList: --env reaches the program through ${envList}, the shape
 // lldb-dap <=19 needs.
 func TestLldbEnvList(t *testing.T) {
