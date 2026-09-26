@@ -13,6 +13,7 @@ import (
 	"net"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	godap "github.com/google/go-dap"
@@ -44,8 +45,11 @@ const DefaultRestartGrace = 10 * time.Second
 
 // Config configures [Serve].
 type Config struct {
-	// Session is the session the connection joined.
+	// Session is the session the connection joined; nil with Launcher.
 	Session *session.Session
+	// Launcher, set instead of Session, makes a launch connection: it
+	// joins no session, and its DAP launch starts one (launch.go).
+	Launcher *Launcher
 	// Client is who every request of the connection acts as.
 	Client api.Client
 	Logger *slog.Logger
@@ -56,28 +60,46 @@ type Config struct {
 }
 
 // phase is how far the connection's handshake got.
-type phase int
+type phase int32
 
 const (
 	phaseNew         phase = iota // nothing yet
 	phaseInitialized              // initialize answered
-	phaseAttached                 // attach answered, initialized sent
-	phaseConfigured               // configurationDone answered: following the log
+	phaseLaunching                // launch connection: its launch is starting the session
+	phaseAttached                 // attach answered (launch: the session bound), initialized sent
+	phaseConfigured               // configurationDone (launch: launch) answered: following the log
+	phaseFailed                   // launch connection: its launch failed or was stopped
 )
+
+// phaseVar is a phase any goroutine may read: a launch connection's
+// launch goroutine moves it on.
+type phaseVar struct{ v atomic.Int32 }
+
+func (p *phaseVar) load() phase { return phase(p.v.Load()) }
+
+func (p *phaseVar) store(ph phase) { p.v.Store(int32(ph)) }
 
 // connection is one editor's DAP connection to a session.
 type connection struct {
-	sess     *session.Session
+	// sess and presence are set before the reader starts, except on a
+	// launch connection, whose launch goroutine sets them when it binds
+	// the session it started (before moving phase to attached): read them
+	// through session() and presence.Load().
+	sess     atomic.Pointer[session.Session]
+	presence atomic.Pointer[session.Presence]
 	client   api.Client
-	presence *session.Presence
 	logger   *slog.Logger
 	srv      *dap.Server
 	conn     net.Conn
 
-	// phase and invalidated are the reader's: set before the follower
-	// starts, never changed after. restart is the reader's too: the
-	// disconnect asked for a restart.
-	phase       phase
+	// launch is a launch connection's state; nil when it joined a session.
+	launch *launchState
+
+	// phase is written by the reader, and on a launch connection by its
+	// launch goroutine; it never goes back. invalidated is set by
+	// initialize, before the follower or a launch goroutine starts. restart
+	// is the reader's: the disconnect asked for a restart.
+	phase       phaseVar
 	invalidated bool
 	restart     bool
 
@@ -114,8 +136,16 @@ var funcBreakpoints = bpsKey{function: true} //nolint:gochecknoglobals // a cons
 // Serve waited for every request in flight; when it was the client's last,
 // the session removes its editor breakpoints and releases its lease (after
 // cfg.RestartGrace for a restart). It does not close conn.
+//
+// With cfg.Launcher instead of a session, the connection starts without
+// one and its DAP launch starts it (launch.go).
 func Serve(ctx context.Context, cfg Config, r *bufio.Reader, conn net.Conn) {
-	logger := cfg.Logger.With(slog.String("session", cfg.Session.ID), slog.String("client", cfg.Client.ID))
+	logger := cfg.Logger.With(slog.String("client", cfg.Client.ID))
+	if cfg.Session != nil {
+		logger = logger.With(slog.String("session", cfg.Session.ID))
+	} else {
+		logger = logger.With(slog.Bool("launch", true))
+	}
 
 	codec := godap.NewCodec()
 	if err := RegisterMessages(codec); err != nil {
@@ -125,13 +155,18 @@ func Serve(ctx context.Context, cfg Config, r *bufio.Reader, conn net.Conn) {
 	}
 
 	c := &connection{
-		sess:     cfg.Session,
-		client:   cfg.Client,
-		presence: cfg.Session.Connect(cfg.Client),
-		logger:   logger,
-		srv:      dap.NewServer(r, conn, codec, maxRequest),
-		conn:     conn,
-		view:     newView(),
+		client: cfg.Client,
+		logger: logger,
+		srv:    dap.NewServer(r, conn, codec, maxRequest),
+		conn:   conn,
+		view:   newView(),
+	}
+
+	if cfg.Session != nil {
+		c.sess.Store(cfg.Session)
+		c.presence.Store(cfg.Session.Connect(cfg.Client))
+	} else {
+		c.launch = newLaunchState(cfg.Launcher)
 	}
 
 	c.logger.InfoContext(ctx, "facade opened")
@@ -147,9 +182,20 @@ func Serve(ctx context.Context, cfg Config, r *bufio.Reader, conn net.Conn) {
 		grace = cfg.RestartGrace
 	}
 
-	c.protect(ctx, func() { c.presence.Leave(ctx, grace) })
+	if p := c.presence.Load(); p != nil {
+		c.protect(ctx, func() { p.Leave(ctx, grace) })
+	}
+
+	if c.launch != nil {
+		c.protect(ctx, func() { c.forgetExited(ctx) })
+	}
+
 	c.logger.InfoContext(ctx, "facade closed")
 }
+
+// session is the connection's session: nil on a launch connection until
+// its launch bound the one it started.
+func (c *connection) session() *session.Session { return c.sess.Load() }
 
 // inFlight is where the reader hands the requests it doesn't handle
 // itself: each holds a slot of sem until it is answered.
@@ -194,7 +240,9 @@ func (c *connection) readLoop(ctx context.Context) {
 			return
 		}
 
-		c.sess.Touch(c.client)
+		if s := c.session(); s != nil {
+			s.Touch(c.client)
+		}
 
 		if done := c.dispatch(ctx, req, in); done {
 			return

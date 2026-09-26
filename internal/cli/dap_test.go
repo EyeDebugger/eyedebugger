@@ -40,6 +40,17 @@ func TestDapErrors(t *testing.T) {
 	}
 }
 
+// TestDapLaunchWithSession: --launch starts a session, so -s is a usage
+// error (exit 1), before any daemon is reached.
+func TestDapLaunchWithSession(t *testing.T) {
+	isolate(t)
+
+	stdout, stderr, code := execute(t, NewEyedbgCommand(testInfo), []string{"dap", "--launch", "-s", "s-x"})
+	if code != exitError || len(stdout) != 0 || !strings.Contains(string(stderr), "drop -s") {
+		t.Errorf("dap --launch -s: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
 func TestDapUnknownSession(t *testing.T) {
 	serveInProcess(t, isolate(t))
 

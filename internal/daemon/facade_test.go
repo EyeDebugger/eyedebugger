@@ -255,3 +255,72 @@ func TestFacadeClientDetach(t *testing.T) {
 		t.Errorf("read after the daemon stopped = %v, want EOF", err)
 	}
 }
+
+// TestFacadeOpenLaunch: a launch connection joins no session (empty id,
+// facade version 3) and speaks DAP at once; what it launches with is
+// checked first (errors leave the connection speaking JSON-RPC).
+func TestFacadeOpenLaunch(t *testing.T) {
+	t.Parallel()
+
+	ts := startServer(t)
+	dir := t.TempDir()
+
+	tests := []struct {
+		name string
+		p    api.FacadeOpenParams
+		want api.Code
+	}{
+		{name: "with a session", p: api.FacadeOpenParams{SessionRef: api.SessionRef{SessionID: "s-x"}, Launch: &api.FacadeLaunch{ClientDir: dir}}, want: api.CodeInvalidRequest},
+		{name: "no directory", p: api.FacadeOpenParams{Launch: &api.FacadeLaunch{}}, want: api.CodeInvalidRequest},
+		{name: "relative directory", p: api.FacadeOpenParams{Launch: &api.FacadeLaunch{ClientDir: "rel"}}, want: api.CodeInvalidRequest},
+		{name: "relative venv", p: api.FacadeOpenParams{Launch: &api.FacadeLaunch{ClientDir: dir, VirtualEnv: "venv"}}, want: api.CodeInvalidRequest},
+		{name: "NUL", p: api.FacadeOpenParams{Launch: &api.FacadeLaunch{ClientDir: dir, DotnetAdapter: "a\x00"}}, want: api.CodeInvalidRequest},
+		{name: "bad client", p: api.FacadeOpenParams{SessionRef: api.SessionRef{Client: "robot"}, Launch: &api.FacadeLaunch{ClientDir: dir}}, want: api.CodeInvalidRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cl := dialUntil(t, ts.paths, ts.done)
+			defer cl.Close()
+
+			if err := cl.Call(t.Context(), api.MethodFacadeOpen, tt.p, nil); api.CodeOf(err) != tt.want {
+				t.Errorf("facade.open = %v, want %s", err, tt.want)
+			}
+
+			var st api.StatusResult
+			if err := cl.Call(t.Context(), api.MethodDaemonStatus, nil, &st); err != nil {
+				t.Errorf("daemon.status after a refused facade.open: %v", err)
+			}
+		})
+	}
+
+	t.Run("open", func(t *testing.T) {
+		t.Parallel()
+
+		cl, err := Dial(t.Context(), ts.paths, testInfo)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var open api.FacadeOpenResult
+		if err := cl.Call(t.Context(), api.MethodFacadeOpen, api.FacadeOpenParams{
+			SessionRef: api.SessionRef{Client: humanID}, Launch: &api.FacadeLaunch{ClientDir: dir},
+		}, &open); err != nil || open.SessionID != "" || open.FacadeVersion != 3 {
+			t.Fatalf("facade.open = %+v, %v", open, err)
+		}
+
+		r, conn := cl.Detach()
+		defer conn.Close()
+
+		if _, err := conn.Write([]byte(dapFrame(`{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"x","linesStartAt1":true,"columnsStartAt1":true}}`))); err != nil {
+			t.Fatal(err)
+		}
+
+		raw, err := dap.ReadMessage(bufio.NewReader(r), 1<<20)
+		if err != nil || !bytes.Contains(raw, []byte(`"success":true`)) || !bytes.Contains(raw, []byte(`"filter":"uncaught"`)) {
+			t.Fatalf("initialize on a launch connection = %s, %v", raw, err)
+		}
+	})
+}

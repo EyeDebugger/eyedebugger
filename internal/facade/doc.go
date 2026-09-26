@@ -15,7 +15,7 @@
 //   - Handled here: initialize (answered once the session finished
 //     starting, with the adapter's capabilities adjusted to what eyedbg
 //     provides and refuses), attach (joins the connection's session;
-//     launch is refused), configurationDone (the join point: the program's
+//     launch is refused but on a launch connection, below), configurationDone (the join point: the program's
 //     state is replayed and the session's event log followed from there),
 //     disconnect (leaves; the session keeps running), terminate (ends the
 //     session under the lease, like 'eyedbg stop'), continue, next,
@@ -69,6 +69,23 @@
 //
 // Output replay: configurationDone replays the newest output the session
 // holds (at most 200 chunks, 64 KiB) before the program's state.
+//
+// Launch connections (launch.go, docs/adr/0019): with [Config.Launcher] the
+// connection starts without a session. initialize is answered at once
+// (the forced-on capabilities and both exception filters); launch checks
+// its arguments and runs session.Manager.Launch on the connection's launch
+// goroutine while the reader keeps reading. The build's output streams to
+// the connection as console output (bounded, never logged). Once the
+// adapter is initialized, the launch's Configure hook binds the session to
+// the connection and sends eyedbg/session, capabilities (the adapter's)
+// and initialized; the editor's breakpoints and exception filters apply as
+// in an attach, and its configurationDone, handled on the ordered worker
+// behind them, lets the program run. Launch returned, the launch is
+// answered and the connection joins as configurationDone does in an
+// attach. Before the session is bound only terminate (it stops the
+// launch) and disconnect are taken. After it, the connection's terminate
+// ends and forgets the session ('eyedbg stop'); when the connection ends,
+// its session is forgotten if the program has exited.
 //
 // Every goroutine recovers from panics: a bug closes one connection, never
 // the daemon. Logs name commands, seqs and codes, never debuggee data.
