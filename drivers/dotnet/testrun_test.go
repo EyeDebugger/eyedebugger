@@ -4,6 +4,7 @@
 package dotnet
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -248,6 +249,303 @@ func TestTestFailure(t *testing.T) {
 
 			if tt.want == api.CodeNoTestHost && !strings.Contains(err.Error(), "code 1") {
 				t.Errorf("message %q lacks the exit code", err)
+			}
+		})
+	}
+}
+
+// writeFile writes content to path, failing the test on error.
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDetectLaunch(t *testing.T) {
+	t.Parallel()
+
+	ref := func(pkg string) string {
+		return `<Project><ItemGroup><PackageReference Include="` + pkg + `" Version="1.0.0" /></ItemGroup></Project>`
+	}
+
+	tests := []struct {
+		name       string
+		project    string
+		buildProps string // Directory.Build.props above the project; "" for none
+		env        map[string]string
+		wantReason string // substring; "" means detectLaunch found nothing (VSTest)
+		wantKind   detectedKind
+	}{
+		{name: "plain VSTest", project: ref("Microsoft.NET.Test.Sdk")},
+		{name: "xunit v2", project: ref("xunit") + ref("xunit.runner.visualstudio")},
+		{name: "xunit.v3", project: ref("xunit.v3"), wantReason: "xunit.v3", wantKind: detectXunitV3},
+		{name: "global.json/env MTP", project: "<Project></Project>", env: map[string]string{envTestRunner: mtpRunner}, wantReason: mtpRunner, wantKind: detectOther},
+		{
+			name: "EnableMSTestRunner", wantReason: "EnableMSTestRunner", wantKind: detectOther,
+			project: `<Project><PropertyGroup><EnableMSTestRunner>true</EnableMSTestRunner></PropertyGroup></Project>`,
+		},
+		{
+			name: "Condition attribute, case True", wantReason: "EnableMSTestRunner", wantKind: detectOther,
+			project: `<Project><PropertyGroup><EnableMSTestRunner Condition="'$(Configuration)'=='Debug'">True</EnableMSTestRunner>` +
+				`</PropertyGroup></Project>`,
+		},
+		{name: "marker set false", project: `<Project><PropertyGroup><EnableMSTestRunner>false</EnableMSTestRunner></PropertyGroup></Project>`},
+		{
+			name:    "commented-out marker",
+			project: `<Project><!-- <EnableMSTestRunner>true</EnableMSTestRunner> --></Project>`,
+		},
+		{
+			name: "marker in Directory.Build.props above the project", project: "<Project></Project>",
+			buildProps: `<Project><PropertyGroup><UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner></PropertyGroup></Project>`,
+			wantReason: "UseMicrosoftTestingPlatformRunner", wantKind: detectOther,
+		},
+		{
+			name: "MSTest.Sdk attribute with a version", project: `<Project Sdk="MSTest.Sdk/4.4.1"></Project>`,
+			wantReason: "MSTest.Sdk", wantKind: detectOther,
+		},
+		{
+			name: "MSTest.Sdk element", project: `<Project><Sdk Name="MSTest.Sdk" Version="4.4.1" /></Project>`,
+			wantReason: "MSTest.Sdk", wantKind: detectOther,
+		},
+		{name: "MSTest.Sdk with UseVSTest true", project: `<Project Sdk="MSTest.Sdk"><PropertyGroup><UseVSTest>true</UseVSTest></PropertyGroup></Project>`},
+		{name: "TUnit.Assertions alone", project: ref("TUnit.Assertions")},
+		{name: "TUnit", project: ref("TUnit"), wantReason: "TUnit", wantKind: detectTUnit},
+		{name: "TUnit.Engine", project: ref("TUnit.Engine"), wantReason: "TUnit", wantKind: detectTUnit},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			project := filepath.Join(root, "tests.csproj")
+			writeFile(t, project, tt.project)
+
+			if tt.buildProps != "" {
+				writeFile(t, filepath.Join(root, "Directory.Build.props"), tt.buildProps)
+			}
+
+			env := tt.env
+			if env == nil {
+				env = map[string]string{envTestRunner: ""} // shield from the real environment
+			}
+
+			reason, kind := detectLaunch(project, env)
+
+			if tt.wantReason == "" {
+				if reason != "" {
+					t.Fatalf("detectLaunch = %q, %v; want VSTest", reason, kind)
+				}
+
+				return
+			}
+
+			if !strings.Contains(reason, tt.wantReason) || kind != tt.wantKind {
+				t.Fatalf("detectLaunch = %q, %v; want a reason containing %q, kind %v", reason, kind, tt.wantReason, tt.wantKind)
+			}
+		})
+	}
+}
+
+func TestDecideLaunchTarget(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	built := filepath.Join(dir, "tests.dll")
+	writeFile(t, built, "")
+
+	notBuilt := filepath.Join(dir, "missing.dll")
+	project := filepath.Join(dir, "tests.csproj")
+
+	tests := []struct {
+		name     string
+		props    map[string]string
+		noBuild  bool
+		want     string
+		wantCode api.Code
+	}{
+		{name: "ok", props: map[string]string{propTargetPath: built, propIsTestingPlatformApp: "true"}, want: built},
+		{name: "case-insensitive true", props: map[string]string{propTargetPath: built, propIsTestingPlatformApp: "True"}, want: built},
+		{
+			name: "multi-targeting needs --framework", props: map[string]string{propTargetFrameworks: "net10.0;net9.0"},
+			wantCode: api.CodeInvalidRequest,
+		},
+		{name: "no output at all", props: map[string]string{}, wantCode: api.CodeBuildFailed},
+		{
+			name: "not a testing platform app", props: map[string]string{propTargetPath: built, propIsTestingPlatformApp: "false"},
+			wantCode: api.CodeNoTestHost,
+		},
+		{
+			name: "not a testing platform app, property unset", props: map[string]string{propTargetPath: built},
+			wantCode: api.CodeNoTestHost,
+		},
+		{
+			name: "no-build, not built", props: map[string]string{propTargetPath: notBuilt, propIsTestingPlatformApp: "true"},
+			noBuild: true, wantCode: api.CodeInvalidRequest,
+		},
+		{
+			name: "no-build, already built", props: map[string]string{propTargetPath: built, propIsTestingPlatformApp: "true"},
+			noBuild: true, want: built,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := decideLaunchTarget(project, "it references xunit.v3", tt.props, tt.noBuild)
+
+			if tt.wantCode != "" {
+				if api.CodeOf(err) != tt.wantCode {
+					t.Fatalf("decideLaunchTarget = %v (code %s), want %s", err, api.CodeOf(err), tt.wantCode)
+				}
+
+				return
+			}
+
+			if err != nil || got != tt.want {
+				t.Fatalf("decideLaunchTarget = %q, %v; want %q, no error", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestPickDialect(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		kind  detectedKind
+		props map[string]string
+		want  testDialect
+	}{
+		{name: "xUnit v3 native", kind: detectXunitV3, want: dialectXunitNative},
+		{name: "xUnit v3 native, property empty", kind: detectXunitV3, props: map[string]string{propUseMTPRunner: ""}, want: dialectXunitNative},
+		{name: "xUnit v3 switched to MTP", kind: detectXunitV3, props: map[string]string{propUseMTPRunner: "true"}, want: dialectMTP},
+		{name: "xUnit v3 switched to MTP, case", kind: detectXunitV3, props: map[string]string{propUseMTPRunner: "True"}, want: dialectMTP},
+		{name: "TUnit", kind: detectTUnit, want: dialectTUnit},
+		{name: "TUnit ignores the xUnit property", kind: detectTUnit, props: map[string]string{propUseMTPRunner: "false"}, want: dialectTUnit},
+		{name: "MSTest/NUnit/MSTest.Sdk/global.json (detectOther)", kind: detectOther, want: dialectMTP},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := pickDialect(tt.kind, tt.props); got != tt.want {
+				t.Errorf("pickDialect(%v, %v) = %v, want %v", tt.kind, tt.props, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTestDialectArgs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		dialect testDialect
+		filter  string
+		want    []string
+	}{
+		{name: "xUnit native, no filter", dialect: dialectXunitNative, want: []string{"-noColor"}},
+		{name: "xUnit native, filter", dialect: dialectXunitNative, filter: "Adds", want: []string{"-noColor", "-filterVSTest", "Adds"}},
+		{name: "MTP, no filter", dialect: dialectMTP, want: nil},
+		{name: "MTP, filter", dialect: dialectMTP, filter: "Adds", want: []string{"--filter", "Adds"}},
+		{name: "TUnit, no filter", dialect: dialectTUnit, want: nil},
+		{name: "TUnit, filter", dialect: dialectTUnit, filter: "Adds", want: []string{"--treenode-filter", "Adds"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := testDialectArgs(tt.dialect, tt.filter); !slices.Equal(got, tt.want) {
+				t.Errorf("testDialectArgs(%v, %q) = %v, want %v", tt.dialect, tt.filter, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTestLaunchEnv(t *testing.T) {
+	t.Parallel()
+
+	base := testLaunchEnv(nil)
+	for k, v := range map[string]string{"DOTNET_CLI_TELEMETRY_OPTOUT": "1", "TESTINGPLATFORM_TELEMETRY_OPTOUT": "1", "DOTNET_NOLOGO": "1"} {
+		if base[k] != v {
+			t.Errorf("testLaunchEnv(nil)[%s] = %q, want %q", k, base[k], v)
+		}
+	}
+
+	// The user's own --env wins over the daemon's opt-outs.
+	overlaid := testLaunchEnv(map[string]string{"DOTNET_NOLOGO": "0", "MY_VAR": "x"})
+	if overlaid["DOTNET_NOLOGO"] != "0" || overlaid["MY_VAR"] != "x" || overlaid["DOTNET_CLI_TELEMETRY_OPTOUT"] != "1" {
+		t.Errorf("testLaunchEnv overlay = %v", overlaid)
+	}
+}
+
+func TestLaunchTestProgram(t *testing.T) {
+	t.Parallel()
+
+	target := filepath.Join("bin", "Debug", "net10.0", "tests.dll")
+
+	tests := []struct {
+		fixed []string
+		want  string
+	}{
+		{fixed: nil, want: "dotnet tests.dll"},
+		{fixed: []string{"-noColor"}, want: "dotnet tests.dll -noColor"},
+		{fixed: []string{"--filter", "Adds"}, want: "dotnet tests.dll --filter Adds"},
+	}
+
+	for _, tt := range tests {
+		if got := launchTestProgram(target, tt.fixed); got != tt.want {
+			t.Errorf("launchTestProgram(%q, %v) = %q, want %q", target, tt.fixed, got, tt.want)
+		}
+	}
+}
+
+func TestParseBuildProperties(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		out         string
+		checkResult bool
+		wantOK      bool
+		want        map[string]string
+	}{
+		{
+			name:        "build, success",
+			out:         `{"Properties":{"TargetPath":"/p/tests.dll"},"TargetResults":{"Build":{"Result":"Success"}}}`,
+			checkResult: true, wantOK: true, want: map[string]string{"TargetPath": "/p/tests.dll"},
+		},
+		{
+			name:        "build, failed",
+			out:         `{"Properties":{"TargetPath":""},"TargetResults":{"Build":{"Result":"Failed"}}}`,
+			checkResult: true, wantOK: false,
+		},
+		{
+			name:        "msbuild eval, no TargetResults to check",
+			out:         `{"Properties":{"TargetPath":"/p/tests.dll"}}`,
+			checkResult: false, wantOK: true, want: map[string]string{"TargetPath": "/p/tests.dll"},
+		},
+		{name: "not JSON", out: "warning: something\n", checkResult: true, wantOK: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			props, ok := parseBuildProperties([]byte(tt.out), tt.checkResult)
+			if ok != tt.wantOK {
+				t.Fatalf("parseBuildProperties(%q, %v) ok = %v, want %v", tt.out, tt.checkResult, ok, tt.wantOK)
+			}
+
+			if ok && !maps.Equal(props, tt.want) {
+				t.Fatalf("parseBuildProperties(%q, %v) = %v, want %v", tt.out, tt.checkResult, props, tt.want)
 			}
 		})
 	}
