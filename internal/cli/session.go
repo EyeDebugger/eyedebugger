@@ -449,7 +449,9 @@ func newStatusCommand(info version.Info, g *globals) *cobra.Command {
 the thread, the current function and file:line, and the source lines around it. At an exception
 stop, also the exception: its type and message, the first 5 lines of its stack trace (eval
 '$exception.StackTrace' for the rest) and its inner exceptions, when the adapter can tell. When
-exited, the exit code.
+eyedbg decided a breakpoint stop (clients' breakpoints with different conditions at that line, or
+--hit or --log), also the breakpoints it stopped for and whose ("stopped for breakpoint 6 of
+human:ijat"; "stop.breakpoints" in --json). When exited, the exit code.
 
 Read-only: never resumes the program. Returns at once.` + dumpHelp + sessionHelp,
 		Example: `  eyedbg status
@@ -889,8 +891,11 @@ requested and actual line, and whether it is verified. An unverified breakpoint 
 its module isn't loaded yet) and may still bind later; 'eyedbg bp ls' shows the current state.
 
 --if EXPR stops only when EXPR, an expression in the program's language, is true there (e.g.
-'i == 3'). It is evaluated each time the line runs, so it runs code in the program; an expression
-that fails to evaluate stops the program.
+'i == 3'). It is evaluated each time the line runs, so it runs code in the program. Where eyedbg
+evaluates it (a line where clients' conditions differ, see below, or one with --hit or --log), a
+value that reads as false (false, 0, None, null, nil, an empty string or collection) doesn't stop
+and anything else does, as does an expression that fails to evaluate; elsewhere the adapter
+decides (debugpy ignores an expression that fails to evaluate).
 
 --hit counts the times the line is reached with its --if true, and stops only at some: N (only
 the Nth time), >=N (the Nth time and after) or %N (every Nth time). --log MESSAGE makes it a
@@ -899,16 +904,20 @@ output') each time, with every {EXPR} replaced by its value ({{ and }} print bra
 chooses which times log. Both are for FILE:LINE and FILE@"TEXT" breakpoints. eyedbg does the
 counting and logging itself (netcoredbg can't): each time the line is reached the program pauses
 briefly, and eyedbg continues it. A step (or a pause) that reaches such a line stops there, even
-when it wouldn't stop the program otherwise. 'eyedbg bp ls' shows the counts. Don't put one on
-the first line of a function that has a func: breakpoint: eyedbg can't tell that function
-breakpoint's stops from the line's, so its --hit or --log decides them too.
+when it wouldn't stop the program otherwise. 'eyedbg bp ls' shows the counts. Don't put one (nor
+clients' breakpoints with different conditions) on the first line of a function that has a func:
+breakpoint: eyedbg can't tell that function breakpoint's stops from the line's, so the line's
+--hit, --log or conditions decide them too.
 
 Adding a breakpoint where you already have one replaces its condition, hit count and log message
 (and restarts its count). The breakpoint is yours (--as): only you remove it, unless 'bp rm
---force'. Other clients' breakpoints at the same line share it: the program stops there if any
-of them would (a breakpoint without a condition wins; different conditions make it stop
-unconditionally, which 'eyedbg bp ls' notes, except while some breakpoint has --hit or --log:
-then each one's condition is checked). Needs no lease.
+--force'. Other clients' breakpoints at the same line share it, and each keeps its own --if, --hit
+and --log: the program stops there when any of them would, and another client's logpoint never
+keeps yours from stopping. When their conditions differ, eyedbg checks each one every time the
+line runs (a brief pause, as for --hit and --log), and a stop there names the breakpoints it is
+for and whose they are ("stopped for breakpoint 6 of human:ijat"): if yours isn't named, its
+condition didn't hold. Function breakpoints still share one condition per function: different
+ones make it stop unconditionally, which 'eyedbg bp ls' notes. Needs no lease.
 
 Does not resume the program; returns at once.` + sessionHelp
 
@@ -960,7 +969,9 @@ It works through a temporary breakpoint, removed once the program stops or exits
 stop elsewhere first (another breakpoint, an exception, a pause) or exit: the output says where it
 is. If you already have a breakpoint at that line, that one is used and --if is ignored (unless it
 is a logpoint or has --hit: then a temporary one is added beside it); another client's breakpoint
-there is not (your temporary one shares the line with it).
+there is not (your temporary one shares the line with it, each keeping its own condition). The
+program also stops there for that client's breakpoint: if your --if doesn't hold then, the output
+says it did not reach the line with your --if.
 
 Blocks until the program stops or exits, at most --timeout (default 30s). On a timeout the program
 keeps running and the temporary breakpoint stays (marked in 'eyedbg bp ls') so 'eyedbg wait' can
@@ -1028,10 +1039,10 @@ func newBreakpointListCommand(info version.Info, g *globals) *cobra.Command {
 		Long: `List the session's breakpoints, every client's (--mine: only yours): id, owner (the client that
 added it), where (file:line, with the anchor text it was found by; or func:NAME), the requested
 line if the adapter moved it, condition, hit count and log message, whether each is verified, and
-how many hits it counted (breakpoints with --hit or --log). A note says when a breakpoint shares
-its line with another client's breakpoint whose condition differs (it then stops
-unconditionally), or when its file changed after the session started (the program still runs the
-code it was built from, so the line may not match the file any more).
+how many hits it counted (breakpoints with --hit or --log). A note says when a function
+breakpoint shares its function with another client's breakpoint whose condition differs (it then
+stops unconditionally), or when a breakpoint's file changed after the session started (the program
+still runs the code it was built from, so the line may not match the file any more).
 
 Read-only; returns at once. Prints nothing when there are none.` + sessionHelp,
 		Example: `  eyedbg bp ls

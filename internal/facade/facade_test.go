@@ -1094,8 +1094,9 @@ func TestEditingACopyMakesItYours(t *testing.T) {
 		t.Fatalf("breakpoints = %+v", bps)
 	}
 
-	if bps[0].Note == "" || bps[1].Note == "" {
-		t.Errorf("breakpoints sharing a line without notes: %+v", bps)
+	// Each keeps its own condition (eyedbg checks both): no sharing note.
+	if bps[0].Note != "" || bps[1].Note != "" {
+		t.Errorf("breakpoints sharing a line with notes: %+v", bps)
 	}
 }
 
@@ -1835,4 +1836,30 @@ func (l *logRecorder) atLeast(level slog.Level) []string {
 	}
 
 	return msgs
+}
+
+// TestStoppedNamesHitBreakpoints: at a line where the agent's and the
+// human's breakpoints have different conditions, each stop's stopped event
+// carries the breakpoint it is for as hitBreakpointIds.
+func TestStoppedNamesHitBreakpoints(t *testing.T) {
+	t.Parallel()
+
+	s := startSession(t, fakeDriver{}, startParams(stopOnEntry, "", "lines=3", "laps=5"))
+	agents := agentBP(t, s, agentC, 2, "lap == 2")
+
+	tc := joinReady(t, s, humanC, "")
+	tc.waitEvent("stopped", nil) // the entry stop, replayed
+
+	humans := tc.setBPs(s.Program, "2 if lap == 4")
+
+	for _, want := range []int{agents.ID, humans[0].Id} {
+		if _, err := s.Resume(t.Context(), agentC, session.ExecContinue, 0, testWait, api.DumpSpec{}); err != nil {
+			t.Fatal(err)
+		}
+
+		ev, _ := tc.waitEvent("stopped", nil).(*godap.StoppedEvent)
+		if ev == nil || !slices.Equal(ev.Body.HitBreakpointIds, []int{want}) {
+			t.Errorf("stopped = %+v, want hitBreakpointIds [%d]", ev, want)
+		}
+	}
 }

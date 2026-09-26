@@ -12,6 +12,8 @@
 50  bp 1 changed: Program.cs:6 verified
 51  bp 3 changed: Late.cs:7 pending: pending until the module loads
 52  output (stderr): warn (cut)
-53  thread 4243 exited
-54  ended: stopped by human:ijat
-next: eyedbg events --since 54
+53  continued (thread 4242)
+54  stopped: breakpoint, thread 4242; for breakpoint 6 of human:ijat
+55  thread 4243 exited
+56  ended: stopped by human:ijat
+next: eyedbg events --since 56

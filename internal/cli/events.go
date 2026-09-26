@@ -342,7 +342,13 @@ func describeStop(stop *api.StopInfo) string {
 		s += " (" + cutLine(detail) + ")"
 	}
 
-	return s + fmt.Sprintf(", thread %d", stop.ThreadID)
+	s += fmt.Sprintf(", thread %d", stop.ThreadID)
+
+	if len(stop.Breakpoints) > 0 {
+		s += "; for " + stopBreakpoints(stop.Breakpoints)
+	}
+
+	return s
 }
 
 // describeOutput shows an output chunk's first line and how many more it

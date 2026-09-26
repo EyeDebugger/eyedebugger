@@ -29,6 +29,11 @@ func writeSnapshot(w io.Writer, snap api.Snapshot, asJSON bool, base string) err
 	var b strings.Builder
 
 	b.WriteString(snapshotHeader(snap) + "\n")
+
+	if st := snap.Session.Stop; st != nil && len(st.Breakpoints) > 0 && snap.Session.State == api.StateStopped {
+		b.WriteString("  stopped for " + stopBreakpoints(st.Breakpoints) + "\n")
+	}
+
 	writeSharing(&b, snap.Session)
 
 	if f := snap.Frame; f != nil {
@@ -54,8 +59,12 @@ func writeSnapshot(w io.Writer, snap api.Snapshot, asJSON bool, base string) err
 	}
 
 	if snap.Reached != nil && !*snap.Reached && snap.Target != nil {
-		fmt.Fprintf(&b, "  run-until: did not reach %s (the program stopped or exited first)\n",
-			location(snap.Target.File, snap.Target.Line, base))
+		target := location(snap.Target.File, snap.Target.Line, base)
+		if snap.Target.Condition != "" {
+			target += " with " + snap.Target.Condition
+		}
+
+		fmt.Fprintf(&b, "  run-until: did not reach %s (the program stopped or exited first)\n", target)
 	}
 
 	writeSnapshotOutput(&b, snap)
@@ -206,6 +215,22 @@ func writeSharing(b *strings.Builder, s api.SessionInfo) {
 	}
 
 	fmt.Fprintf(b, "; clients: %s\n", strings.Join(ids, ", "))
+}
+
+// stopBreakpoints names the breakpoints a stop is for and whose they are:
+// "breakpoint 6 of human:ijat", "breakpoints 5 of agent, 6 of human:ijat".
+func stopBreakpoints(bps []api.StopBreakpoint) string {
+	parts := make([]string, len(bps))
+	for i, bp := range bps {
+		parts[i] = fmt.Sprintf("%d of %s", bp.ID, bp.Owner)
+	}
+
+	noun := "breakpoint "
+	if len(bps) > 1 {
+		noun = "breakpoints "
+	}
+
+	return noun + strings.Join(parts, ", ")
 }
 
 // snapshotHeader is the first line: session, state and why.

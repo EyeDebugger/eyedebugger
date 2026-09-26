@@ -1,0 +1,7 @@
+session s-k3f9 (dotnet, netcoredbg) stopped: breakpoint, thread 4242
+  stopped for breakpoints 5 of agent, 6 of human:ijat
+  lease: human:ijat (handoff); requested by agent: "I need to step into Total()"; clients: agent, human:ijat (connected)
+  at Program.<Main>$() Program.cs:4
+    3 | {
+  > 4 |     total += i;
+    5 |     Console.WriteLine(total);

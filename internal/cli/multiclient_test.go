@@ -5,10 +5,12 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/eyedebugger/eyedebugger/internal/adapters"
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/daemon"
+	"github.com/eyedebugger/eyedebugger/internal/dap/daptest"
 	"github.com/eyedebugger/eyedebugger/internal/session"
 )
 
@@ -159,6 +162,66 @@ func TestMultiClientCLI(t *testing.T) {
 	expectOutput(t, run(t, exitState, "stop"), "[LEASE_HELD]")
 	expectOutput(t, run(t, 0, "--as", "human:t", "stop"), " ended")
 	expectOutput(t, run(t, exitError, "--as", "robot", "status"), "[INVALID_REQUEST]", "set it with --as or EYEDBG_CLIENT")
+}
+
+// lapsDriver runs fake programs of 3 lines, 5 times over ("lap" is 1..5).
+type lapsDriver struct{ fakeDriver }
+
+func (lapsDriver) Prepare(_ context.Context, spec session.LaunchSpec) (session.Launch, error) {
+	path, args, env, err := daptest.Command()
+	if err != nil {
+		return session.Launch{}, err
+	}
+
+	return session.Launch{
+		Adapter: path, AdapterArgs: args, AdapterEnv: env, AdapterID: "fake", Program: spec.Program,
+		Arguments: daptest.ProgramArgs{Program: spec.Program, Lines: 3, Laps: 5, StopAtEntry: spec.StopOnEntry}.Map(),
+	}, nil
+}
+
+// TestSharedConditionsCLI: the agent's and a human's breakpoints at one
+// line with different conditions each stop the program when their own
+// condition holds, and the output names whose breakpoint the stop is for.
+// Not parallel: it sets environment variables.
+func TestSharedConditionsCLI(t *testing.T) {
+	serveWithDrivers(t, isolate(t), lapsDriver{})
+
+	prog := filepath.Join(t.TempDir(), "prog.txt")
+	if err := os.WriteFile(prog, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	expectOutput(t, run(t, 0, "start", "fake", "--program", prog, "--stop-on-entry", "--timeout", "20s"), "stopped: entry")
+	expectOutput(t, run(t, 0, "bp", "add", prog+":2", "--if", "lap == 2"), "1  agent  ")
+	expectOutput(t, run(t, 0, "--as", "human:t", "bp", "add", prog+":2", "--if", "lap == 4"), "2  human:t  ")
+
+	expectOutput(t, run(t, 0, "continue", "--timeout", "20s"), "stopped: breakpoint", "\n  stopped for breakpoint 1 of agent\n")
+	if out := run(t, 0, "eval", "lap"); !strings.HasPrefix(out, "2 ") {
+		t.Errorf("eval lap = %q, want 2", out)
+	}
+
+	expectOutput(t, run(t, 0, "continue", "--timeout", "20s"), "\n  stopped for breakpoint 2 of human:t\n")
+	if out := run(t, 0, "eval", "lap"); !strings.HasPrefix(out, "4 ") {
+		t.Errorf("eval lap = %q, want 4", out)
+	}
+
+	var snap struct {
+		Session struct {
+			Stop struct {
+				Breakpoints []api.StopBreakpoint `json:"breakpoints"`
+			} `json:"stop"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal([]byte(run(t, 0, "status", "--json")), &snap); err != nil {
+		t.Fatal(err)
+	}
+
+	if want := []api.StopBreakpoint{{ID: 2, Owner: "human:t"}}; !slices.Equal(snap.Session.Stop.Breakpoints, want) {
+		t.Errorf("status --json stop.breakpoints = %+v, want %+v", snap.Session.Stop.Breakpoints, want)
+	}
+
+	expectOutput(t, run(t, 0, "events", "--since", "0", "--kind", "stopped"), "; for breakpoint 1 of agent", "; for breakpoint 2 of human:t")
+	expectOutput(t, run(t, 0, "stop"), " ended")
 }
 
 // TestSessionsWithoutDaemon lists and forgets a lost session from its
