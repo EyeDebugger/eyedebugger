@@ -308,7 +308,8 @@ func TestAdapterChoice(t *testing.T) {
 	}
 }
 
-// TestExitCodeUnknown: only netcoredbg on macOS, any arch, is untrusted.
+// TestExitCodeUnknown: netcoredbg on macOS, any arch, and SharpDbg
+// everywhere are untrusted.
 func TestExitCodeUnknown(t *testing.T) {
 	t.Parallel()
 
@@ -319,9 +320,9 @@ func TestExitCodeUnknown(t *testing.T) {
 		{"netcoredbg", "darwin", true},
 		{"netcoredbg", "linux", false},
 		{"netcoredbg", "windows", false},
-		{"sharpdbg", "darwin", false},
-		{"sharpdbg", "linux", false},
-		{"sharpdbg", "windows", false},
+		{"sharpdbg", "darwin", true},
+		{"sharpdbg", "linux", true},
+		{"sharpdbg", "windows", true},
 	}
 
 	for _, tt := range tests {

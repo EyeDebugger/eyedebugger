@@ -260,7 +260,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test runs regardless of the program's real exit code. netcoredbg reports every one as 0 there;
   `exitCode` is now absent instead (`--json`'s `SessionInfo`/`Event`, both already optional: no
   schema change) and `endReason` says it is unknown and why, with a "read the test output" hint
-  for a test run. `--adapter sharpdbg` is unaffected.
+  for a test run.
+- Sessions under SharpDbg (any OS) no longer report exit code 0 for a `start`, `attach` or launched
+  test run whose program exited otherwise. SharpDbg 0.1.17 reports 0 whenever it misses the real
+  exit code (a race, seen on launched test apps that exited 1 or 2) and always on attach; its
+  sessions now end without `exitCode` and an `endReason` saying it is unknown and why, as under
+  netcoredbg on macOS. A VSTest test run keeps `dotnet test`'s own exit code.
 
 ## [0.1.2] - 2026-09-24
 

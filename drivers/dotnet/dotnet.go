@@ -54,11 +54,17 @@ const netcoredbgName = "netcoredbg"
 
 // ExitCodeUnknown is why adapter's exit codes for goos can't be trusted, or
 // "" where they can. netcoredbg (verified: 3.2.0-1092, osx-arm64) reports
-// every launched or attached program's exit code as 0 on macOS, any arch;
-// re-check this on a netcoredbg manifest bump (docs/DESIGN.md §8).
+// every launched or attached program's exit code as 0 on macOS, any arch.
+// SharpDbg 0.1.17, on every OS, sends exitCode 0 whenever the exit code
+// isn't known yet when the runtime reports the exit (a race: seen in CI on
+// launched test apps that exited 1 or 2) and always for an attached program.
+// Re-check this on a netcoredbg or SharpDbg manifest bump (docs/DESIGN.md §8).
 func ExitCodeUnknown(adapter, goos string) string {
-	if adapter == netcoredbgName && goos == "darwin" {
+	switch {
+	case adapter == netcoredbgName && goos == "darwin":
 		return "netcoredbg on macOS reports every program's exit code as 0"
+	case adapter == SharpDbg:
+		return "SharpDbg 0.1.17 reports an exit code of 0 when it misses the real one"
 	}
 
 	return ""
