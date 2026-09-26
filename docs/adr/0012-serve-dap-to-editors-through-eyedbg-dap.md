@@ -234,3 +234,6 @@ breakpoints from being re-sent as the human's own.
 
 Amended by ADR 0014 (presence, releasing the lease on the last disconnect, shared breakpoints,
 custom messages).
+
+Amended by ADR 0019 (launch connections: `eyedbg dap --launch`, whose DAP `launch` starts the
+session; the launcher's `terminate` ends and forgets it).

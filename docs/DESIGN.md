@@ -1,6 +1,6 @@
 # EyeDebugger (`eyedbg`) — AI-native debugger (design)
 
-Status: v0.3 · 2026-09-26 · phase 1 (MVP) complete; phase 2: DAP facade (P2-M1), collaboration (P2-M2), VS Code extension (P2-M3, P2-M5), .NET side helper (P2-M6), .NET dumps, heap and threads (P2-M7), .NET traces (P2-M8), the extension's .NET views (P2-M9), per-owner conditions at shared lines (P2-S1)
+Status: v0.3 · 2026-09-26 · phase 1 (MVP) complete; phase 2: DAP facade (P2-M1), collaboration (P2-M2), VS Code extension (P2-M3, P2-M5), .NET side helper (P2-M6), .NET dumps, heap and threads (P2-M7), .NET traces (P2-M8), the extension's .NET views (P2-M9), per-owner conditions at shared lines (P2-S1), launching through the DAP facade (P2-S3a)
 
 ## 1. What and why
 
@@ -43,10 +43,11 @@ eyedbg dotnet … ─stdio, one process per command (JSON-RPC 2.0)─► side he
   1. *Native API* (JSON-RPC 2.0) — sessions, leases, budgeted views, event log. Used by the CLI, and
      by the extension for non-DAP concerns.
   2. *DAP facade* — an editor's DAP connection to one session, so VS Code's built-in debug UI (or
-     nvim-dap, or any DAP client) attaches natively. It is reached through `eyedbg dap`, which
+     nvim-dap, or any DAP client) attaches natively, or launches the session with a DAP `launch`
+     (`eyedbg dap --launch`, ADR 0019). It is reached through `eyedbg dap`, which
      switches an authenticated connection on the same socket to DAP (§6, ADR 0012); requests from
      it go through the same lease, state and ownership checks as native calls, because the facade
-     calls the same session methods.
+     calls the same session methods (a launch, `Manager.Launch`, those of `eyedbg start`).
 - **Side helpers are run by the CLI, not the daemon** (ADR 0016): `eyedbg dotnet …` starts the
   helper for one call and closes it; no session state, lease or event is involved. A session only
   names the target (its program's pid).
@@ -68,7 +69,7 @@ eyedbg dotnet … ─stdio, one process per command (JSON-RPC 2.0)─► side he
 - DAP `seq` is owned by the daemon toward the adapter; an editor's request ids are mapped per
   connection (the facade answers each with its own `seq`, and never relays the editor's bytes: it
   re-encodes the request the policy decided on).
-- Reverse requests (`runInTerminal`, `startDebugging`) are handled by the daemon (MVP: spawn directly / create child session); phase 2 may route `runInTerminal` to the human's VS Code if the lease holder is human.
+- Reverse requests from adapters (`runInTerminal`, `startDebugging`) are refused ("not supported"). Phase 2 plans to route `runInTerminal` only to the editor connection whose DAP `launch` started the session, while that launch runs (ADR 0019, S3b; not built yet).
 
 ## 4. CLI surface (MVP)
 
@@ -104,6 +105,7 @@ eyedbg events [--since N] [--limit N] [--kind k,...] [--wait] [--timeout 30s]
 
 eyedbg lease [status|take [--force]|release|grant <client> [--force]|policy <p> [--force]|request [--message TEXT]]
 eyedbg dap [-s ID] [--as CLIENT]           # DAP on stdio for an editor, joined to a running session (ADR 0012)
+eyedbg dap --launch [--as CLIENT]          # DAP on stdio; the client's DAP launch starts the session (ADR 0019)
 eyedbg daemon [status|stop|logs]
 eyedbg adapters ls | install <adapter|language> | doctor [adapter|language...]
 eyedbg skill [print|install [--dir ROOT] [--force]]
@@ -146,7 +148,7 @@ Design rules:
 - **Lifecycle:** One daemon per user serves all sessions; each session's adapter is its own child process, so an adapter crash only ends that session. Nobody starts or stops the daemon by hand, and it is never installed as a system service:
   - *Start:* CLI connects → on failure spawns detached `eyedbgd` (`setsid` on Unix, detached process on Windows; stdout/stderr appended to `eyedbgd.log`, rotated at 5 MiB), polls ready (5 s). The daemon holds an exclusive OS lock (`flock` / no-share open) on `eyedbgd.lock` for its whole life, so when concurrent agents spawn several, exactly one wins and the rest exit at once; the winner may delete any leftover socket or token, since they can only be stale. `EYEDBG_NO_AUTOSTART=1` makes the CLI fail instead of spawning (CI, or users who manage the daemon themselves).
   - *Handshake:* protocol version + token on every connection; version mismatch → CLI asks the old daemon to drain & exit if it has no sessions, else errors with a hint (never kills live sessions).
-  - *Connection switch:* after `hello`, `facade.open {sessionId, client}` turns the connection into a DAP connection for that session and client, for good (ADR 0012): the result is its last JSON-RPC line, and whatever the client sent past the request is handed to the facade with it. `eyedbg dap` bridges it to stdio; an older daemon answers `UNKNOWN_METHOD`, reported as `VERSION_MISMATCH`.
+  - *Connection switch:* after `hello`, `facade.open {sessionId, client}` turns the connection into a DAP connection for that session and client, for good (ADR 0012): the result is its last JSON-RPC line, and whatever the client sent past the request is handed to the facade with it. `eyedbg dap` bridges it to stdio; an older daemon answers `UNKNOWN_METHOD`, reported as `VERSION_MISMATCH`. `facade.open {client, launch: {clientDir, virtualEnv?, noRecord?, dotnetAdapter?}}` (no session id; `facadeVersion` 3) opens a launch connection instead: no session yet, its DAP `launch` starts one (ADR 0019); `eyedbg dap --launch` sends it, starting the daemon if needed, and reports a daemon answering with a session id or an older facade version as `VERSION_MISMATCH`.
   - *Idle exit:* the idle timer starts when the last session ends (no immediate exit, so the next command starts fast); exit after N minutes with zero sessions (default 30, configurable).
   - *Manual:* `eyedbg daemon status` (pid, uptime, version, sessions); `eyedbg daemon stop` refuses while sessions exist unless `--force`, which ends them (killing their debuggees); `eyedbgd` run directly stays in the foreground with logs on stderr, for debugging the daemon itself.
 - **Crash resilience:** debuggee processes are children of adapters, adapters children of the daemon; if the daemon dies, sessions die (MVP). Session metadata is persisted in the runtime dir as `sessions/<id>.json` (0600; written at start and when the session ends, removed when it is stopped or the daemon exits cleanly), so a daemon reads what is left at its start as the sessions an earlier one lost: `eyedbg sessions` lists them as `lost` (read from the files directly when no daemon runs) and `eyedbg stop -s ID` forgets one (ADR 0009).
@@ -264,7 +266,7 @@ Built (P2-M1, ADR 0012):
 - **The facade holds no policy.** `initialize` answers once the session finished starting, with
   the adapter's capabilities adjusted (eyedbg's hit counts and logpoints on; restart, step back,
   goto, memory writes, data breakpoints, terminate-debuggee and the like off); `attach` joins
-  (`launch` is refused); `configurationDone` is the join point — the current stop is replayed and
+  (`launch` is refused there: a launch connection takes it, P2-S3a below); `configurationDone` is the join point — the current stop is replayed and
   the session's event log followed from there. Execution requests (`continue`, steps, `pause`,
   `terminate`, `setVariable`/`setExpression`, `evaluate` in the debug console) go through the lease
   exactly like the CLI's; reads are forwarded (stack, scopes, variables, …), `evaluate` in watch or
@@ -355,6 +357,26 @@ at one line each keep their own condition, hit count and log message (§3, §4);
 breakpoints it is for (CLI, events, `--json`, DAP `hitBreakpointIds`, which VS Code uses to select
 the hit breakpoint). The extension is unchanged.
 
+Built (P2-S3a, ADR 0019): **launching through the facade** — `eyedbg dap --launch [--as CLIENT]`
+opens a launch connection (`facade.open {launch}`, §6), and the client's DAP `launch` starts the
+session through `session.Manager.Launch` as that client (the checks, time limit and order of
+`eyedbg start`; the launcher holds the lease). Launch arguments are known keys only, typed (`lang`,
+`program`, `project`, `cwd`, `args`, `env`, `opts`, `stopOnEntry`, `noBuild`, `leasePolicy`,
+`exceptions`, `adapter`); other keys are ignored, a case variant of a known key is refused, and
+relative paths resolve against the `eyedbg dap` process's directory. `initialize` answers at once
+with the forced-on capabilities and both exception filters (a filter the adapter can't serve is
+turned off for that client, with one console line); the build streams to that connection only as
+console `output` (the .NET driver builds, then queries the program's path; bounded: 4096 bytes a
+line, 10,000 lines, 1 MiB). Once the adapter is initialized the connection binds the session and
+sends `eyedbg/session {sessionId}`, a `capabilities` event (the adapter's) and `initialized`; the
+editor's `configurationDone` runs behind its breakpoint and exception requests, so they are in
+place before the program runs; `launch` is answered once the session started, and the connection
+then joins as an attach does. The launcher's `terminate` ends and forgets the session (`eyedbg
+stop`); when the launcher leaves, an exited session is forgotten and a live one keeps running. So a
+Restart restarts the program. `version --json` lists `dap.launch`. Not built yet (S3b): routing an
+adapter's `runInTerminal` to the launching editor's terminal — reverse requests are still refused
+(§3).
+
 ## 10. Agent integration
 
 - `SKILL.md` shipped with the binary (`eyedbg skill print`/`install`): when to reach for the debugger (after a failed hypothesis or two, per debug-gym), the standard loop (`start → bp add → run-until --dump → vars --changed → eval`), budgets, and "always `eyedbg stop` when done". `skill print` writes it to stdout byte for byte; `skill install [--dir ROOT] [--force]` writes it to `ROOT/eyedbg/SKILL.md`, `ROOT` defaulting to Claude Code's personal skills directory (`~/.claude/skills`, `%USERPROFILE%\.claude\skills` on Windows); idempotent, and a differing existing file is left alone unless `--force`. `skill/eyedbg/SKILL.md` is embedded in the binary, so it is always in sync with the `eyedbg` that prints it; `TestSkillMatchesCommandTree` (`internal/cli`) checks its examples and exit codes against the real command tree.
@@ -363,7 +385,7 @@ the hit breakpoint). The extension is unchanged.
 ## 11. Safety
 
 - `eval` may run code (method calls, property getters). Default: read-only intent (DAP `context: "watch"`) plus the driver's syntactic check (`SIDE_EFFECTS`; for manifest languages, the manifest's `evalGuard`), since netcoredbg enforces nothing and debugpy only refuses statements in `watch`; `--allow-side-effects` (context `repl`) is an execution request: it needs the lease and is logged. `vars --expand` doesn't evaluate a path the check flags. Breakpoint conditions and logpoint expressions are not checked: the user wrote them for the program to run. The conditions eyedbg evaluates itself — a shared line's `--if` (§4) and every `--log` message's `{EXPR}` — run in the program as the adapter's would, without the lease; the daemon's log holds neither their text nor their values, and recordings keep a stop's reason and thread only (no attribution).
-- Socket access restricted to the user; token file; no TCP listener by default. Editors reach sessions through the same socket and token (`eyedbg dap`); their DAP frames are bounded (one `Content-Length` header, ≤ 1 MiB) and a malformed one closes the connection.
+- Socket access restricted to the user; token file; no TCP listener by default. Editors reach sessions through the same socket and token (`eyedbg dap`); their DAP frames are bounded (one `Content-Length` header, ≤ 1 MiB) and a malformed one closes the connection. A launch connection (ADR 0019) logs its launch's language only, never its arguments; the build's output goes to that connection alone, bounded, never to the event log or the daemon's log.
 - Redaction (§5), not implemented yet. Session recordings (`sessions/<id>.jsonl` in the private runtime dir, 0600, never overwritten, capped at 4 MiB, pruned 7 days after the session ended) hold control events only: started, client, lease, exec, continued, stopped (reason and thread only), breakpoints (conditions included), threads, exited, ended — no program output, stop text, launch arguments, environment or variable values, until redaction exists. On by default; `start --no-record` or `EYEDBG_NO_RECORD=1` turns it off.
 - `attach` only to processes owned by the same user (checked first: Linux `/proc`, other Unix `ps`, Windows the process token's SID), shown as `pid N (name)`, never by command line. For .NET the ptrace-scope/`task_for_pid` hints don't apply: CoreCLR's debugger falls back to its pipe transport when it can't read memory directly (dotnet/runtime `shimremotedatatarget.cpp`), so the real failure modes — not a started .NET runtime, `DOTNET_EnableDiagnostics=0`, another debugger attached, a different `TMPDIR`, another user — are what `ATTACH_FAILED`'s hint lists. A native (non-.NET) manifest-driven adapter's `ATTACH_FAILED` keeps the generic ptrace-scope (Linux)/`task_for_pid` (macOS) hint instead, since such an adapter typically does attach through the OS's own mechanism. `stop` detaches from an attached program, never kills it.
 - `test` passes the filter, framework and environment to `dotnet test` as argv, never through a shell, and runs it in its own process group, killed as a whole by `stop`.
@@ -381,7 +403,7 @@ internal/api/        native JSON-RPC schema (shared by the CLI, the extension, a
 internal/daemon/     lifecycle, IPC, auth
 internal/session/    session, lease, breakpoint store, event log, stop snapshot
 internal/dap/        DAP over go-dap, both ways: bounded framing, the client toward adapters (seq mapping, reverse requests), the server side of editor connections
-internal/facade/     DAP facade: an editor's connection served as session calls (eyedbg dap, ADR 0012)
+internal/facade/     DAP facade: an editor's connection served as session calls (eyedbg dap, ADR 0012; launch, ADR 0019)
 internal/present/    budgeting, truncation, text/JSON renderers
 internal/adapters/   manifest schema, loader and trust check, templates, installer (download + checksum), Python runtime
 internal/adapters/manifests/   bundled adapter manifests (netcoredbg, debugpy, lldb-dap-{c,cpp,rust}, delve)
@@ -438,6 +460,10 @@ Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; mor
 - **P2-S1 shared conditions** (done): the stop filter checks each owner's condition at a line
   whose clients' conditions differ, a fail-open truth rule, stop attribution (`stop.breakpoints`,
   DAP `hitBreakpointIds`), run-until's `reached` at a shared line; real-adapter e2e (ADR 0018).
+- **P2-S3a launch through the facade** (in progress): `session.Manager.Launch` with build-output
+  and configure hooks, the .NET driver's streamed build, launch connections (`eyedbg dap --launch`,
+  `facade.open {launch}`, `dap.launch`), real-binary e2e (ADR 0019); the VS Code extension's F5
+  through it is next. S3b (an adapter's `runInTerminal` in the launching editor's terminal) follows.
 
 **More languages** (ADR 0013, run independently of phase 2's own sequencing): C, C++, Rust
 (lldb-dap, manifest-only, no schema change) and Go (Delve, manifest-only through a new

@@ -36,6 +36,14 @@ type dapProc struct {
 	cursor int           // where the next waitEvent starts
 }
 
+// dapLaunch starts 'eyedbg dap --launch --as client': a launch connection,
+// which starts h's daemon if needed.
+func (h *harness) dapLaunch(client string) *dapProc {
+	h.t.Helper()
+
+	return h.dap(client, "--launch")
+}
+
 // dap starts 'eyedbg dap --as client' against h's daemon.
 func (h *harness) dap(client string, args ...string) *dapProc {
 	h.t.Helper()
@@ -128,6 +136,43 @@ func (p *dapProc) do(req godap.RequestMessage) godap.ResponseMessage {
 	return resp
 }
 
+// send sends req on a goroutine and returns a function that waits for its
+// response (up to procTimeout from the send) and returns it, a failed one
+// as it is: for a request answered only after later ones (launch, which
+// debugpy answers after configurationDone).
+func (p *dapProc) send(req godap.RequestMessage) func() godap.ResponseMessage {
+	type answer struct {
+		msg godap.Message
+		err error
+	}
+
+	ch := make(chan answer, 1)
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), procTimeout)
+		defer cancel()
+
+		msg, err := p.client.Do(ctx, req)
+		ch <- answer{msg, err}
+	}()
+
+	return func() godap.ResponseMessage {
+		p.t.Helper()
+
+		a := <-ch
+		if _, failed := errors.AsType[*dap.RequestError](a.err); a.err != nil && !failed {
+			p.t.Fatalf("%s: %v\neyedbg dap stderr: %s", req.GetRequest().Command, a.err, p.stderr)
+		}
+
+		resp, ok := a.msg.(godap.ResponseMessage)
+		if !ok {
+			p.t.Fatalf("%s: response %T", req.GetRequest().Command, a.msg)
+		}
+
+		return resp
+	}
+}
+
 // ok is do, failing the test on a failed response.
 func (p *dapProc) ok(req godap.RequestMessage) godap.ResponseMessage {
 	p.t.Helper()
@@ -207,6 +252,14 @@ func (p *dapProc) received() []godap.EventMessage {
 	defer p.mu.Unlock()
 
 	p.cursor = len(p.events)
+
+	return append([]godap.EventMessage(nil), p.events...)
+}
+
+// all returns the events received so far, without moving the cursor.
+func (p *dapProc) all() []godap.EventMessage {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	return append([]godap.EventMessage(nil), p.events...)
 }

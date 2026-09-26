@@ -221,6 +221,10 @@ consecutive clean runs before merging an extension change), the VSIX file-list c
 Supersedes nothing; builds on ADR 0012 and ADR 0014. Publishing and the views are covered by the
 addenda below.
 
+Amended by ADR 0019: `launch` becomes a DAP launch through `eyedbg dap --launch` (feature
+`dap.launch`) instead of `eyedbg start` and an attach, so the build's output shows while it runs and
+a Restart restarts the program instead of re-joining it.
+
 ## Addendum (2026-09-25, P2-M4): releases and publishing
 
 - **Lockstep version, guarded.** `package.json` `version` == the release tag, bumped by hand in the
