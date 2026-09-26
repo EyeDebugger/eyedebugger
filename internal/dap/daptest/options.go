@@ -118,6 +118,8 @@ type ProgramArgs struct {
 	// FailAttach fails configurationDone as netcoredbg does when it can't
 	// attach.
 	FailAttach bool `json:"failAttach,omitempty"`
+	// ExitCode is the program's exit code at its last line (0: none).
+	ExitCode int `json:"exitCode,omitempty"`
 }
 
 // Map returns the arguments as a request body.
@@ -138,6 +140,10 @@ func (a ProgramArgs) Map() map[string]any {
 
 	if a.FailAttach {
 		m["failAttach"] = true
+	}
+
+	if a.ExitCode != 0 {
+		m["exitCode"] = a.ExitCode
 	}
 
 	return m

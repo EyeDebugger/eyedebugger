@@ -20,12 +20,13 @@
 // holds ("", "true", "false", "line == N" or "lap == N"; any other condition
 // holds) or to the end; next, stepIn and stepOut run one line (reason step,
 // or breakpoint with [Options.StepHitsBreakpoints] when the line has one).
-// At the end the program exits with code 0 and the adapter sends
-// terminated, unless it hangs: then it keeps running until paused (reason
-// pause; with [Options.PauseAsSignal], reason exception and description
-// "signal SIGSTOP"). initialized is sent once the launch (or attach) request arrived
-// (the session sends it without waiting for its answer), and continued
-// before the continue or step response, as netcoredbg does.
+// At the end the program exits with code 0, or [ProgramArgs.ExitCode], and
+// the adapter sends terminated, unless it hangs: then it keeps running
+// until paused (reason pause; with [Options.PauseAsSignal], reason
+// exception and description "signal SIGSTOP"). initialized is sent once
+// the launch (or attach) request arrived (the session sends it without
+// waiting for its answer), and continued before the continue or step
+// response, as netcoredbg does.
 //
 // setBreakpoints rejects two breakpoints on one line in one request
 // (netcoredbg keeps only one per line) and keeps ids stable per file and
@@ -37,11 +38,12 @@
 // user-unhandled; with all, the lines in Throws stop with reason exception
 // (a caught Fake.Error, described by exceptionInfo). setExpression and
 // setVariable change the local x (setVariable answers with "result" instead
-// of "value" with [Options.SetVariableResult]). An attach request loads the program like
-// launch but sends no process event, fails configurationDone when
-// FailAttach is set, and makes disconnect print "fake: disconnect
-// terminateDebuggee=true|false|unset" first. Capabilities default to
-// [DefaultCaps]; [CommandWith] passes other [Options].
+// of "value" with [Options.SetVariableResult]). An attach request loads the
+// program like launch but sends no process event, and fails
+// configurationDone when FailAttach is set. disconnect prints "fake:
+// disconnect terminateDebuggee=true|false" first when the request said
+// which. Capabilities default to [DefaultCaps]; [CommandWith] passes other
+// [Options].
 //
 // evaluate knows "line", "lap", "x", "obj" (with members a and b), "x =
 // VALUE" in the repl context (it sets x, answering its new value), the

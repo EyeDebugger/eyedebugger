@@ -46,6 +46,12 @@ type fakeDriver struct {
 	// exiting with runnerCode.
 	runner     string
 	runnerCode int
+	// launch, when set, is the program a launched test run debugs: TestCommand
+	// returns a Launch for it (its ProgramArgs overridden by spec.Args, as
+	// Prepare does for a plain launch) instead of the fake runner.
+	launch *daptest.ProgramArgs
+	// badAdapter makes a launched test run's adapter fail to start.
+	badAdapter bool
 	// socket, when set, puts the adapter on the connect transport and
 	// records the socket paths it was given.
 	socket *socketPaths
@@ -134,6 +140,10 @@ func (d fakeDriver) PrepareAttach(_ context.Context, spec api.AttachSpec) (Launc
 }
 
 func (d fakeDriver) TestCommand(_ context.Context, spec TestSpec) (TestCommand, error) {
+	if d.launch != nil {
+		return d.testLaunchCommand(spec)
+	}
+
 	path, args, env, err := daptest.RunnerCommand(d.runner, d.runnerCode)
 	if err != nil {
 		return TestCommand{}, err
@@ -157,7 +167,33 @@ func (d fakeDriver) TestCommand(_ context.Context, spec TestSpec) (TestCommand, 
 	}, nil
 }
 
-// parseProgramArgs applies lines=, laps= and throws= arguments.
+// testLaunchCommand is TestCommand for a launched test run: a Launch built
+// like Prepare, from d.launch overridden by spec.Args.
+func (d fakeDriver) testLaunchCommand(spec TestSpec) (TestCommand, error) {
+	path, args, env, err := daptest.CommandWith(d.opts)
+	if err != nil {
+		return TestCommand{}, err
+	}
+
+	pa := *d.launch
+
+	if err := parseProgramArgs(&pa, spec.Args); err != nil {
+		return TestCommand{}, err
+	}
+
+	if d.badAdapter {
+		path = filepath.Join(path, "does-not-exist")
+	}
+
+	launch := d.transport(d.withKnobs(Launch{
+		Adapter: path, AdapterArgs: args, AdapterEnv: env, AdapterID: "fake",
+		Arguments: pa.Map(), ExceptionFilters: d.excFilters, SideEffects: d.sideEffects,
+	}))
+
+	return TestCommand{Program: "fake test " + spec.Filter, Launch: &launch}, nil
+}
+
+// parseProgramArgs applies lines=, laps=, throws= and exitCode= arguments.
 func parseProgramArgs(pa *daptest.ProgramArgs, args []string) error {
 	for _, a := range args {
 		name, value, _ := strings.Cut(a, "=")
@@ -169,6 +205,8 @@ func parseProgramArgs(pa *daptest.ProgramArgs, args []string) error {
 			pa.Lines, err = strconv.Atoi(value)
 		case "laps":
 			pa.Laps, err = strconv.Atoi(value)
+		case "exitCode":
+			pa.ExitCode, err = strconv.Atoi(value)
 		case "throws":
 			for l := range strings.SplitSeq(value, ",") {
 				n, err := strconv.Atoi(l)

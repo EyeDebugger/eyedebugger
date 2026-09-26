@@ -101,8 +101,10 @@ type TestSpec struct {
 	api.TestSpec
 }
 
-// TestCommand is how a [Tester] runs tests: a command that starts a test
-// host, prints its process id and waits for a debugger to attach.
+// TestCommand is how a [Tester] runs tests: either a command that starts a
+// test host, prints its process id and waits for a debugger to attach, or,
+// with Launch set, a self-hosting test app the session launches under the
+// adapter itself.
 type TestCommand struct {
 	Path string
 	Args []string
@@ -119,6 +121,11 @@ type TestCommand struct {
 	// Failure is the error for a command that exited with code before a
 	// test host appeared; output is the end of what it printed.
 	Failure func(code int, output string) error
+	// Launch, when set, is a self-hosting test app to launch under the
+	// adapter directly: no runner, no attach. The session ends when it
+	// exits, with its exit code. Path, Args, Env, Dir, HostPID and Failure
+	// are then unused.
+	Launch *Launch
 }
 
 // Tester is a [Driver] that can debug test runs. A Tester must also be an

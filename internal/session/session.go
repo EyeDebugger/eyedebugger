@@ -454,11 +454,11 @@ func (s *Session) onEvent(ev godap.EventMessage) {
 	case *godap.ThreadEvent:
 		s.log.append(api.Event{Kind: api.EventThread, Reason: e.Body.Reason, ThreadID: e.Body.ThreadId})
 	case *godap.TerminatedEvent:
-		// A test host ending is not the session's end: the runner's is.
-		if s.mode == api.ModeTest {
+		// A test host ending is not the session's end: its runner's is.
+		if s.run != nil {
 			go s.shutdownAdapter(s.life, true)
 		} else {
-			s.endLocked("the program terminated")
+			s.endLocked(s.endReasonLocked("the program terminated"))
 		}
 	case *godap.ProcessEvent:
 		s.pid = e.Body.SystemProcessId
@@ -513,7 +513,7 @@ func (s *Session) onContinuedLocked(e *godap.ContinuedEvent) {
 // onExitedLocked records the program's exit code; a test host's is only
 // noted (the session's is its runner's).
 func (s *Session) onExitedLocked(e *godap.ExitedEvent) {
-	if s.mode == api.ModeTest {
+	if s.run != nil {
 		s.hostExitedLocked(e.Body.ExitCode)
 
 		return
@@ -530,10 +530,10 @@ func (s *Session) onExitedLocked(e *godap.ExitedEvent) {
 func (s *Session) watchAdapter() {
 	<-s.client.Done()
 
-	// A test session ends with its runner (watchRunner).
-	if s.mode != api.ModeTest {
+	// A test session with a runner ends with it (watchRunner).
+	if s.run == nil {
 		s.mu.Lock()
-		s.endLocked("the debug adapter exited")
+		s.endLocked(s.endReasonLocked("the debug adapter exited"))
 		s.mu.Unlock()
 	}
 
@@ -545,9 +545,20 @@ func (s *Session) watchAdapter() {
 		_ = s.cmd.Wait()
 	}
 
-	if s.mode != api.ModeTest {
+	if s.run == nil {
 		s.closeRecording()
 	}
+}
+
+// endReasonLocked is def, unless s is a launched test run (mode test, no
+// runner) that reported an exit code: then it names it, as a runner's test
+// run does in finishRun.
+func (s *Session) endReasonLocked(def string) string {
+	if s.mode == api.ModeTest && s.run == nil && s.exitCode != nil {
+		return fmt.Sprintf("the test run finished: the test app exited with code %d", *s.exitCode)
+	}
+
+	return def
 }
 
 // closeRecording ends the recording, if any.

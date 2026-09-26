@@ -192,7 +192,7 @@ func (m *Manager) create(ctx context.Context, c api.Client, p api.StartParams, p
 func (m *Manager) run(ctx context.Context, s *Session, launch Launch, bps []api.BreakpointSpec) (*Session, error) {
 	// The adapter lives as long as the daemon, not this request.
 	if err := s.startAdapter(m.ctx, launch, m.stderr, m.connectTimeout); err != nil { //nolint:contextcheck // Deliberately not the request's context.
-		if s.mode == api.ModeTest { // shared already: end it properly
+		if s.run != nil { // a runner test run: shared already, end it properly
 			m.fail(ctx, s, err)
 
 			return nil, err

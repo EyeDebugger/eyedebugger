@@ -67,6 +67,7 @@ type program struct {
 	hang     bool
 	attached bool
 	throws   []int
+	exitCode int
 
 	state int
 	line  int  // stopped at (about to run) this line
@@ -113,6 +114,7 @@ func (p *program) verifyPending() {
 
 func (p *program) load(args launchArgs, attached bool) {
 	p.path, p.lines, p.hang, p.laps, p.throws, p.attached = args.Program, args.Lines, args.Hang, max(args.Laps, 1), args.Throws, attached
+	p.exitCode = args.ExitCode
 }
 
 // start runs the program from line 1 (stopping there if stopAtEntry). An
@@ -268,7 +270,7 @@ func (p *program) finish() {
 	}
 
 	p.state = stateEnded
-	p.emit("exited", godap.ExitedEventBody{ExitCode: 0})
+	p.emit("exited", godap.ExitedEventBody{ExitCode: p.exitCode})
 	p.emit("terminated", nil)
 }
 
