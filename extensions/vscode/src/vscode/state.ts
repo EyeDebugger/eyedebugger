@@ -12,7 +12,6 @@ import { LeaseHeldNotices, RequestNotices } from '../core/lease';
 import { type Mirror, MirrorModel } from '../core/mirrors';
 import { type Breakpoint, type ClientInfo, EyedbgError, type LeaseInfo } from '../core/protocol';
 import { errorNotice, notificationSafe } from '../core/render';
-import { launchToken } from './config';
 
 const maxActivity = 200;
 const maxNotices = 50;
@@ -59,9 +58,27 @@ export class Tracked {
 
   constructor(
     readonly session: vscode.DebugSession,
-    readonly eyedbgId: string,
+    private id: string,
     readonly client: string,
   ) {}
+
+  /**
+   * eyedbgId is the eyedbg session's id; '' while a launch connection
+   * hasn't learned it yet (its eyedbg/session event): State hands out no
+   * such entry, and no eyedbg/* request is sent for it.
+   */
+  get eyedbgId(): string {
+    return this.id;
+  }
+
+  /** learned sets the id a launch connection learned; only once (false if it was known already). */
+  learned(id: string): boolean {
+    if (this.id !== '') {
+      return false;
+    }
+    this.id = id;
+    return true;
+  }
 
   breakpoint(id: number): Breakpoint | undefined {
     return this.list.find((b) => b.id === id);
@@ -137,36 +154,46 @@ export class State implements vscode.Disposable {
   private readonly tracked = new Map<string, Tracked>();
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChange = this.changed.event;
-  /** Launched sessions by launch token: which eyedbg session each launch started (never a config flag). */
-  readonly launched = new Map<string, string>();
-  /** VS Code sessions whose last disconnect asked for a restart. */
+  /** VS Code sessions whose adapter connection asked for a restart (disconnect or terminate). */
   readonly restarting = new Set<string>();
   notices: Notice[] = [];
   annotations: Annotation[] = [];
-  /** Sessions this window stopped when their launch ended; error is the code if it failed. */
-  stops: { session: string; error: string }[] = [];
   /** The activity of ended debug sessions, oldest first. */
   ended: EndedLog[] = [];
   private endedCount = 0;
   reveals: Reveal[] = [];
   autoJoin: AutoJoinStats = { state: 'idle', polls: 0, lastError: '', prompted: [] };
-  /** How many 'eyedbg start' runs are in progress. */
-  launching = 0;
 
   constructor(readonly log: vscode.LogOutputChannel) {}
 
+  /** get is VS Code session id's entry, if its eyedbg session id is known. */
   get(id: string): Tracked | undefined {
-    return this.tracked.get(id);
+    const t = this.tracked.get(id);
+    return t !== undefined && t.eyedbgId !== '' ? t : undefined;
   }
 
+  /** all are the entries whose eyedbg session id is known. */
   all(): Tracked[] {
-    return [...this.tracked.values()];
+    return [...this.tracked.values()].filter((t) => t.eyedbgId !== '');
   }
 
-  /** begin returns the session's entry, keeping it across a Restart (same VS Code session). */
+  /** active reports whether the window has an eyedbg debug session, its id known or not (a launch starting). */
+  active(): boolean {
+    return this.tracked.size > 0;
+  }
+
+  /**
+   * begin returns the entry of a new adapter connection of session:
+   * eyedbgId, or '' for a launch connection until it learns it. An attach's
+   * Restart keeps the entry (same eyedbg session); a launch's Restart
+   * starts a new session, so the old entry ends.
+   */
   begin(session: vscode.DebugSession, eyedbgId: string, client: string): Tracked {
     let t = this.tracked.get(session.id);
     if (t === undefined || t.eyedbgId !== eyedbgId || t.client !== client) {
+      if (t !== undefined) {
+        this.archive(t);
+      }
       t = new Tracked(session, eyedbgId, client);
       this.tracked.set(session.id, t);
     }
@@ -181,13 +208,18 @@ export class State implements vscode.Disposable {
       return;
     }
     this.tracked.delete(id);
-    if (t.log.size > 0) {
+    this.archive(t);
+    this.fire();
+  }
+
+  /** archive keeps an ended entry's activity (the last 3). */
+  private archive(t: Tracked): void {
+    if (t.log.size > 0 && t.eyedbgId !== '') {
       this.ended.push({ key: `ended-${++this.endedCount}`, session: t.eyedbgId, base: t.base, log: t.log });
       if (this.ended.length > maxEnded) {
         this.ended.splice(0, this.ended.length - maxEnded);
       }
     }
-    this.fire();
   }
 
   /** revealed records a followed stop (before it is shown). */
@@ -196,11 +228,6 @@ export class State implements vscode.Disposable {
     if (this.reveals.length > maxReveals) {
       this.reveals.splice(0, this.reveals.length - maxReveals);
     }
-  }
-
-  isLaunched(t: Tracked): boolean {
-    const token: unknown = t.session.configuration[launchToken];
-    return typeof token === 'string' && this.launched.get(token) === t.eyedbgId;
   }
 
   /**
@@ -244,14 +271,15 @@ export class State implements vscode.Disposable {
    * custom sends an eyedbg/* request on t's session. A refusal becomes an
    * EyedbgError with the facade's code (VS Code's own error keeps only the
    * text; the tracker saw the response first). A facade that predates the
-   * eyedbg/* messages marks the session unsupported and resolves undefined.
+   * eyedbg/* messages marks the session unsupported and resolves undefined,
+   * as does an entry whose eyedbg session id isn't known yet.
    */
   async custom(
     t: Tracked,
     command: string,
     args: Record<string, unknown>,
   ): Promise<Record<string, unknown> | undefined> {
-    if (t.unsupported) {
+    if (t.unsupported || t.eyedbgId === '') {
       return undefined;
     }
     t.failures.delete(command);
@@ -284,7 +312,7 @@ export class State implements vscode.Disposable {
       vscodeSession: t.session.id,
       session: t.eyedbgId,
       client: t.client,
-      launched: this.isLaunched(t),
+      launched: t.session.configuration.request === 'launch',
       unsupported: t.unsupported,
       lease: t.lease === undefined ? undefined : structuredClone(t.lease),
       // lastSeen raised by the clients' activity, as the Clients view shows it.

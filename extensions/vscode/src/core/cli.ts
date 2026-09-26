@@ -16,6 +16,17 @@ export const requiredFeatures = ['dap', 'presence', 'lease.request', 'dap.collab
 /** The feature a launch configuration's "adapter" needs: 'eyedbg start --adapter'. */
 export const adapterFeature = 'adapter.select';
 
+/** The feature a launch configuration needs: 'eyedbg dap --launch' (docs/adr/0019). */
+export const launchFeature = 'dap.launch';
+
+/** launchUnsupported is the error text for a launch on an eyedbg without launchFeature, else ''. */
+export function launchUnsupported(version: string, features: readonly string[]): string {
+  if (features.includes(launchFeature)) {
+    return '';
+  }
+  return `eyedbg ${version} can't start a session from a launch configuration: it lacks ${launchFeature}`;
+}
+
 /** adapterUnsupported is the error text for a launch with "adapter" on an eyedbg without adapterFeature, else ''. */
 export function adapterUnsupported(spec: LaunchSpec, version: string, features: readonly string[]): string {
   if (spec.adapter === undefined || features.includes(adapterFeature)) {
@@ -32,52 +43,13 @@ export function sessionsArgs(): string[] {
   return ['sessions', '--json'];
 }
 
-export function startArgs(spec: LaunchSpec, client: string): string[] {
-  const argv = ['start', spec.lang];
-  if (spec.program !== undefined) {
-    argv.push(`--program=${spec.program}`);
-  }
-  if (spec.project !== undefined) {
-    argv.push(`--project=${spec.project}`);
-  }
-  if (spec.cwd !== undefined) {
-    argv.push(`--cwd=${spec.cwd}`);
-  }
-  for (const [k, v] of spec.env) {
-    argv.push(`--env=${k}=${v}`);
-  }
-  for (const [k, v] of spec.opts) {
-    argv.push(`--opt=${k}=${v}`);
-  }
-  if (spec.adapter !== undefined) {
-    argv.push(`--adapter=${spec.adapter}`);
-  }
-  if (spec.exceptions !== undefined) {
-    argv.push(`--exceptions=${spec.exceptions}`);
-  }
-  if (spec.leasePolicy !== undefined) {
-    argv.push(`--lease-policy=${spec.leasePolicy}`);
-  }
-  if (spec.stopOnEntry) {
-    argv.push('--stop-on-entry');
-  }
-  if (spec.noBuild) {
-    argv.push('--no-build');
-  }
-  // Only the session id is read: no stop snapshot (locals, output) for nothing.
-  argv.push('--dump=none', `--as=${client}`, '--json');
-  if (spec.args.length > 0) {
-    argv.push('--', ...spec.args);
-  }
-  return argv;
-}
-
 /**
  * launchCwd resolves a launch configuration's cwd against the workspace
  * folder (a relative cwd without a folder is refused) and says where to run
- * 'eyedbg start': the resolved cwd, else the folder, else an absolute
+ * 'eyedbg dap --launch' (eyedbg resolves the launch's relative paths against
+ * its own directory): the resolved cwd, else the folder, else an absolute
  * program's directory, else nowhere in particular (undefined). The returned
- * spec carries the absolute cwd, so --cwd= and the process agree.
+ * spec carries the absolute cwd, so the launch's cwd and the process agree.
  */
 export function launchCwd(
   spec: LaunchSpec,
@@ -115,12 +87,13 @@ export function launchCwd(
   return { ok: true, value: { spec, cwd: undefined } };
 }
 
-export function stopArgs(session: string, client: string): string[] {
-  return ['stop', `--session=${session}`, `--as=${client}`, '--json'];
-}
-
 export function dapArgs(session: string, client: string): string[] {
   return ['dap', `--session=${session}`, `--as=${client}`];
+}
+
+/** dapLaunchArgs runs a facade connection whose DAP launch starts the session (docs/adr/0019). */
+export function dapLaunchArgs(client: string): string[] {
+  return ['dap', '--launch', `--as=${client}`];
 }
 
 /** redact hides the values of --env=K=V in argv, for the log. */
@@ -232,17 +205,22 @@ export function isLive(s: SessionInfo): boolean {
   return s.state !== 'exited' && s.state !== 'lost';
 }
 
-/** parseStarted reads 'eyedbg start --json': the new session. */
-export function parseStarted(v: Record<string, unknown>): SessionInfo {
-  const info = parseSessionInfo(v.session);
-  if (info === undefined) {
-    throw new EyedbgError('INTERNAL', 'eyedbg start printed no session');
-  }
-  return info;
-}
-
-/** dapExitMessage explains an 'eyedbg dap' that exited before the debug session started (its stderr is lost). */
+/**
+ * dapExitMessage explains an 'eyedbg dap' that exited before the debug
+ * session started (its stderr is lost); session is '' for a launch
+ * connection ('eyedbg dap --launch'), which has no session yet.
+ */
 export function dapExitMessage(code: number | undefined, session: string): string {
+  if (session === '') {
+    switch (code) {
+      case 0:
+        return 'The connection to eyedbg ended before the session started.';
+      case 3:
+        return "eyedbg couldn't start its daemon, or the running daemon is too old for this extension or refused its token: run 'eyedbg daemon stop' and try again.";
+      default:
+        return `Lost the connection to the eyedbg daemon (exit code ${code ?? 'unknown'}); 'eyedbg daemon logs' may say why.`;
+    }
+  }
   switch (code) {
     case 0:
       return `The connection to eyedbg session ${session} ended.`;

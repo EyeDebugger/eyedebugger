@@ -186,6 +186,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   live one keeps running. A failed launch is the `launch` response's error. `facade.open` takes
   `launch` and reports `facadeVersion` 3; `version --json` lists `"dap.launch"`. An adapter's
   `runInTerminal` is still refused (terminals: S3b).
+- The VS Code extension's F5 launches through `eyedbg dap --launch` (P2-S3a, ADR 0019): a .NET
+  build's output shows in the Debug Console while it runs, breakpoints are in place before the
+  program starts, Stop ends the session and removes it from `eyedbg sessions`, and Restart restarts
+  the program as a new session (it used to re-join the same one). A launch configuration needs an
+  eyedbg with `dap.launch`; a property differing from an eyedbg one only in case is dropped. The
+  extension no longer runs `eyedbg start` or `eyedbg stop` for a launch; its API drops `stops()`.
 
 ### Changed
 

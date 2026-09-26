@@ -97,13 +97,23 @@ test('candidates: live, used by an agent, not by me, not skipped', () => {
   assert.deepEqual(ids(candidates([session('/ws/a.py')], env({ skip: new Set(['s-a1']) }))), []);
 });
 
+test('candidates: a session this window launched is never offered, an agent in it or not', () => {
+  // F5 launches as this window's client, which the session lists from its
+  // start (the starter), before the window learns the id: no skip needed.
+  const launched = (clients: ClientInfo[]) =>
+    session('/ws/a.py', { state: 'starting', clients: [client('human:me', 1), ...clients] });
+  assert.deepEqual(ids(candidates([launched([])], env())), []);
+  assert.deepEqual(ids(candidates([launched([client('agent:b', 1)])], env())), []);
+  assert.deepEqual(ids(candidates([launched([client('agent:b')])], env({ skip: new Set() }))), []);
+});
+
 test('agentOf', () => {
   assert.equal(agentOf(session('/ws/a.py', { clients: [client('human:x'), client('agent:b')] })), 'agent:b');
   assert.equal(agentOf(session('/ws/a.py', { clients: [] })), '');
 });
 
 test('plan: every gate, and the delays', () => {
-  const ok = { setting: 'ask', focused: true, folders: 1, joined: false, launching: false, failing: false };
+  const ok = { setting: 'ask', focused: true, folders: 1, joined: false, failing: false };
   assert.deepEqual(plan(ok), { poll: true, delayMs: pollDelayMs });
   assert.deepEqual(plan({ ...ok, failing: true }), { poll: true, delayMs: failureDelayMs });
   assert.equal(pollDelayMs, 5_000);
@@ -114,7 +124,6 @@ test('plan: every gate, and the delays', () => {
     { focused: false },
     { folders: 0 },
     { joined: true },
-    { launching: true },
   ]) {
     assert.deepEqual(plan({ ...ok, ...off }), { poll: false }, JSON.stringify(off));
   }

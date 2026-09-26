@@ -309,8 +309,9 @@ Built (P2-M3, ADR 0015):
 
 - **The VS Code extension** (`extensions/vscode/`; TypeScript bundled by esbuild, no runtime
   dependencies, VS Code ≥ 1.100): debug type `eyedbg` — `attach` joins a running session (picked
-  when not named; Run and Debug lists one configuration per session), `launch` runs `eyedbg start`
-  as the human and joins it, and stops it when that debug session ends (a Restart re-joins).
+  when not named; Run and Debug lists one configuration per session), `launch` starts one as the
+  human — since P2-S3a a DAP launch through `eyedbg dap --launch` (below), before it `eyedbg start`
+  and an attach.
 - **Which binary:** the machine-scoped `eyedbg.path`, else the extension's own PATH scan (absolute
   entries, never the current directory; `eyedbg.exe` on Windows), checked with `version --json`;
   every call is `execFile` without a shell, values bound as `--flag=value`.
@@ -373,7 +374,11 @@ editor's `configurationDone` runs behind its breakpoint and exception requests, 
 place before the program runs; `launch` is answered once the session started, and the connection
 then joins as an attach does. The launcher's `terminate` ends and forgets the session (`eyedbg
 stop`); when the launcher leaves, an exited session is forgotten and a live one keeps running. So a
-Restart restarts the program. `version --json` lists `dap.launch`. Not built yet (S3b): routing an
+Restart restarts the program. `version --json` lists `dap.launch`. The VS Code extension's F5 runs
+`eyedbg dap --launch --as human:NAME` as its debug adapter (in the launch's cwd, else the workspace
+folder, else an absolute program's directory) and sends the validated configuration as the launch; it needs `dap.launch` (no fallback to
+`eyedbg start`), learns the id from `eyedbg/session`, and no longer stops sessions itself: Stop is
+the facade's terminate, and Restart a new launch. Not built yet (S3b): routing an
 adapter's `runInTerminal` to the launching editor's terminal — reverse requests are still refused
 (§3).
 
@@ -460,10 +465,11 @@ Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; mor
 - **P2-S1 shared conditions** (done): the stop filter checks each owner's condition at a line
   whose clients' conditions differ, a fail-open truth rule, stop attribution (`stop.breakpoints`,
   DAP `hitBreakpointIds`), run-until's `reached` at a shared line; real-adapter e2e (ADR 0018).
-- **P2-S3a launch through the facade** (in progress): `session.Manager.Launch` with build-output
-  and configure hooks, the .NET driver's streamed build, launch connections (`eyedbg dap --launch`,
-  `facade.open {launch}`, `dap.launch`), real-binary e2e (ADR 0019); the VS Code extension's F5
-  through it is next. S3b (an adapter's `runInTerminal` in the launching editor's terminal) follows.
+- **P2-S3a launch through the facade** (done): `session.Manager.Launch` with build-output and
+  configure hooks, the .NET driver's streamed build, launch connections (`eyedbg dap --launch`,
+  `facade.open {launch}`, `dap.launch`), real-binary e2e (ADR 0019), and the VS Code extension's F5
+  through it (a Restart restarts the program). S3b (an adapter's `runInTerminal` in the launching
+  editor's terminal) follows.
 
 **More languages** (ADR 0013, run independently of phase 2's own sequencing): C, C++, Rust
 (lldb-dap, manifest-only, no schema change) and Go (Delve, manifest-only through a new

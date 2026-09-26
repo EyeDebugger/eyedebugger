@@ -1,9 +1,10 @@
 // Copyright The EyeDebugger Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Validation of everything a debug configuration hands to the eyedbg CLI
-// (docs/adr/0015): values are checked here, then bound as --flag=value, so
-// no configuration can add a flag or name another binary.
+// Validation of everything a debug configuration hands to eyedbg
+// (docs/adr/0015, 0019): values are checked here, then bound as
+// --flag=value or sent as the launch request's arguments exactly as
+// validated, so no configuration can add a flag or name another binary.
 
 import { isRecord, type LeasePolicy, leasePolicies } from './protocol';
 
@@ -196,4 +197,56 @@ export function validateLaunch(cfg: Record<string, unknown>): Result<LaunchSpec>
   }
 
   return { ok: true, value: spec };
+}
+
+/** The launch arguments eyedbg reads (internal/facade: launchKey); names are case-sensitive. */
+export const launchKeys = [
+  'lang',
+  'program',
+  'project',
+  'cwd',
+  'args',
+  'env',
+  'opts',
+  'stopOnEntry',
+  'noBuild',
+  'leasePolicy',
+  'exceptions',
+  'adapter',
+] as const;
+
+/**
+ * launchConfiguration is cfg as the launch request carries it to eyedbg:
+ * every eyedbg key written back exactly as spec validated it (an absent
+ * one deleted), and every key that differs from one only in case deleted
+ * (eyedbg refuses those: its JSON decoding would match them). Other keys
+ * (VS Code's own) are kept. cfg itself isn't changed.
+ */
+export function launchConfiguration(cfg: Record<string, unknown>, spec: LaunchSpec): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(cfg)) {
+    const lower = k.toLowerCase();
+    if (!launchKeys.some((known) => known.toLowerCase() === lower)) {
+      // Defined, not assigned: a "__proto__" key stays a plain key.
+      Object.defineProperty(out, k, { value: v, enumerable: true, writable: true, configurable: true });
+    }
+  }
+  const put = (k: (typeof launchKeys)[number], v: unknown) => {
+    if (v !== undefined) {
+      out[k] = v;
+    }
+  };
+  put('lang', spec.lang);
+  put('program', spec.program);
+  put('project', spec.project);
+  put('cwd', spec.cwd);
+  put('args', [...spec.args]);
+  put('env', Object.fromEntries(spec.env));
+  put('opts', Object.fromEntries(spec.opts));
+  put('stopOnEntry', spec.stopOnEntry);
+  put('noBuild', spec.noBuild);
+  put('leasePolicy', spec.leasePolicy);
+  put('exceptions', spec.exceptions);
+  put('adapter', spec.adapter);
+  return out;
 }

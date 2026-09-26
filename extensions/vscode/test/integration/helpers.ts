@@ -184,6 +184,7 @@ export interface Rec {
 /** Conn is one adapter connection of a debug session (a Restart makes a new one). */
 export interface Conn {
   session: vscode.DebugSession;
+  /** The eyedbg session: an attach's configured one; a launch's from its eyedbg/session event ('' until then). */
   eyedbgSession: string;
   msgs: Rec[];
   exited: boolean;
@@ -230,7 +231,13 @@ export class Recorder implements vscode.Disposable {
   private trackers(): vscode.Disposable {
     return vscode.debug.registerDebugAdapterTrackerFactory('eyedbg', {
       createDebugAdapterTracker: (session) => {
-        const conn: Conn = { session, eyedbgSession: String(session.configuration.session), msgs: [], exited: false };
+        const launch = session.configuration.request === 'launch';
+        const conn: Conn = {
+          session,
+          eyedbgSession: launch ? '' : String(session.configuration.session),
+          msgs: [],
+          exited: false,
+        };
         this.conns.push(conn);
         this.emitter.fire();
         return {
@@ -239,7 +246,11 @@ export class Recorder implements vscode.Disposable {
             this.emitter.fire();
           },
           onDidSendMessage: (m: unknown) => {
-            conn.msgs.push({ dir: 'in', m: structuredClone(m) });
+            const msg: Json = structuredClone(m);
+            if (launch && conn.eyedbgSession === '' && msg?.type === 'event' && msg.event === 'eyedbg/session') {
+              conn.eyedbgSession = String(msg.body?.sessionId);
+            }
+            conn.msgs.push({ dir: 'in', m: msg });
             this.emitter.fire();
           },
           onExit: () => {

@@ -5,7 +5,8 @@
 // from the DAP traffic, in the adapter's order — the mirrors (VS Code hides
 // its copies of them from extensions), the eyedbg/* events and refusals.
 // The factory returns synchronously (VS Code drops trackers that take over
-// a second).
+// a second). A launch connection learns its eyedbg session's id from the
+// facade's eyedbg/session event (docs/adr/0019).
 
 import type * as vscode from 'vscode';
 import { dapExitMessage } from '../core/cli';
@@ -47,8 +48,9 @@ export class TrackerFactory implements vscode.DebugAdapterTrackerFactory {
   ) {}
 
   createDebugAdapterTracker(session: vscode.DebugSession): vscode.DebugAdapterTracker | undefined {
-    const id: unknown = session.configuration.session;
-    if (!isSessionId(id)) {
+    const launch = session.configuration.request === 'launch';
+    const id: unknown = launch ? '' : session.configuration.session;
+    if (!launch && !isSessionId(id)) {
       return undefined;
     }
     let who: string;
@@ -57,15 +59,18 @@ export class TrackerFactory implements vscode.DebugAdapterTrackerFactory {
     } catch {
       return undefined;
     }
-    const t = this.state.begin(session, id, who);
+    const t = this.state.begin(session, id as string, who);
     // Per connection: a Restart's old adapter may report its exit after the
     // new one started, and its exit is no start-up failure if it talked.
     let talked = false;
+    // Per connection: this connection asked for a restart, so VS Code's
+    // own disconnect after its terminated event doesn't cancel it.
+    const conn = { restart: false };
     return {
       onWillReceiveMessage: (raw: unknown) => {
         const m = parseDap(raw);
         if (m !== undefined) {
-          this.fromEditor(t, m);
+          this.fromEditor(t, m, conn);
         }
       },
       onDidSendMessage: (raw: unknown) => {
@@ -84,13 +89,19 @@ export class TrackerFactory implements vscode.DebugAdapterTrackerFactory {
     };
   }
 
-  private fromEditor(t: Tracked, m: DapMessage): void {
+  /**
+   * fromEditor notes a restart: an attach's Restart sends disconnect
+   * {restart: true}; a launch's sends terminate {restart: true}, and VS Code
+   * then disconnects without restart after the terminated event.
+   */
+  private fromEditor(t: Tracked, m: DapMessage, conn: { restart: boolean }): void {
     t.mirrors.fromEditor(m);
     t.log.fromEditor(m);
-    if (m.type === 'request' && m.command === 'disconnect') {
+    if (m.type === 'request' && (m.command === 'disconnect' || m.command === 'terminate')) {
       if (m.arguments?.restart === true) {
+        conn.restart = true;
         this.state.restarting.add(t.session.id);
-      } else {
+      } else if (!conn.restart) {
         this.state.restarting.delete(t.session.id);
       }
     }
@@ -122,6 +133,18 @@ export class TrackerFactory implements vscode.DebugAdapterTrackerFactory {
   private event(t: Tracked, m: DapMessage): void {
     const body = m.body ?? {};
     switch (m.event) {
+      case 'eyedbg/session': {
+        const id: unknown = body.sessionId;
+        if (!isSessionId(id)) {
+          this.state.log.warn('eyedbg/session: not a session id; ignored');
+        } else if (t.learned(id)) {
+          this.state.log.info(`launched session ${id}`);
+          this.state.fire();
+        } else if (id !== t.eyedbgId) {
+          this.state.log.warn(`eyedbg/session ${id} on the connection of ${t.eyedbgId}; ignored`);
+        }
+        break;
+      }
       case 'eyedbg/lease':
         this.handlers.lease(t, parseLease(body.lease));
         break;

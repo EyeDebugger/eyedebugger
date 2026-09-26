@@ -325,6 +325,11 @@ async function runOnce(run: number, version: string, bin: string, breadth: Bread
         EYEDBG_TEST_BREADTH: breadth?.dll ?? '',
         EYEDBG_TEST_BREADTH_SRC: breadth?.src ?? '',
         EYEDBG_TEST_DOTNET_HOST: onPath(`dotnet${exe}`) ?? '',
+        // A launch builds in the daemon, which the extension host's eyedbg
+        // starts with this environment: leave no build server behind.
+        ...(breadth !== undefined
+          ? { MSBUILDDISABLENODEREUSE: '1', DOTNET_CLI_USE_MSBUILD_SERVER: '0', UseSharedCompilation: 'false' }
+          : {}),
         // Window focus is unreliable under xvfb and on a busy desktop.
         EYEDBG_TEST_ASSUME_FOCUSED: '1',
       },
