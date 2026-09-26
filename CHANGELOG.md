@@ -163,6 +163,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   adapter's exit codes aren't trusted (see the Fixed entry below), when it ends without one. A
   VSTest project's flow (`dotnet test`, attach to the host) is unchanged. New sample apps
   `testdata/apps/dotnet/xunit3` and `dotnet/mstest`.
+- Stops name the breakpoints they are for (ADR 0018): when eyedbg decided a breakpoint stop (a
+  line whose clients' breakpoints have different conditions, or `--hit`/`--log`), the snapshot
+  says `stopped for breakpoint 6 of human:ijat` (`breakpoints 5 of agent, 6 of human:ijat`) under
+  its first line, `--json` carries `session.stop.breakpoints` (`[{"id", "owner"}]`, sorted by id;
+  schema 1), `eyedbg events` appends `; for breakpoint 6 of human:ijat` to the stop, and the DAP
+  facade's `stopped` carries `hitBreakpointIds` (live, at the join and on a resync), so VS Code
+  selects the hit breakpoint. Absent when eyedbg didn't decide the stop. Recordings don't keep it.
 
 ### Changed
 
@@ -195,6 +202,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The DAP facade marks a stop caused by another client's continue, step, run-until or pause with
   `preserveFocusHint` (ADR 0014 addendum), so an editor keeps its focus when the agent steps; the
   replayed stop at the join and the editor's own stops are unchanged.
+- Breakpoints of several clients at one line each keep their own condition, hit count and log
+  message (ADR 0018): the program stops there when any of them would, and another client's
+  logpoint never suppresses a stop. Where the conditions differ (or one is unconditional), the
+  adapter still gets one unconditional breakpoint there and eyedbg evaluates each condition at
+  every pass (a brief pause, as for `--hit`/`--log`) — before, the line stopped unconditionally,
+  or, while some breakpoint had `--hit`/`--log`, only when one condition held. The "shares its
+  line … it stops there unconditionally" note is gone; function breakpoints keep the
+  unconditional merge, noted "shares its function with another client's breakpoint that has a
+  different condition: it stops there unconditionally".
+- A condition eyedbg evaluates (at such a line, or with `--hit`/`--log`) holds unless its value
+  reads as false (`false`, `0`, `None`, `null`, `nil`, an empty string or collection); before,
+  only a `true` result did, which skipped stops for a C comparison (`1`) and Python truthy values.
+  A condition that fails to evaluate still stops there; `bp add --help` now says that debugpy
+  ignores a failing condition it evaluates itself.
+- `run-until` at a line where another client has a breakpoint reports `reached: false` when the
+  program stopped there only for that client's breakpoint (its condition held, the run-until's
+  `--if` didn't); the missed line names the condition (`did not reach Program.cs:9 with i == 3`).
 
 ### Fixed
 
