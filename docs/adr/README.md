@@ -28,6 +28,7 @@ security model, major dependencies, licensing and the contribution process.
 | [0016](0016-a-csharp-side-helper-for-dotnet-diagnostics.md) | A C# side helper for .NET diagnostics | proposed |
 | [0017](0017-sharpdbg-as-an-alternative-dotnet-adapter.md) | SharpDbg as an alternative .NET adapter | proposed |
 | [0018](0018-per-owner-conditions-at-shared-lines.md) | Per-owner conditions at shared breakpoint lines | proposed |
+| [0019](0019-launch-sessions-and-their-terminals-through-the-dap-facade.md) | Launch sessions through the DAP facade | proposed |
 
 ## Process
 

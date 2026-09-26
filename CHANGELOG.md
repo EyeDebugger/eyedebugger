@@ -170,6 +170,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   schema 1), `eyedbg events` appends `; for breakpoint 6 of human:ijat` to the stop, and the DAP
   facade's `stopped` carries `hitBreakpointIds` (live, at the join and on a resync), so VS Code
   selects the hit breakpoint. Absent when eyedbg didn't decide the stop. Recordings don't keep it.
+- `eyedbg dap --launch [--as CLIENT]` (P2-S3a, ADR 0019): a DAP client's `launch` starts the
+  session, as `eyedbg start` would, as that client (who holds the lease); the daemon is started if
+  needed and `-s` is refused. Launch arguments: `lang` (required), `program`, `project`, `cwd`
+  (relative paths against the command's directory), `args`, `env`, `opts`, `stopOnEntry`,
+  `noBuild`, `leasePolicy`, `exceptions`, `adapter`; other keys are ignored, a key differing from
+  one of these only in case is refused. `initialize` offers both exception filters (one the adapter
+  can't serve is turned off for that client, with a console line); the build streams to that
+  client's debug console as it runs (.NET: `dotnet build -tl:off`, then the program's path from
+  `dotnet msbuild -getProperty:TargetPath`; bounded, never logged); once the adapter is ready the
+  client gets an `eyedbg/session {sessionId}` event, the adapter's capabilities as a
+  `capabilities` event, and `initialized`, and its breakpoints and exception filters are in place
+  before the program runs. The launcher's `terminate` ends and forgets the session (`eyedbg stop`),
+  so a Restart restarts the program; when the launcher leaves, an exited session is forgotten and a
+  live one keeps running. A failed launch is the `launch` response's error. `facade.open` takes
+  `launch` and reports `facadeVersion` 3; `version --json` lists `"dap.launch"`. An adapter's
+  `runInTerminal` is still refused (terminals: S3b).
 
 ### Changed
 
