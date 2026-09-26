@@ -316,9 +316,15 @@ func (c *connection) replayOutput(seq int) []godap.EventMessage {
 // disconnect leaves: holding the event gate, it retracts the mirrors,
 // stops every later event and answers. Leaving never ends the session,
 // whatever the arguments ask; a restart asks the session to wait for the
-// client's next connection.
+// client's next connection. A launch connection first forgets the session
+// it launched if that has exited, without the gate (the forget's events go
+// through it), so the session is gone once the client has its response.
 func (c *connection) disconnect(ctx context.Context, r *godap.DisconnectRequest) {
 	c.restart = r.Arguments != nil && r.Arguments.Restart
+
+	if c.launch != nil {
+		c.forgetExited(ctx)
+	}
 
 	c.gate.Lock()
 	defer c.gate.Unlock()

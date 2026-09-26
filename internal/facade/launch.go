@@ -359,8 +359,10 @@ func (c *connection) afterExceptions() {
 	})
 }
 
-// forgetExited forgets, when the launch connection ends, the session it
-// launched if that has exited (docs/adr/0019); a live one keeps running.
+// forgetExited forgets, when the launch connection ends (on its disconnect
+// request, and again when it closes), the session it launched if that has
+// exited (docs/adr/0019); a live one keeps running. Stop skips the lease
+// check for an exited session; one already forgotten is no error.
 func (c *connection) forgetExited(ctx context.Context) {
 	s := c.launch.launched.Load()
 	if s == nil || s.Info().State != api.StateExited {
