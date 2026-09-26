@@ -106,8 +106,11 @@ func expectExitCode(t *testing.T, info api.SessionInfo, want int) {
 		return
 	}
 
-	if info.ExitCode == nil || *info.ExitCode != want {
-		t.Errorf("exit code = %v, want %d", info.ExitCode, want)
+	switch {
+	case info.ExitCode == nil:
+		t.Errorf("exit code = none (%s), want %d", info.EndReason, want)
+	case *info.ExitCode != want:
+		t.Errorf("exit code = %d (%s), want %d", *info.ExitCode, info.EndReason, want)
 	}
 }
 
