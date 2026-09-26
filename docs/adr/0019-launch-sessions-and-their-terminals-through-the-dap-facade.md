@@ -98,7 +98,8 @@ it, the build streams as DAP `output`) and leaves the joining contract as it is.
   `noBuild` (booleans), `leasePolicy`, `exceptions`, `adapter`. Other keys are ignored (VS Code adds
   `__sessionId`, `__restart`, …; `noDebug` is ignored, so it debugs, as the extension always did).
   A key equal to a known one but for case is refused (`INVALID_REQUEST`: Go's JSON would match it,
-  the client didn't mean it), as are `null` for a typed key and NUL in any value. Relative paths
+  the client didn't mean it), as are `null` for a typed key, NUL in any value, and an `env` or
+  `opts` name that is empty or holds `=` (`eyedbg start`'s `KEY=VALUE` rule). Relative paths
   resolve against the `eyedbg dap` process's directory (`eyedbg start`'s rule); on Windows a path
   relative to a drive or to the current drive's root is refused. Neither `program` nor `project`:
   the project is that directory.

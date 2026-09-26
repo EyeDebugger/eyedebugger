@@ -777,6 +777,11 @@ func TestLaunchParamsRefused(t *testing.T) {
 		"NUL arg":            `{"lang":"python","args":["\u0000"]}`,
 		"NUL env key":        `{"lang":"python","env":{"K\u0000":"v"}}`,
 		"NUL opt value":      `{"lang":"python","opts":{"k":"\u0000"}}`,
+		"empty env key":      `{"lang":"python","env":{"":"v"}}`,
+		"= in env key":       `{"lang":"python","env":{"PATH=/x:":"y"}}`,
+		"= env key":          `{"lang":"python","env":{"=":"y"}}`,
+		"empty opt key":      `{"lang":"python","opts":{"":"v"}}`,
+		"= in opt key":       `{"lang":"python","opts":{"a=b":"v"}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

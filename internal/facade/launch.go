@@ -627,6 +627,13 @@ func mapArg(name string, v any) (map[string]string, error) {
 			return nil, err
 		}
 
+		// As 'eyedbg start' parses --env/--opt KEY=VALUE: a name is
+		// non-empty and holds no "=" (an env name with one would set
+		// another variable). The name isn't echoed.
+		if k == "" || strings.Contains(k, "=") {
+			return nil, invalidLaunch("launch argument " + name + ` has an empty name or one holding "="`)
+		}
+
 		out[k] = s
 	}
 
