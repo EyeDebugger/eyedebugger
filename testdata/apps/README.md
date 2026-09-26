@@ -10,6 +10,16 @@ tests (docs/DESIGN.md §12-13). Go tooling ignores `testdata/`.
 - `dotnet/tests`: an xunit v2 test project (VSTest) for `eyedbg test`; `Adds`
   passes and `Fails` fails. Restoring it needs network access to NuGet
   (Microsoft.NET.Test.Sdk, xunit, xunit.runner.visualstudio).
+- `dotnet/xunit3`: a self-hosting xUnit v3 test app for `eyedbg test` (launched directly under the
+  adapter, not attached to as VSTest is); `Adds` passes, `Fails` fails. Native mode by default; the
+  e2e tests also run it switched to the Microsoft.Testing.Platform runner by writing a
+  `Directory.Build.props` into a copy. Restoring it needs network access to NuGet (xunit.v3).
+- `dotnet/mstest`: a self-hosting MSTest test app (Microsoft.Testing.Platform runner,
+  `EnableMSTestRunner`) for `eyedbg test`, same launch path as `xunit3`; `Adds` passes, `Fails`
+  fails. `<AssemblyName>` is set to `mstest-tests`: NuGet resolves package ids case-insensitively,
+  so the project's default assembly name (`mstest`, from the directory) collides with the `MSTest`
+  package and fails restore with NU1108 otherwise. Restoring it needs network access to NuGet
+  (MSTest).
 - `python/basic`: the Python e2e app (`drivers/generic`, `TestPython*`); run it
   as `python app.py loop|raise|child|wait`.
 - `c/basic`, `cpp/basic`, `rust/basic`: the lldb-dap e2e apps (`drivers/generic`, `TestLldb*`,
