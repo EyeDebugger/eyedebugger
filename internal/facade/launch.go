@@ -211,10 +211,12 @@ func (c *connection) stopAbandoned(ctx context.Context, s *session.Session) {
 	}
 }
 
-// stopLaunched ends and forgets s (session.Manager.Stop, under the lease);
-// a session already gone is no error.
+// stopLaunched ends and forgets s (session.Manager.StopSession, under the
+// lease); a session already gone is no error. It stops s itself, never by
+// id: after the first stop forgot s, a later terminate, disconnect or
+// close calls this again, and a newer session may have reused the id.
 func (c *connection) stopLaunched(ctx context.Context, s *session.Session) error {
-	if _, err := c.launch.mgr.Stop(ctx, c.client, s.ID); err != nil && api.CodeOf(err) != api.CodeNoSession {
+	if _, err := c.launch.mgr.StopSession(ctx, c.client, s); err != nil && api.CodeOf(err) != api.CodeNoSession {
 		return err //nolint:wrapcheck // The session's error is the answer.
 	}
 
