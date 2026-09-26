@@ -127,6 +127,14 @@ func TestTranslate(t *testing.T) {
 			ev:   api.Event{Kind: api.EventStopped, Stop: &api.StopInfo{Reason: "breakpoint", ThreadID: 2, Description: "d", Text: "x", AllThreadsStopped: true}},
 			want: `{"seq":0,"type":"","event":"stopped","body":{"reason":"breakpoint","description":"d","threadId":2,"text":"x","allThreadsStopped":true}}`,
 		},
+		{
+			name: "stopped for breakpoints",
+			ev: api.Event{Kind: api.EventStopped, Stop: &api.StopInfo{
+				Reason: "breakpoint", ThreadID: 2,
+				Breakpoints: []api.StopBreakpoint{{ID: 5, Owner: "agent"}, {ID: 6, Owner: "human:t"}},
+			}},
+			want: `{"seq":0,"type":"","event":"stopped","body":{"reason":"breakpoint","threadId":2,"hitBreakpointIds":[5,6]}}`,
+		},
 		{name: "own exec", ev: api.Event{Kind: api.EventExec, Client: "human:t", Action: "continue"}, want: ""},
 		{
 			name: "other's continue", ev: api.Event{Kind: api.EventExec, Client: "agent", Action: "continue"},

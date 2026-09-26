@@ -115,8 +115,23 @@ func stoppedEvent(stop *api.StopInfo, st *followState, hint bool) []godap.EventM
 
 	return []godap.EventMessage{&godap.StoppedEvent{Event: event("stopped"), Body: godap.StoppedEventBody{
 		Reason: stop.Reason, ThreadId: stop.ThreadID, Description: stop.Description, Text: stop.Text,
-		AllThreadsStopped: stop.AllThreadsStopped, PreserveFocusHint: hint,
+		AllThreadsStopped: stop.AllThreadsStopped, PreserveFocusHint: hint, HitBreakpointIds: hitIDs(stop.Breakpoints),
 	}}}
+}
+
+// hitIDs are the ids of the breakpoints eyedbg decided a stop is for, in
+// order; nil (omitted) when it didn't decide it.
+func hitIDs(bps []api.StopBreakpoint) []int {
+	if len(bps) == 0 {
+		return nil
+	}
+
+	ids := make([]int, len(bps))
+	for i, b := range bps {
+		ids[i] = b.ID
+	}
+
+	return ids
 }
 
 // runs reports whether an exec action makes the program run or stop (not

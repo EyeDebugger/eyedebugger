@@ -2,9 +2,10 @@
 2  agent  /other/Lib.cs:12 (requested line 10)  verified
 3  human:ijat  Late.cs:7  pending: pending until the module loads
 4  agent  Program.cs:9 if i == 3 (run-until, temporary)  verified
-5  agent  Program.cs:12 if n > 1  verified  note: shares its line with another client's breakpoint that has a different condition: it stops there unconditionally
-6  human:ijat  Program.cs:12 if n > 2  verified  note: shares its line with another client's breakpoint that has a different condition: it stops there unconditionally
-7  agent  func:Orders.Price  verified
+5  agent  Program.cs:12 if n > 1  verified
+6  human:ijat  Program.cs:12 if n > 2  verified
+7  agent  func:Orders.Price if qty > 10  verified  note: shares its function with another client's breakpoint that has a different condition: it stops there unconditionally
 8  human:ijat  func:Orders.Missing  pending: no function Orders.Missing
 9  agent  Program.cs:15 @"total += price" hit >=3 (requested line 14)  verified  hits 4
 10  agent  Program.cs:20 log "i={i} total={total}"  verified  hits 2  note: Program.cs changed after the session started: the program runs the code it was built from, so this line may not match it (restart the session to debug the new code)
+11  human:ijat  func:Orders.Price if qty > 1  verified  note: shares its function with another client's breakpoint that has a different condition: it stops there unconditionally

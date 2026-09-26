@@ -72,20 +72,23 @@ func TestSessionRendering(t *testing.T) {
 			{Name: "[0]", Type: "int", Value: "7"}, {Name: "[1]", Type: "int", Value: "9"},
 		}},
 	}}}
+	const funcNote = "shares its function with another client's breakpoint that has a different condition: it stops there unconditionally"
+
 	bps := []api.Breakpoint{
 		{ID: 1, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 4, Line: 4, Verified: true},
 		{ID: 2, Owner: "agent", File: "/other/Lib.cs", RequestedLine: 10, Line: 12, Verified: true},
 		{ID: 3, Owner: "human:ijat", File: "/work/app/Late.cs", RequestedLine: 7, Line: 7, Message: "pending until the module loads"},
 		{ID: 4, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 9, Line: 9, Verified: true, Condition: "i == 3", Temporary: true},
-		{ID: 5, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 12, Line: 12, Verified: true, Condition: "n > 1", Note: "shares its line with another client's breakpoint that has a different condition: it stops there unconditionally"},
-		{ID: 6, Owner: "human:ijat", File: "/work/app/Program.cs", RequestedLine: 12, Line: 12, Verified: true, Condition: "n > 2", Note: "shares its line with another client's breakpoint that has a different condition: it stops there unconditionally"},
-		{ID: 7, Owner: "agent", Function: "Orders.Price", Verified: true},
+		{ID: 5, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 12, Line: 12, Verified: true, Condition: "n > 1"},
+		{ID: 6, Owner: "human:ijat", File: "/work/app/Program.cs", RequestedLine: 12, Line: 12, Verified: true, Condition: "n > 2"},
+		{ID: 7, Owner: "agent", Function: "Orders.Price", Verified: true, Condition: "qty > 10", Note: funcNote},
 		{ID: 8, Owner: "human:ijat", Function: "Orders.Missing", Message: "no function Orders.Missing"},
 		{ID: 9, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 14, Line: 15, Anchor: "total += price", Verified: true, HitCondition: ">=3", Hits: 4},
 		{
 			ID: 10, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 20, Line: 20, Verified: true, LogMessage: "i={i} total={total}", Hits: 2,
 			Note: "Program.cs changed after the session started: the program runs the code it was built from, so this line may not match it (restart the session to debug the new code)",
 		},
+		{ID: 11, Owner: "human:ijat", Function: "Orders.Price", Verified: true, Condition: "qty > 1", Note: funcNote},
 	}
 
 	tests := []struct {
@@ -153,6 +156,17 @@ func TestSessionRendering(t *testing.T) {
 		{"run-until missed", "snapshot_run_until_missed.golden", func(b *bytes.Buffer) error {
 			snap, reached := stoppedSnapshot(), false
 			snap.Reached, snap.Target = &reached, &api.BreakpointSpec{File: "/work/app/Program.cs", Line: 9}
+
+			return writeSnapshot(b, snap, false, renderBase)
+		}},
+		{"snapshot attributed", "snapshot_attributed.golden", func(b *bytes.Buffer) error { return writeSnapshot(b, attributedSnapshot(), false, renderBase) }},
+		{"snapshot attributed json", "snapshot_attributed_json.golden", func(b *bytes.Buffer) error {
+			return writeSnapshot(b, attributedSnapshot(), true, renderBase)
+		}},
+		{"run-until missed with a condition", "snapshot_run_until_condition.golden", func(b *bytes.Buffer) error {
+			snap, reached := attributedSnapshot(), false
+			snap.Session.Stop.Breakpoints = snap.Session.Stop.Breakpoints[1:]
+			snap.Reached, snap.Target = &reached, &api.BreakpointSpec{File: "/work/app/Program.cs", Line: 4, Condition: "i == 3"}
 
 			return writeSnapshot(b, snap, false, renderBase)
 		}},
@@ -283,6 +297,15 @@ func sharedSnapshot() api.Snapshot {
 	return snap
 }
 
+// attributedSnapshot is a stop eyedbg decided at a line two clients'
+// breakpoints share with different conditions, both of which held.
+func attributedSnapshot() api.Snapshot {
+	snap := sharedSnapshot()
+	snap.Session.Stop.Breakpoints = []api.StopBreakpoint{{ID: 5, Owner: "agent"}, {ID: 6, Owner: "human:ijat"}}
+
+	return snap
+}
+
 // sampleEvents is the example of the events help: two clients, a lease
 // handed over and taken back, the program's end. Values are synthetic.
 func sampleEvents() api.EventsResult {
@@ -332,6 +355,8 @@ func otherEvents() api.EventsResult {
 		{Kind: api.EventBreakpoint, Action: "changed", Breakpoint: &moved},
 		{Kind: api.EventBreakpoint, Action: "changed", Breakpoint: &pending},
 		{Kind: api.EventOutput, Category: "stderr", Text: "warn", Truncated: true},
+		{Kind: api.EventContinued, ThreadID: 4242},
+		{Kind: api.EventStopped, Stop: &api.StopInfo{Reason: "breakpoint", ThreadID: 4242, Breakpoints: []api.StopBreakpoint{{ID: 6, Owner: "human:ijat"}}}},
 		{Kind: api.EventThread, Reason: "exited", ThreadID: 4243},
 		{Kind: api.EventEnded, Reason: "stopped by human:ijat", Client: "human:ijat"},
 	}
@@ -340,7 +365,7 @@ func otherEvents() api.EventsResult {
 		events[i].Seq, events[i].Time = 40+i, renderTime
 	}
 
-	return api.EventsResult{Events: events, Latest: 54, More: 39}
+	return api.EventsResult{Events: events, Latest: 56, More: 39}
 }
 
 // sampleExceptions has two clients' exception modes.
