@@ -133,12 +133,18 @@ type Session struct {
 	// sideEffects is the driver's check of eval expressions (nil: none).
 	sideEffects func(expr string) (string, bool)
 	// adapter names the adapter; pauseUnsupported is the hint of a refused
-	// pause ("" allows pause); setByEval lets set assign by evaluate (all
-	// the driver's Launch settings; a test run's are set once its host is
-	// known).
+	// pause ("" allows pause); setByEval lets set assign by evaluate;
+	// exitCodeUnknown is why the adapter's exit codes can't be trusted ("":
+	// they can) (all the driver's Launch settings; a test run's are set
+	// once its host is known).
 	adapter          string
 	pauseUnsupported string
 	setByEval        bool
+	exitCodeUnknown  string
+	// programExited is set once the program has exited under an adapter
+	// whose exit codes aren't trusted (exitCodeUnknown != ""): exitCode
+	// stays nil, but endReasonLocked still says the program is done.
+	programExited bool
 	// curStale means cur's values may have changed (set, eval with side
 	// effects): the next capture refetches them.
 	curStale bool
@@ -209,6 +215,7 @@ func newSession(life context.Context, id, lang, mode string, launch Launch, logg
 		adapter:          launch.AdapterName,
 		pauseUnsupported: launch.PauseUnsupported,
 		setByEval:        launch.SetByEval,
+		exitCodeUnknown:  launch.ExitCodeUnknown,
 	}
 }
 
@@ -511,10 +518,24 @@ func (s *Session) onContinuedLocked(e *godap.ContinuedEvent) {
 }
 
 // onExitedLocked records the program's exit code; a test host's is only
-// noted (the session's is its runner's).
+// noted (the session's is its runner's). Under an adapter marked
+// exitCodeUnknown, no exit code is trusted: it is dropped in both cases,
+// and endReasonLocked explains why once the session ends.
 func (s *Session) onExitedLocked(e *godap.ExitedEvent) {
 	if s.run != nil {
-		s.hostExitedLocked(e.Body.ExitCode)
+		if s.exitCodeUnknown != "" {
+			s.appendOutputLocked("console", "eyedbg: the test host exited\n")
+		} else {
+			s.hostExitedLocked(e.Body.ExitCode)
+		}
+
+		return
+	}
+
+	if s.exitCodeUnknown != "" {
+		s.programExited = true
+		s.bump()
+		s.log.append(api.Event{Kind: api.EventExited})
 
 		return
 	}
@@ -552,10 +573,23 @@ func (s *Session) watchAdapter() {
 
 // endReasonLocked is def, unless s is a launched test run (mode test, no
 // runner) that reported an exit code: then it names it, as a runner's test
-// run does in finishRun.
+// run does in finishRun. When the program exited under an adapter whose
+// exit code isn't trusted (exitCodeUnknown), it says so instead, with
+// finishRun's "read the test output" hint for a launched test run.
 func (s *Session) endReasonLocked(def string) string {
-	if s.mode == api.ModeTest && s.run == nil && s.exitCode != nil {
-		return fmt.Sprintf("the test run finished: the test app exited with code %d", *s.exitCode)
+	if s.mode == api.ModeTest && s.run == nil {
+		if s.exitCode != nil {
+			return fmt.Sprintf("the test run finished: the test app exited with code %d", *s.exitCode)
+		}
+
+		if s.programExited {
+			return fmt.Sprintf("the test run finished; the test app's exit code is unknown (%s): read the test output for the result",
+				s.exitCodeUnknown)
+		}
+	}
+
+	if s.programExited {
+		return def + "; its exit code is unknown (" + s.exitCodeUnknown + ")"
 	}
 
 	return def

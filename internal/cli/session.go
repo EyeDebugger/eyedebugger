@@ -153,7 +153,9 @@ an installed SharpDbg is used without --adapter (on Windows on Arm, which has no
 with it: unverified there). Under SharpDbg, pause is refused
 (UNSUPPORTED_BY_ADAPTER: it stops the program without saying where), 'eyedbg set' runs the
 assignment as an expression, and eval also runs lambdas and LINQ (with --allow-side-effects) and
-shows [DebuggerDisplay] values. 'eyedbg sessions' shows each session's adapter.`
+shows [DebuggerDisplay] values. 'eyedbg sessions' shows each session's adapter. On macOS,
+netcoredbg reports every program's exit code as 0, so its sessions end without one (the end
+reason says so; the program's or test run's output tells the result, or use --adapter sharpdbg).`
 
 // sessionFlags are the flags every command that creates a session has
 // (start, attach, test).

@@ -46,7 +46,8 @@ const (
 	EventBreakpoint EventKind = "breakpoint"
 	// EventThread: Reason (started, exited), ThreadID.
 	EventThread EventKind = "thread"
-	// EventExited: ExitCode.
+	// EventExited: ExitCode, absent when the adapter's can't be trusted
+	// (session.Launch.ExitCodeUnknown).
 	EventExited EventKind = "exited"
 	// EventEnded: Reason, Client when a client stopped the session.
 	EventEnded EventKind = "ended"
