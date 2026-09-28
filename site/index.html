@@ -733,12 +733,12 @@ html.vt *, html.vt *::before, html.vt *::after { transition: none !important; }
       EyeDebugger
     </a>
     <nav class="nav-links" id="nav-links" aria-label="Sections">
+      <a href="#what">What is eyedbg?</a>
       <a href="#how">How it works</a>
-      <a href="#features">Features</a>
-      <a href="#co">Co-debugging</a>
-      <a href="#dotnet">.NET</a>
+      <a href="#vscode">VS Code</a>
       <a href="#languages">Languages</a>
       <a href="#install">Install</a>
+      <a href="#features">Features</a>
       <a href="#faq">FAQ</a>
     </nav>
     <div class="nav-actions">
@@ -868,6 +868,28 @@ html.vt *, html.vt *::before, html.vt *::after { transition: none !important; }
     </div>
   </div>
 </div>
+
+<!-- ============ what is eyedbg ============ -->
+<section id="what">
+  <div class="wrap">
+    <div class="sec-head" data-reveal>
+      <span class="eyebrow">What is eyedbg?</span>
+      <h2>It's a debugger. <span class="grad">Your agent drives it.</span></h2>
+      <p class="lede">eyedbg is free and open source. Your AI coding agent runs it from the terminal to set breakpoints, step through code and read the program's real values while it runs. Join the same session from VS Code any time you want to look, or take over.</p>
+    </div>
+    <ul class="list" data-stagger>
+      <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
+        <div><h3>What it is</h3><p>A CLI debugger for .NET, Python, Go, C, C++ and Rust. A daemon holds the session; the agent, and you if you join, are just clients of it.</p></div></li>
+      <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg></span>
+        <div><h3>The problem it solves</h3><p>When a fix based on reading the code doesn't work, agents start guessing and printing more logs. eyedbg lets an agent stop at the real line and check the real values instead.</p></div></li>
+      <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/></svg></span>
+        <div><h3>Who it's for</h3><p>Developers using a coding agent on .NET, Python, Go, C, C++ or Rust, who don't want to buy a commercial IDE just to get a debugger.</p></div></li>
+      <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M2 8.8a15 15 0 0 1 20 0"/><path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><path d="M12 19.5h.01"/><path d="M3 3l18 18"/></svg></span>
+        <div><h3>What it can't do yet</h3><p>No remote or mobile debugging, no browser JavaScript, and it's not an IDE, just a debugger for a program on your machine. You don't need it for a compile error either.</p></div></li>
+    </ul>
+    <p class="lede" data-reveal style="margin-top:28px">Curious how it works? Keep reading, or jump straight to <a class="text-link" href="#install">install</a>.</p>
+  </div>
+</section>
 
 <!-- ============ why ============ -->
 <section id="why">
@@ -1013,6 +1035,121 @@ session s-7f3k ended</code></pre></div>
   </div>
 </section>
 
+<!-- ============ VS Code extension ============ -->
+<section id="vscode">
+  <div class="wrap">
+    <div class="sec-head" data-reveal>
+      <span class="eyebrow">VS Code extension</span>
+      <h2>Join from VS Code. <span class="grad">Or start there.</span></h2>
+      <p class="lede">EyeDebugger is a real, first-party VS Code extension (id <code>eyedebugger.eyedbg</code>). Join the agent's live session, or press F5 and let the agent join you. Same breakpoints, same stops, one control lease that says who's driving.</p>
+    </div>
+    <div class="co" id="co">
+      <ul class="list" data-stagger>
+        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg></span>
+          <div><h3>Install it</h3><p>Grab the VSIX from any <a class="text-link" href="https://github.com/EyeDebugger/eyedebugger/releases/latest">GitHub release</a> and install it: <code>code --install-extension eyedebugger_X.Y.Z_vscode.vsix</code>. It finds <code>eyedbg</code> on your PATH, or set <code>eyedbg.path</code> yourself. Full steps are in Install below.</p></div></li>
+        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M12 14.5V21M9.6 11.2L3.5 9.5M14.4 11.2l6.1-1.7"/></svg></span>
+          <div><h3>A control lease, not a free-for-all</h3><p>Exactly one client holds execution control: continue, step, pause, <code>set</code> and side-effecting eval. Everyone else can read state, set their own breakpoints and ask for control.</p></div></li>
+        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></span>
+          <div><h3>Breakpoints keep their owners</h3><p>The agent's breakpoints show in your editor with whose they are and what they do (<code>⬥ agent · if total &gt; 3</code>). Removing one only hides it for you; <em>Copy as My Breakpoint</em> makes it yours.</p></div></li>
+        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
+          <div><h3>Follow the agent, keep your focus</h3><p>When the agent's step stops, VS Code shows the line without taking your keyboard focus. The Activity and Clients views list what each client did, who is connected and who has control.</p></div></li>
+        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
+          <div><h3>Join when an agent starts</h3><p>When an agent starts debugging a program in your workspace, VS Code offers to join — once per session, and never without your click.</p></div></li>
+        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M7 4l12 8-12 8z"/></svg></span>
+          <div><h3>F5 launches your own</h3><p>Every launch attribute from the CLI works in <code>launch.json</code> too: language, program or project, args, env, exceptions and more. For Python, <code>console: integratedTerminal</code> runs it in a real terminal, so <code>input()</code> works.</p></div></li>
+        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M9 7V3M15 7V3"/><path d="M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/></svg></span>
+          <div><h3>Any DAP client</h3><p><code>eyedbg dap</code> speaks standard DAP on stdio and joins a running session under the same rules — for nvim-dap, scripts or another editor.</p></div></li>
+      </ul>
+      <div>
+        <div class="card lease" data-reveal="scale" id="lease-demo">
+          <div class="lease-top"><b>Session s-7f3k</b><span class="policy">policy: free</span></div>
+          <div class="clients">
+            <div class="client"><span class="av a"><svg viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4"/><circle cx="12" cy="3" r="1"/><path d="M9 14h.01M15 14h.01"/></svg></span><div><b>agent</b><small>eyedbg CLI · seen just now</small></div></div>
+            <div class="client"><span class="av h"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span><div><b>human:alex</b><small>VS Code · connected</small></div><span class="req">requested control</span></div>
+            <span class="token"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M12 14.5V21M9.6 11.2L3.5 9.5M14.4 11.2l6.1-1.7"/></svg>CONTROL</span>
+          </div>
+          <div class="lease-log" aria-live="off"><span>agent holds the lease under the default policy.</span></div>
+          <div class="policies">
+            <div><code>free</code><span>The default. Anyone can take control; running or stepping takes it automatically.</span></div>
+            <div><code>handoff</code><span>Only the holder releases control or gives it to someone.</span></div>
+            <div><code>human-priority</code><span>Like handoff, but a human can always take control from an agent. Agents never take it from one another.</span></div>
+          </div>
+        </div>
+        <div class="co-code" data-reveal>
+          <div class="tabs" role="tablist" aria-label="Joining a session">
+            <span class="tab-ind" aria-hidden="true"></span>
+            <button class="tab" type="button" role="tab" id="t-join" aria-controls="p-join" aria-selected="true">Join in VS Code</button>
+            <button class="tab" type="button" role="tab" id="t-launch" aria-controls="p-launch" aria-selected="false" tabindex="-1">Start with F5</button>
+            <button class="tab" type="button" role="tab" id="t-term" aria-controls="p-term" aria-selected="false" tabindex="-1">Terminal input</button>
+            <button class="tab" type="button" role="tab" id="t-open" aria-controls="p-open2" aria-selected="false" tabindex="-1">Browser</button>
+            <button class="tab" type="button" role="tab" id="t-nvim" aria-controls="p-nvim" aria-selected="false" tabindex="-1">nvim-dap</button>
+            <button class="tab" type="button" role="tab" id="t-agent" aria-controls="p-agent" aria-selected="false" tabindex="-1">Agent's side</button>
+          </div>
+          <div class="panel" role="tabpanel" id="p-join" aria-labelledby="t-join">
+            <div class="code" data-lang="json"><div class="code-bar"><span class="lang file">.vscode/launch.json</span></div><pre><code>{
+  "type": "eyedbg",
+  "request": "attach",
+  "name": "Join eyedbg session"
+}</code></pre></div>
+          </div>
+          <div class="panel" role="tabpanel" id="p-launch" aria-labelledby="t-launch" hidden>
+            <div class="code" data-lang="json"><div class="code-bar"><span class="lang file">.vscode/launch.json</span></div><pre><code>{
+  "type": "eyedbg",
+  "request": "launch",
+  "name": "Debug Shop",
+  "lang": "dotnet",
+  "project": "${workspaceFolder}/src/Shop",
+  "leasePolicy": "human-priority"
+}</code></pre></div>
+          </div>
+          <div class="panel" role="tabpanel" id="p-term" aria-labelledby="t-term" hidden>
+            <div class="code" data-lang="json"><div class="code-bar"><span class="lang file">.vscode/launch.json</span></div><pre><code>{
+  "type": "eyedbg",
+  "request": "launch",
+  "name": "app.py (eyedbg)",
+  "lang": "python",
+  "program": "${workspaceFolder}/app.py",
+  "console": "integratedTerminal"
+}</code></pre></div>
+          </div>
+          <div class="panel" role="tabpanel" id="p-open2" aria-labelledby="t-open" hidden>
+            <div class="code" data-lang="json"><div class="code-bar"><span class="lang file">.vscode/launch.json</span></div><pre><code>{
+  "type": "eyedbg",
+  "request": "launch",
+  "name": "eyedbg: dotnet web",
+  "lang": "dotnet",
+  "project": "${workspaceFolder}/dotnetweb.csproj",
+  "serverReadyAction": {
+    "action": "openExternally",
+    "pattern": "\\bNow listening on:\\s+(https?://\\S+)"
+  }
+}</code></pre></div>
+          </div>
+          <div class="panel" role="tabpanel" id="p-nvim" aria-labelledby="t-nvim" hidden>
+            <div class="code" data-lang="lua"><div class="code-bar"><span class="lang file">init.lua</span></div><pre><code>local dap = require('dap')
+dap.adapters.eyedbg = {
+  type = 'executable',
+  command = 'eyedbg',
+  args = { 'dap', '--as', 'human:alex' },
+}
+dap.configurations.cs = {
+  { type = 'eyedbg', request = 'attach', name = 'Join eyedbg session' },
+}</code></pre></div>
+          </div>
+          <div class="panel" role="tabpanel" id="p-agent" aria-labelledby="t-agent" hidden>
+            <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg sessions                                    # who is connected, who has control
+eyedbg lease request --message 'let me step into Total()'
+eyedbg events --wait --kind lease                  # wait for the answer
+eyedbg lease grant human:alex                      # hand control to a human</code></pre></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><div class="sep"></div></div>
+
 <!-- ============ demo: video and screenshots ============
      Slots for the demo video and screenshots. Until a source is set they show placeholders.
      To publish one, set its data attribute — see site/README.md:
@@ -1067,6 +1204,158 @@ session s-7f3k ended</code></pre></div>
         </div>
         <figcaption><b>.NET diagnostics</b>Counters, heap, threads and CPU traces, in VS Code.</figcaption>
       </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ============ languages ============ -->
+<section id="languages">
+  <div class="wrap">
+    <div class="sec-head center" data-reveal>
+      <span class="eyebrow">Languages</span>
+      <h2>Six languages, <span class="grad">one interface</span></h2>
+      <p class="lede">The same commands, the same output and the same rules for every language. Adding one takes a JSON adapter manifest, not a new driver.</p>
+    </div>
+    <div class="langs" data-stagger>
+      <article class="card glow" data-reveal>
+        <div class="lang-top"><span class="badge" style="--c:#6d28d9">.NET</span><div><h3>.NET</h3><small>netcoredbg · SharpDbg (opt-in)</small></div></div>
+        <p>Builds your project and debugs it, attaches to a running process or a test run. SharpDbg adds lambdas and LINQ in eval. You install either one with a single eyedbg command.</p>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters install netcoredbg
+eyedbg start dotnet --project src/Shop --bp Orders.cs:18
+eyedbg test dotnet Adds --bp 'CalculatorTests.cs@"Assert.Equal"'</code></pre></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="lang-top"><span class="badge" style="--c:#2563eb">Py</span><div><h3>Python</h3><small>debugpy</small></div></div>
+        <p>Runs a script or a module like <code>python -m</code>. Finds your interpreter: <code>--opt python=PATH</code>, your active virtualenv, the project's <code>.venv</code>, then PATH.</p>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters install python
+eyedbg start python --program app.py --bp app.py:7
+eyedbg start python --opt module=pytest -- -x tests/test_orders.py</code></pre></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="lang-top"><span class="badge" style="--c:#0891b2">Go</span><div><h3>Go</h3><small>Delve</small></div></div>
+        <p>Debugs a package, a built binary (<code>--opt mode=exec</code>) or a package's tests, over a private Unix socket. Function breakpoints are package-qualified.</p>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters install delve
+eyedbg start go --program ./cmd/shop --bp main.go:20
+eyedbg start go --program ./internal/orders --opt mode=test</code></pre></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="lang-top"><span class="badge" style="--c:#4f46e5">C</span><div><h3>C and C++</h3><small>LLVM lldb-dap</small></div></div>
+        <p>Uses the <code>lldb-dap</code> on your PATH, or the one <code>EYEDBG_LLDB_DAP</code> names. In C++, <code>--exceptions all</code> stops at every throw.</p>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg start c --program ./build/app --bp main.c:20
+eyedbg start cpp --program ./build/app --exceptions all</code></pre></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="lang-top"><span class="badge" style="--c:#be123c">Rs</span><div><h3>Rust</h3><small>LLVM lldb-dap</small></div></div>
+        <p>Debugs your debug build with lldb-dap. Import Rust's LLDB formatters in <code>~/.lldbinit</code> to read <code>String</code>, <code>Vec</code> and <code>HashMap</code> values.</p>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>cargo build
+eyedbg start rust --program ./target/debug/shop --bp src/main.rs:20</code></pre></div>
+      </article>
+      <article class="card glow" data-reveal>
+        <div class="lang-top"><span class="badge" style="--c:#047857">{ }</span><div><h3>Your own</h3><small>an adapter manifest</small></div></div>
+        <p>A JSON manifest says how to download, find and launch a DAP adapter and how to fill its launch request. Yours live in <code>~/.eyedbg/adapters</code>, trusted like your shell config — never read from a project.</p>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters ls        # bundled and your own
+eyedbg adapters doctor    # checks each one it knows</code></pre></div>
+      </article>
+    </div>
+    <div class="platforms" data-reveal><span>Linux x64</span><span>Linux arm64</span><span>macOS arm64</span><span>macOS x64</span><span>Windows x64</span><span>Windows arm64</span></div>
+    <div class="note" data-reveal>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+      <span>Not supported yet: mobile targets (Android, iOS, .NET MAUI), WebAssembly, JavaScript and Node.js, Java and Kotlin, Ruby, PHP, and a process on another machine. Your own adapter manifest can add a language eyedbg doesn't bundle (<code>docs/adapter-manifests.md</code>).</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============ install ============ -->
+<section id="install">
+  <div class="wrap">
+    <div class="sec-head" data-reveal>
+      <span class="eyebrow">Install</span>
+      <h2>Get it running, <span class="grad">your way.</span></h2>
+      <p class="lede">Give your agent the prompt below and it handles all of this, or do each step yourself. Either way, it's once per machine.</p>
+    </div>
+    <div class="card glow" data-reveal style="margin-bottom:28px">
+      <h3>Let your agent install it</h3>
+      <p>Copy this into your agent's chat. It works out your OS, downloads the right release, checks it against <code>checksums.txt</code>, and asks what you want before it changes anything.</p>
+      <div class="code" data-lang="text">
+        <div class="code-bar"><span class="lang">install-prompt.txt</span></div>
+        <pre><code id="install-prompt">Please install eyedbg (EyeDebugger) on this machine for me. It's a free, open-source debugger that
+AI coding agents drive from the terminal, and I can join the same debug session from VS Code.
+Project: https://github.com/EyeDebugger/eyedebugger
+
+1. Work out my OS (Linux, macOS or Windows) and CPU (x64 or arm64).
+
+2. Before installing anything, ask me which of these I want. Use your question tool if you have
+   one, otherwise show a numbered list; I can pick several.
+   - eyedbg itself: the eyedbg CLI and its eyedbgd daemon (always installed)
+   - .NET: netcoredbg (the default), and optionally SharpDbg (it bundles a Microsoft library whose
+     license isn't open source; `eyedbg help adapters install` explains)
+   - Python: debugpy
+   - Go: Delve
+   - C, C++ and Rust: LLVM's lldb-dap (from my OS's LLVM package, not from eyedbg)
+   - The VS Code extension
+   - The eyedbg skill for you (the agent)
+
+3. Open https://github.com/EyeDebugger/eyedebugger/releases and take the newest release (the newest
+   stable one; if there is none yet, the newest pre-release). Download checksums.txt and the archive
+   for my system: eyedebugger_&lt;version&gt;_&lt;os&gt;_&lt;arch&gt;.tar.gz on Linux and macOS, .zip on Windows,
+   where &lt;os&gt; is linux, darwin or windows and &lt;arch&gt; is amd64 or arm64.
+
+4. Check the archive before using it. checksums.txt has one "&lt;sha256&gt;  &lt;file name&gt;" line per file.
+   Find the line whose file name is exactly the archive's name, compute the archive's SHA-256, and
+   compare (ignore upper/lower case). If there is no such line, more than one, or the hashes differ,
+   stop and tell me; don't continue without that check. If the gh CLI is installed, also run
+   gh attestation verify &lt;archive&gt; -R EyeDebugger/eyedebugger and stop if it fails.
+
+5. Unpack the whole archive into a folder of its own that my user owns (for example
+   ~/.local/share/eyedbg, or %LOCALAPPDATA%\Programs\eyedbg on Windows). Keep eyedbg, eyedbgd and
+   the helpers folder together in it. Add that folder to my PATH for new terminals (or link eyedbg
+   and eyedbgd into a folder already on PATH). Don't use sudo or admin rights unless I say so.
+
+6. Run: eyedbg version
+
+7. For each language I picked, run the matching command:
+   eyedbg adapters install netcoredbg
+   eyedbg adapters install sharpdbg
+   eyedbg adapters install debugpy
+   eyedbg adapters install delve
+   For C, C++ or Rust, install lldb-dap 18 or newer with my OS's package manager (ask me first). If
+   it isn't on PATH as lldb-dap, set EYEDBG_LLDB_DAP to its full path.
+   Then run eyedbg adapters doctor with the languages I picked (for example:
+   eyedbg adapters doctor dotnet python) and fix what it reports.
+
+8. VS Code extension: download eyedebugger_&lt;version&gt;_vscode.vsix from the same release, check it
+   against checksums.txt the same way as in step 4, then run:
+   code --install-extension &lt;the .vsix file&gt;
+
+9. The skill: eyedbg skill install puts it where Claude Code looks. For another agent, use
+   eyedbg skill install --dir &lt;your skills folder&gt;. Tell me to restart you so you load it.
+
+Only use the debug adapters eyedbg installs or finds itself. Don't download or set up any other
+debugger. When you're done, tell me what you installed, where, and anything I still need to do.</code></pre>
+      </div>
+    </div>
+    <p class="lede" data-reveal style="margin:0 0 28px">Prefer doing it by hand? Here's every step.</p>
+    <div class="install">
+      <div class="card inst" data-reveal>
+        <div><h3>Get eyedbg</h3><p>Download the archive for your platform from <a class="text-link" href="https://github.com/EyeDebugger/eyedebugger/releases/latest">the latest release</a>: <code>eyedbg</code>, <code>eyedbgd</code> and the .NET side helper. Keep them together on your PATH, and check the archive was built by the project's release workflow. With Go 1.26 or later, <code>go install</code> works too (without the .NET helper).</p></div>
+        <div>
+          <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Verify a download</span></div><pre><code>gh attestation verify eyedebugger_X.Y.Z_linux_amd64.tar.gz -R EyeDebugger/eyedebugger</code></pre></div>
+          <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Or with Go</span></div><pre><code>go install github.com/eyedebugger/eyedebugger/cmd/eyedbg@latest github.com/eyedebugger/eyedebugger/cmd/eyedbgd@latest</code></pre></div>
+        </div>
+      </div>
+      <div class="card inst" data-reveal>
+        <div><h3>Install a debug adapter</h3><p>Pinned and checksum-verified. Name an adapter or a language; C, C++ and Rust use the <code>lldb-dap</code> on your PATH. <code>doctor</code> checks what you have.</p></div>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters install netcoredbg   # or: python, delve, sharpdbg
+eyedbg adapters doctor</code></pre></div>
+      </div>
+      <div class="card inst" data-reveal>
+        <div><h3>Teach your agent</h3><p>Installs the skill for Claude Code. For another agent, use <code>--dir</code> with its skills folder, or point it at <code>eyedbg help --all</code>.</p></div>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg skill install</code></pre></div>
+      </div>
+      <div class="card inst" data-reveal>
+        <div><h3>Join from VS Code</h3><p>Install the EyeDebugger extension from the VSIX attached to each release. It finds <code>eyedbg</code> on your PATH, or set <code>eyedbg.path</code>.</p></div>
+        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>code --install-extension eyedebugger_X.Y.Z_vscode.vsix</code></pre></div>
+      </div>
     </div>
   </div>
 </section>
@@ -1155,92 +1444,6 @@ session s-7f3k (dotnet, netcoredbg) stopped: step, thread 4242
     </div>
   </div>
 </section>
-
-<!-- ============ co-debugging ============ -->
-<section id="co">
-  <div class="wrap">
-    <div class="sec-head" data-reveal>
-      <span class="eyebrow">Co-debugging</span>
-      <h2>One session. <span class="grad">Two drivers.</span></h2>
-      <p class="lede">Join the agent's live session from VS Code, or start one with F5 and let the agent join you. You see where it stopped, its breakpoints and everything it does; a control lease decides who drives.</p>
-    </div>
-    <div class="co">
-      <ul class="list" data-stagger>
-        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M12 14.5V21M9.6 11.2L3.5 9.5M14.4 11.2l6.1-1.7"/></svg></span>
-          <div><h3>A control lease, not a free-for-all</h3><p>Exactly one client holds execution control: continue, step, pause, <code>set</code> and side-effecting eval. Everyone else can read state, set their own breakpoints and ask for control.</p></div></li>
-        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></span>
-          <div><h3>Breakpoints keep their owners</h3><p>The agent's breakpoints show in your editor with whose they are and what they do (<code>⬥ agent · if total &gt; 3</code>). Removing one only hides it for you; <em>Copy as My Breakpoint</em> makes it yours.</p></div></li>
-        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
-          <div><h3>Follow the agent, keep your focus</h3><p>When the agent's step stops, VS Code shows the line without taking your keyboard focus. The Activity and Clients views list what each client did, who is connected and who has control.</p></div></li>
-        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
-          <div><h3>Join when an agent starts</h3><p>When an agent starts debugging a program in your workspace, VS Code offers to join — once per session, and never without your click.</p></div></li>
-        <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M9 7V3M15 7V3"/><path d="M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/></svg></span>
-          <div><h3>Any DAP client</h3><p><code>eyedbg dap</code> speaks standard DAP on stdio and joins a running session under the same rules — for nvim-dap, scripts or another editor.</p></div></li>
-      </ul>
-      <div>
-        <div class="card lease" data-reveal="scale" id="lease-demo">
-          <div class="lease-top"><b>Session s-7f3k</b><span class="policy">policy: free</span></div>
-          <div class="clients">
-            <div class="client"><span class="av a"><svg viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4"/><circle cx="12" cy="3" r="1"/><path d="M9 14h.01M15 14h.01"/></svg></span><div><b>agent</b><small>eyedbg CLI · seen just now</small></div></div>
-            <div class="client"><span class="av h"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span><div><b>human:alex</b><small>VS Code · connected</small></div><span class="req">requested control</span></div>
-            <span class="token"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M12 14.5V21M9.6 11.2L3.5 9.5M14.4 11.2l6.1-1.7"/></svg>CONTROL</span>
-          </div>
-          <div class="lease-log" aria-live="off"><span>agent holds the lease under the default policy.</span></div>
-          <div class="policies">
-            <div><code>free</code><span>The default. Anyone can take control; running or stepping takes it automatically.</span></div>
-            <div><code>handoff</code><span>Only the holder releases control or gives it to someone.</span></div>
-            <div><code>human-priority</code><span>Like handoff, but a human can always take control from an agent. Agents never take it from one another.</span></div>
-          </div>
-        </div>
-        <div class="co-code" data-reveal>
-          <div class="tabs" role="tablist" aria-label="Joining a session">
-            <span class="tab-ind" aria-hidden="true"></span>
-            <button class="tab" type="button" role="tab" id="t-join" aria-controls="p-join" aria-selected="true">Join in VS Code</button>
-            <button class="tab" type="button" role="tab" id="t-launch" aria-controls="p-launch" aria-selected="false" tabindex="-1">Start with F5</button>
-            <button class="tab" type="button" role="tab" id="t-nvim" aria-controls="p-nvim" aria-selected="false" tabindex="-1">nvim-dap</button>
-            <button class="tab" type="button" role="tab" id="t-agent" aria-controls="p-agent" aria-selected="false" tabindex="-1">The agent's side</button>
-          </div>
-          <div class="panel" role="tabpanel" id="p-join" aria-labelledby="t-join">
-            <div class="code" data-lang="json"><div class="code-bar"><span class="lang file">.vscode/launch.json</span></div><pre><code>{
-  "type": "eyedbg",
-  "request": "attach",
-  "name": "Join eyedbg session"
-}</code></pre></div>
-          </div>
-          <div class="panel" role="tabpanel" id="p-launch" aria-labelledby="t-launch" hidden>
-            <div class="code" data-lang="json"><div class="code-bar"><span class="lang file">.vscode/launch.json</span></div><pre><code>{
-  "type": "eyedbg",
-  "request": "launch",
-  "name": "Debug Shop",
-  "lang": "dotnet",
-  "project": "${workspaceFolder}/src/Shop",
-  "leasePolicy": "human-priority"
-}</code></pre></div>
-          </div>
-          <div class="panel" role="tabpanel" id="p-nvim" aria-labelledby="t-nvim" hidden>
-            <div class="code" data-lang="lua"><div class="code-bar"><span class="lang file">init.lua</span></div><pre><code>local dap = require('dap')
-dap.adapters.eyedbg = {
-  type = 'executable',
-  command = 'eyedbg',
-  args = { 'dap', '--as', 'human:alex' },
-}
-dap.configurations.cs = {
-  { type = 'eyedbg', request = 'attach', name = 'Join eyedbg session' },
-}</code></pre></div>
-          </div>
-          <div class="panel" role="tabpanel" id="p-agent" aria-labelledby="t-agent" hidden>
-            <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg sessions                                    # who is connected, who has control
-eyedbg lease request --message 'let me step into Total()'
-eyedbg events --wait --kind lease                  # wait for the answer
-eyedbg lease grant human:alex                      # hand control to a human</code></pre></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<div class="wrap"><div class="sep"></div></div>
 
 <!-- ============ .NET diagnostics ============ -->
 <section id="dotnet">
@@ -1331,61 +1534,6 @@ threads 11, 12, 13 (3 threads, background, threadpool):
   </div>
 </section>
 
-<!-- ============ languages ============ -->
-<section id="languages">
-  <div class="wrap">
-    <div class="sec-head center" data-reveal>
-      <span class="eyebrow">Languages</span>
-      <h2>Six languages, <span class="grad">one interface</span></h2>
-      <p class="lede">The same commands, the same output and the same rules for every language. Adding one takes a JSON adapter manifest, not a new driver.</p>
-    </div>
-    <div class="langs" data-stagger>
-      <article class="card glow" data-reveal>
-        <div class="lang-top"><span class="badge" style="--c:#6d28d9">.NET</span><div><h3>.NET</h3><small>netcoredbg · SharpDbg (opt-in)</small></div></div>
-        <p>Builds your project and debugs it, attaches to a running process or a test run. SharpDbg adds lambdas and LINQ in eval. You install either one with a single eyedbg command.</p>
-        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters install netcoredbg
-eyedbg start dotnet --project src/Shop --bp Orders.cs:18
-eyedbg test dotnet Adds --bp 'CalculatorTests.cs@"Assert.Equal"'</code></pre></div>
-      </article>
-      <article class="card glow" data-reveal>
-        <div class="lang-top"><span class="badge" style="--c:#2563eb">Py</span><div><h3>Python</h3><small>debugpy</small></div></div>
-        <p>Runs a script or a module like <code>python -m</code>. Finds your interpreter: <code>--opt python=PATH</code>, your active virtualenv, the project's <code>.venv</code>, then PATH.</p>
-        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters install python
-eyedbg start python --program app.py --bp app.py:7
-eyedbg start python --opt module=pytest -- -x tests/test_orders.py</code></pre></div>
-      </article>
-      <article class="card glow" data-reveal>
-        <div class="lang-top"><span class="badge" style="--c:#0891b2">Go</span><div><h3>Go</h3><small>Delve</small></div></div>
-        <p>Debugs a package, a built binary (<code>--opt mode=exec</code>) or a package's tests, over a private Unix socket. Function breakpoints are package-qualified.</p>
-        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters install delve
-eyedbg start go --program ./cmd/shop --bp main.go:20
-eyedbg start go --program ./internal/orders --opt mode=test</code></pre></div>
-      </article>
-      <article class="card glow" data-reveal>
-        <div class="lang-top"><span class="badge" style="--c:#4f46e5">C</span><div><h3>C and C++</h3><small>LLVM lldb-dap</small></div></div>
-        <p>Uses the <code>lldb-dap</code> on your PATH, or the one <code>EYEDBG_LLDB_DAP</code> names. In C++, <code>--exceptions all</code> stops at every throw.</p>
-        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg start c --program ./build/app --bp main.c:20
-eyedbg start cpp --program ./build/app --exceptions all</code></pre></div>
-      </article>
-      <article class="card glow" data-reveal>
-        <div class="lang-top"><span class="badge" style="--c:#be123c">Rs</span><div><h3>Rust</h3><small>LLVM lldb-dap</small></div></div>
-        <p>Debugs your debug build with lldb-dap. Import Rust's LLDB formatters in <code>~/.lldbinit</code> to read <code>String</code>, <code>Vec</code> and <code>HashMap</code> values.</p>
-        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>cargo build
-eyedbg start rust --program ./target/debug/shop --bp src/main.rs:20</code></pre></div>
-      </article>
-      <article class="card glow" data-reveal>
-        <div class="lang-top"><span class="badge" style="--c:#047857">{ }</span><div><h3>Your own</h3><small>an adapter manifest</small></div></div>
-        <p>A JSON manifest says how to download, find and launch a DAP adapter and how to fill its launch request. Yours live in <code>~/.eyedbg/adapters</code>, trusted like your shell config — never read from a project.</p>
-        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters ls        # bundled and your own
-eyedbg adapters doctor    # checks each one it knows</code></pre></div>
-      </article>
-    </div>
-    <div class="platforms" data-reveal><span>Linux x64</span><span>Linux arm64</span><span>macOS arm64</span><span>macOS x64</span><span>Windows x64</span><span>Windows arm64</span></div>
-  </div>
-</section>
-
-<div class="wrap"><div class="sep"></div></div>
-
 <!-- ============ built for agents ============ -->
 <section id="agents">
   <div class="wrap">
@@ -1459,39 +1607,6 @@ hint: ask human:alex to run 'eyedbg lease grant agent'; 'eyedbg events --wait --
 
 <div class="wrap"><div class="sep"></div></div>
 
-<!-- ============ install ============ -->
-<section id="install">
-  <div class="wrap">
-    <div class="sec-head" data-reveal>
-      <span class="eyebrow">Install</span>
-      <h2>Up and running <span class="grad">in four steps</span></h2>
-      <p class="lede">Once per machine. After that, your agent starts sessions on its own and you join them when you like.</p>
-    </div>
-    <div class="install">
-      <div class="card inst" data-reveal>
-        <div><h3>Get eyedbg</h3><p>Download the archive for your platform from <a class="text-link" href="https://github.com/EyeDebugger/eyedebugger/releases/latest">the latest release</a>: <code>eyedbg</code>, <code>eyedbgd</code> and the .NET side helper. Keep them together on your PATH, and check the archive was built by the project's release workflow. With Go 1.26 or later, <code>go install</code> works too (without the .NET helper).</p></div>
-        <div>
-          <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Verify a download</span></div><pre><code>gh attestation verify eyedebugger_X.Y.Z_linux_amd64.tar.gz -R EyeDebugger/eyedebugger</code></pre></div>
-          <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Or with Go</span></div><pre><code>go install github.com/eyedebugger/eyedebugger/cmd/eyedbg@latest github.com/eyedebugger/eyedebugger/cmd/eyedbgd@latest</code></pre></div>
-        </div>
-      </div>
-      <div class="card inst" data-reveal>
-        <div><h3>Install a debug adapter</h3><p>Pinned and checksum-verified. Name an adapter or a language; C, C++ and Rust use the <code>lldb-dap</code> on your PATH. <code>doctor</code> checks what you have.</p></div>
-        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters install netcoredbg   # or: python, delve, sharpdbg
-eyedbg adapters doctor</code></pre></div>
-      </div>
-      <div class="card inst" data-reveal>
-        <div><h3>Teach your agent</h3><p>Installs the skill for Claude Code. For another agent, use <code>--dir</code> with its skills folder, or point it at <code>eyedbg help --all</code>.</p></div>
-        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg skill install</code></pre></div>
-      </div>
-      <div class="card inst" data-reveal>
-        <div><h3>Join from VS Code</h3><p>Install the EyeDebugger extension from the VSIX attached to each release. It finds <code>eyedbg</code> on your PATH, or set <code>eyedbg.path</code>.</p></div>
-        <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>code --install-extension eyedebugger_X.Y.Z_vscode.vsix</code></pre></div>
-      </div>
-    </div>
-  </div>
-</section>
-
 <!-- ============ FAQ ============ -->
 <section id="faq">
   <div class="wrap">
@@ -1547,12 +1662,13 @@ eyedbg adapters doctor</code></pre></div>
       <div>
         <h4>Product</h4>
         <ul>
+          <li><a href="#what">What is eyedbg?</a></li>
           <li><a href="#how">How it works</a></li>
-          <li><a href="#features">Features</a></li>
-          <li><a href="#co">Co-debugging</a></li>
-          <li><a href="#dotnet">.NET diagnostics</a></li>
+          <li><a href="#vscode">VS Code</a></li>
           <li><a href="#languages">Languages</a></li>
           <li><a href="#install">Install</a></li>
+          <li><a href="#features">Features</a></li>
+          <li><a href="#dotnet">.NET diagnostics</a></li>
         </ul>
       </div>
       <div>
@@ -1564,6 +1680,7 @@ eyedbg adapters doctor</code></pre></div>
           <li><a href="https://github.com/EyeDebugger/eyedebugger/blob/main/extensions/vscode/README.md">VS Code extension</a></li>
           <li><a href="https://github.com/EyeDebugger/eyedebugger/blob/main/docs/adapter-manifests.md">Adapter manifests</a></li>
           <li><a href="https://github.com/EyeDebugger/eyedebugger/blob/main/CHANGELOG.md">Changelog</a></li>
+          <li><a href="/llms.txt">For AI agents: llms.txt</a></li>
         </ul>
       </div>
       <div>
