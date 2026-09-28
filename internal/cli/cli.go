@@ -175,9 +175,9 @@ The CLI is stateless: every invocation talks to a per-user daemon (eyedbgd) over
 auto-starts on first use and exits by itself when idle (see 'eyedbg daemon --help'). There is no MCP server by default — this CLI, with its complete built-in
 help, is the agent interface (docs/DESIGN.md §10).
 
-A typical loop: start a program with breakpoints (dotnet or python, or a language your own
-adapter manifest adds: 'eyedbg adapters ls'; or attach to a running one, or debug a test run with
-'eyedbg test'), inspect (status, stack, vars, eval, output), move (next, step-in,
+A typical loop: start a program with breakpoints (dotnet, python, go, c, cpp, rust, or a language
+your own adapter manifest adds: 'eyedbg adapters ls'; or attach to a running one, or debug a test
+run with 'eyedbg test'), inspect (status, stack, vars, eval, output), move (next, step-in,
 step-out, continue, pause, wait), change it if needed (set), and stop (or detach) when done.
 Every execution command prints where the program ended up, so no extra call is needed to see it.
 Breakpoints (lines, text anchors, functions, hit counts, logpoints) and exception stops are
@@ -189,7 +189,10 @@ when to use it, whether it blocks (and for how long), its effect on the debuggee
 and its exit codes (docs/DESIGN.md §4). 'eyedbg help --all' prints every command's help in one
 read; add --json for the same as structured data.
 
-Agents: 'eyedbg skill install' installs a usage guide (SKILL.md) for your agent.
+Agents: 'eyedbg skill install' installs a usage guide (SKILL.md) for your agent. 'eyedbg help lang'
+covers what each language needs and its own launch.json shape; 'eyedbg help vscode' covers the VS
+Code extension: joining a session, starting one from a launch config, and the control lease from
+the editor's side.
 
 Output is budgeted: variables are cut to --budget tokens (default 2000) and every cut says so.
 
@@ -254,6 +257,8 @@ func NewEyedbgCommand(info version.Info) *cobra.Command {
 		newAdaptersCommand(g),
 		newDaemonCommand(info, g),
 		newSkillCommand(g),
+		newVSCodeGuide(),
+		newLangCommand(),
 		newVersionCommand("eyedbg", info, g),
 	)
 	root.AddCommand(newExecCommands(info, g)...)
