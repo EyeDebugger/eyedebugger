@@ -801,3 +801,38 @@ func TestDotnetDumpKeepsTen(t *testing.T) {
 		}
 	}
 }
+
+// TestRemoveStray: an existing regular file goes; a directory at path and a
+// path that never existed are both left alone, without panicking (Windows'
+// removeRetrying — internal/cli/dotnet_dump_windows.go — is exercised for
+// real by a canceled dump or trace on Windows, not by this cross-platform
+// test).
+func TestRemoveStray(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	file := filepath.Join(dir, "stray.dmp")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	removeStray(file)
+
+	if _, err := os.Lstat(file); !os.IsNotExist(err) {
+		t.Errorf("stray file still at %s: %v", file, err)
+	}
+
+	sub := filepath.Join(dir, "not-a-file")
+	if err := os.Mkdir(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	removeStray(sub) // a directory: removeStray's IsRegular guard skips it
+
+	if _, err := os.Lstat(sub); err != nil {
+		t.Errorf("directory %s removed (or unreadable): %v", sub, err)
+	}
+
+	removeStray(filepath.Join(dir, "never-existed.dmp")) // must not panic
+}

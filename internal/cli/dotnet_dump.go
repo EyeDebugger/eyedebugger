@@ -376,11 +376,14 @@ func checkDump(path string) error {
 	return nil
 }
 
-// removeStray removes what a failed or canceled dump left at path (a
-// regular file only; Prune catches one that appears later).
+// removeStray removes what a failed or canceled dump or trace left at path
+// (a regular file only; Prune catches one that appears later). Canceling
+// mid-write only drops eyedbg's own diagnostics connection; the runtime
+// notices and closes the file on its own time, so removeRetrying (Windows)
+// gives it a moment rather than leaving the file for the next prune.
 func removeStray(path string) {
 	if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
-		_ = os.Remove(path)
+		removeRetrying(path)
 	}
 }
 

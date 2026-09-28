@@ -353,8 +353,9 @@ runs), **Memory** (a heap dump's top types; a type's GC root paths on expand), *
 grouped as the CLI's text, locks; a frame's source opened only for a local absolute path of a
 regular file, the helper's rule) and **CPU Trace** (hottest methods, or GC and allocations). One
 target — the active joined session, a session or a process from `dotnet ps` — every run
-cancellable (SIGINT off Windows, so eyedbg discards a partial file), dumps and traces left in
-eyedbg's private directory. No new CLI surface.
+cancellable (SIGINT off Windows; on Windows, `EYEDBG_CANCEL_ON_STDIN_EOF=1` plus closing stdin,
+since Windows has no graceful Ctrl-C for a child process — either way eyedbg discards a partial
+file), dumps and traces left in eyedbg's private directory. No new CLI surface.
 
 Built (P2-S1, ADR 0018): **per-owner conditions at shared lines** — breakpoints of several clients
 at one line each keep their own condition, hit count and log message (§3, §4); a stop names the

@@ -15,8 +15,15 @@ import (
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+
+	cancelStdin := func() {}
+	if os.Getenv(cli.EnvCancelOnStdinEOF) == "1" {
+		ctx, cancelStdin = cli.CancelOnEOF(ctx, os.Stdin)
+	}
+
 	code := cli.Run(ctx, cli.NewEyedbgCommand(version.Get()), os.Args[1:])
 
+	cancelStdin()
 	stop()
 	os.Exit(code)
 }

@@ -6,10 +6,14 @@
 // command that streams lines until stopped — without a shell, with every
 // argument built by core/cli or core/dotnet.
 //
-// Interrupting (the .NET commands, P2-M9): an abort or a timeout sends
-// SIGINT off Windows, so eyedbg runs its Ctrl-C path (it ends its helper
-// and discards a partial dump or trace), and SIGKILL 10 s later if it is
-// still running. On Windows Node can only end a process forcefully.
+// Interrupting (the .NET commands, P2-M9): an abort, a timeout or stop()
+// closes eyedbg's stdin, kept open as a pipe for exactly this — with
+// EYEDBG_CANCEL_ON_STDIN_EOF=1 set, eyedbg treats that like Ctrl-C (it
+// ends its helper and discards a partial dump or trace). Off Windows it
+// also sends SIGINT, which runs the same path sooner; on Windows a signal
+// always ends the process at once (Node has no graceful kill there), so
+// closing stdin is the only way to ask first. SIGKILL 10 s later either
+// way if eyedbg is still running.
 
 import { type ChildProcess, type ExecFileException, execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -21,6 +25,9 @@ import { LineSplitter } from '../core/dotnet';
 import { EyedbgError } from '../core/protocol';
 
 const maxBuffer = 4 << 20;
+
+/** The CLI's opt-in: stdin EOF (or a read error) cancels it like Ctrl-C. */
+const envCancelOnStdinEOF = 'EYEDBG_CANCEL_ON_STDIN_EOF';
 
 /** How long an interrupted eyedbg gets to exit before SIGKILL. */
 const killAfterMs = 10_000;
@@ -60,7 +67,7 @@ export interface RunOptions {
   signal?: AbortSignal;
   /** quiet logs the run and its failures at trace level (the auto-join poller: every 5 s). */
   quiet?: boolean;
-  /** interrupt: an abort or a timeout interrupts eyedbg (SIGINT off Windows), then kills it 10 s later. */
+  /** interrupt: an abort or a timeout interrupts eyedbg (closes stdin, SIGINT off Windows), then kills it 10 s later. */
   interrupt?: boolean;
 }
 
@@ -83,13 +90,13 @@ export interface Stream {
    * INTERNAL quoting its stderr.
    */
   done: Promise<StreamEnd>;
-  /** stop interrupts the command (SIGINT; on Windows it ends it) and resolves when it has ended. */
+  /** stop interrupts the command (closes stdin; SIGINT off Windows) and resolves when it has ended. */
   stop(): Promise<StreamEnd>;
 }
 
-/** interruptSignal is the signal that makes eyedbg run its Ctrl-C path (Windows: any signal ends it). */
+/** interruptSignal is SIGINT: sent off Windows only, alongside closing stdin (see the file header). */
 function interruptSignal(): NodeJS.Signals {
-  return process.platform === 'win32' ? 'SIGTERM' : 'SIGINT';
+  return 'SIGINT';
 }
 
 function running(child: ChildProcess): boolean {
@@ -147,31 +154,38 @@ export class Eyedbg {
       this.log.info(line);
     }
     return new Promise((resolve, reject) => {
-      // execFile hands its AbortSignal to spawn without its killSignal (an
-      // abort would send SIGTERM): an interruptible run handles the abort.
       const interruptible = opts.interrupt === true;
-      let aborted = false;
+      // reason, once stopInterruptible ran: which of the two closed stdin
+      // (and, off Windows, sent SIGINT). Node's own timeout/killSignal
+      // aren't used for an interruptible run — on Windows a kill signal
+      // always ends the process at once, before eyedbg could react to
+      // stdin closing — so this run times itself out instead.
+      let reason: 'abort' | 'timeout' | undefined;
       const child = execFile(
         file,
         argv,
         {
           shell: false,
           windowsHide: true,
-          timeout: opts.timeoutMs,
           maxBuffer,
           encoding: 'utf8',
-          ...(interruptible ? { killSignal: interruptSignal() } : {}),
+          ...(interruptible ? { env: { ...process.env, [envCancelOnStdinEOF]: '1' } } : { timeout: opts.timeoutMs }),
           ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
           ...(opts.signal !== undefined && !interruptible ? { signal: opts.signal } : {}),
         },
         (err, stdout, stderr) => {
           opts.signal?.removeEventListener('abort', abort);
-          if (interruptible && aborted) {
+          clearTimeout(timer);
+          if (interruptible && reason !== undefined) {
             // eyedbg ran its Ctrl-C path, and may have printed "context canceled".
-            reject(this.spawnError(Object.assign(new Error('canceled'), { name: 'AbortError' }), argv, opts));
+            const synthetic =
+              reason === 'timeout'
+                ? Object.assign(new Error('eyedbg timed out'), { killed: true })
+                : Object.assign(new Error('canceled'), { name: 'AbortError' });
+            reject(this.spawnError(synthetic, argv, opts));
             return;
           }
-          if (err !== null && (typeof err.code !== 'number' || (interruptible && err.killed === true))) {
+          if (err !== null && typeof err.code !== 'number') {
             reject(this.spawnError(err, argv, opts));
             return;
           }
@@ -185,12 +199,21 @@ export class Eyedbg {
           }
         },
       );
-      const abort = () => {
-        if (!aborted && child.pid !== undefined && running(child)) {
-          aborted = true;
+      const stopInterruptible = (r: 'abort' | 'timeout') => {
+        if (reason !== undefined || child.pid === undefined || !running(child)) {
+          return;
+        }
+        reason = r;
+        child.stdin?.end();
+        if (process.platform !== 'win32') {
           child.kill(interruptSignal());
         }
       };
+      const abort = () => stopInterruptible('abort');
+      const timer =
+        interruptible && opts.timeoutMs > 0
+          ? setTimeout(() => stopInterruptible('timeout'), opts.timeoutMs)
+          : undefined;
       if (interruptible) {
         opts.signal?.addEventListener('abort', abort, { once: true });
         if (opts.signal?.aborted === true) {
@@ -245,7 +268,12 @@ export class Eyedbg {
     } else {
       this.log.info(`run: ${cmd}`);
     }
-    const child = spawn(file, argv, { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(file, argv, {
+      shell: false,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, [envCancelOnStdinEOF]: '1' },
+    });
     const splitter = new LineSplitter();
     let stopped = false;
     let failure: EyedbgError | undefined;
@@ -255,7 +283,10 @@ export class Eyedbg {
     const stop = () => {
       stopped = true;
       if (running(child) && child.pid !== undefined) {
-        child.kill(interruptSignal());
+        child.stdin?.end();
+        if (process.platform !== 'win32') {
+          child.kill(interruptSignal());
+        }
         interrupt();
       }
     };
