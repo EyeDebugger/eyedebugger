@@ -405,8 +405,9 @@ func localAbsolute(p, goos string) bool {
 }
 
 // checkWindowsArgs is rule 7: on Windows, the program is an .exe, and no
-// argument is quote-enclosed with a space (node-pty would pass it
-// unquoted, and the program would split it).
+// argument is one node-pty passes unquoted while it holds a space (rule 4
+// already refused tabs), which the program would drop or split: a single
+// space, or one enclosed in quotes (node-pty's argsToCommandLine).
 func checkWindowsArgs(a godap.RunInTerminalRequestArguments, goos string) string {
 	if goos != goosWindows {
 		return ""
@@ -417,6 +418,10 @@ func checkWindowsArgs(a godap.RunInTerminalRequestArguments, goos string) string
 	}
 
 	for _, arg := range a.Args {
+		if arg == " " {
+			return "rule 7: on Windows no argument may be a single space"
+		}
+
 		if len(arg) > 1 && arg[0] == '"' && arg[len(arg)-1] == '"' && strings.Contains(arg, " ") {
 			return `rule 7: on Windows no argument may start and end with " while holding a space`
 		}

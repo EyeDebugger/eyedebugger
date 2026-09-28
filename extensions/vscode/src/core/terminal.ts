@@ -133,11 +133,16 @@ export function checkTerminal(body: unknown, platform: string): TerminalCheck {
   if (!localAbsolute(program, platform) || !localAbsolute(cwd, platform)) {
     return refuse(6, 'its program and working directory must be local absolute paths');
   }
-  // Rule 7: on Windows an .exe, and no quote-enclosed argument with a
-  // space (node-pty would pass it unquoted and the program would split it).
+  // Rule 7: on Windows an .exe, and no argument node-pty passes unquoted
+  // while it holds a space (rule 4 already refused tabs), which the program
+  // would drop or split: a single space, or one enclosed in quotes
+  // (node-pty's argsToCommandLine).
   if (platform === 'win32') {
     if (!/\.exe$/i.test(program)) {
       return refuse(7, 'on Windows its program must be an .exe');
+    }
+    if (argv.includes(' ')) {
+      return refuse(7, 'on Windows no argument may be a single space');
     }
     if (argv.some((a) => a.length > 1 && a.startsWith('"') && a.endsWith('"') && a.includes(' '))) {
       return refuse(7, 'on Windows no argument may start and end with " while holding a space');
