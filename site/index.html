@@ -6,7 +6,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>EyeDebugger (eyedbg) — the debugger your AI agent drives, in a session you can join</title>
+<title>EyeDebugger (eyedbg): the debugger your AI agent drives, in a session you can join</title>
 <meta name="description" content="eyedbg is an open-source, CLI-first debugger built for AI coding agents: breakpoints, stepping, locals and eval from the shell, in one live session you can join from VS Code. .NET, Python, Go, C, C++ and Rust on Linux, macOS and Windows.">
 <link rel="canonical" href="https://eyedbg.izzat.dev/">
 <meta name="color-scheme" content="dark light">
@@ -15,7 +15,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="EyeDebugger">
 <meta property="og:url" content="https://eyedbg.izzat.dev/">
-<meta property="og:title" content="EyeDebugger — give your agent eyes on the running program">
+<meta property="og:title" content="EyeDebugger: give your agent eyes on the running program">
 <meta property="og:description" content="A CLI-first debugger for AI coding agents, in one live session you can join from VS Code.">
 <meta property="og:image" content="https://eyedbg.izzat.dev/og.png">
 <meta property="og:image:width" content="1200">
@@ -779,7 +779,7 @@ html.vt *, html.vt *::before, html.vt *::after { transition: none !important; }
       <span class="w" style="--i:0">Give</span> <span class="w" style="--i:1">your</span> <span class="w" style="--i:2">agent</span> <span class="w grad" style="--i:3">eyes</span>
       <span class="w" style="--i:4">on</span> <span class="w" style="--i:5">the</span> <span class="w" style="--i:6">running</span> <span class="w" style="--i:7">program.</span>
     </h1>
-    <p class="lede">eyedbg is a CLI-first debugger built for AI coding agents. Breakpoints, stepping, locals and eval — one shell command at a time — in a live session you can join from VS Code whenever you want to look, or take the wheel.</p>
+    <p class="lede">eyedbg is a CLI-first debugger built for AI coding agents. Breakpoints, stepping, locals and eval, one shell command at a time, in a live session you can join from VS Code whenever you want to look, or take the wheel.</p>
     <div class="cta-row">
       <a class="btn btn-primary" href="#install">Get started <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
       <a class="btn btn-ghost" href="https://github.com/EyeDebugger/eyedebugger"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.73.5.5 5.73.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.39-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.73 18.27.5 12 .5z"/></svg>View on GitHub</a>
@@ -790,11 +790,11 @@ html.vt *, html.vt *::before, html.vt *::after { transition: none !important; }
     <div class="stage" id="stage" data-reveal="fade">
       <div class="stage-grid" aria-hidden="true">
         <div class="win term">
-          <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span><span class="win-title">agent — zsh — ~/shop</span><span class="role agent">AGENT</span></div>
+          <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span><span class="win-title">agent · zsh · ~/shop</span><span class="role agent">AGENT</span></div>
           <div class="term-body"></div>
         </div>
         <div class="win ed">
-          <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span><span class="win-title">Orders.cs — shop</span><span class="role human">YOU</span></div>
+          <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span><span class="win-title">Orders.cs · shop</span><span class="role human">YOU</span></div>
           <div class="ed-top">
             <div class="ed-tab"><b></b>Orders.cs</div>
             <div class="ed-tools">
@@ -822,7 +822,7 @@ html.vt *, html.vt *::before, html.vt *::after { transition: none !important; }
           <div class="ed-status"><span class="ed-sess">⎇ main</span><span class="push"></span><span class="ed-lease" hidden><b></b><span></span></span></div>
           <div class="ed-toast"><p><b>agent</b> is debugging Shop.dll in this workspace (s-7f3k, dotnet, stopped).</p><div class="btns"><span>Ignore</span><span class="pri" data-t="join">Join</span></div></div>
           <div class="ed-menu"><span data-t="request">Request Control…</span><span>Take Control</span><span>Give Control…</span></div>
-          <div class="ed-input"><small>Tell agent why (optional) — Enter to send</small><div></div></div>
+          <div class="ed-input"><small>Tell agent why (optional) · Enter to send</small><div></div></div>
           <svg class="ed-cursor" viewBox="0 0 24 24"><path d="M4 2.5l15.5 9.8-6.9 1.4-3.9 6.3z" fill="#fff" stroke="#0a0f1c" stroke-width="1.4" stroke-linejoin="round"/></svg>
         </div>
       </div>
@@ -897,7 +897,7 @@ html.vt *, html.vt *::before, html.vt *::after { transition: none !important; }
     <div class="sec-head" data-reveal>
       <span class="eyebrow">Why eyedbg</span>
       <h2>Agents guess. <span class="grad">Debuggers know.</span></h2>
-      <p class="lede">When a fix based on reading the code fails once or twice, the fastest way forward is to look at what the program really does. eyedbg gives your agent a real debugger it drives from the shell — and gives you a seat in the same session.</p>
+      <p class="lede">When a fix based on reading the code fails once or twice, the fastest way forward is to look at what the program really does. eyedbg gives your agent a real debugger it drives from the shell, and gives you a seat in the same session.</p>
     </div>
     <div class="why" data-stagger>
       <article class="card glow" data-reveal>
@@ -1012,7 +1012,7 @@ session s-7f3k (dotnet, netcoredbg) stopped: breakpoint, thread 4242
       </div>
       <div class="step" data-reveal>
         <span class="n">3</span>
-        <div><h3>Ask the program</h3><p><code>eval</code> runs in the stopped frame. The fourth order is a refund with a negative quantity — the wrong total, explained with two reads.</p></div>
+        <div><h3>Ask the program</h3><p><code>eval</code> runs in the stopped frame. The fourth order is a refund with a negative quantity, which explains the wrong total in two reads.</p></div>
         <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg eval 'order.Quantity'
 -2  (int)
 $ eyedbg eval 'order.Refunded'
@@ -1054,11 +1054,11 @@ session s-7f3k ended</code></pre></div>
         <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
           <div><h3>Follow the agent, keep your focus</h3><p>When the agent's step stops, VS Code shows the line without taking your keyboard focus. The Activity and Clients views list what each client did, who is connected and who has control.</p></div></li>
         <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
-          <div><h3>Join when an agent starts</h3><p>When an agent starts debugging a program in your workspace, VS Code offers to join — once per session, and never without your click.</p></div></li>
+          <div><h3>Join when an agent starts</h3><p>When an agent starts debugging a program in your workspace, VS Code offers to join, once per session and never without your click.</p></div></li>
         <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M7 4l12 8-12 8z"/></svg></span>
           <div><h3>F5 launches your own</h3><p>Every launch attribute from the CLI works in <code>launch.json</code> too: language, program or project, args, env, exceptions and more. For Python, <code>console: integratedTerminal</code> runs it in a real terminal, so <code>input()</code> works.</p></div></li>
         <li data-reveal><span class="ic"><svg viewBox="0 0 24 24"><path d="M9 7V3M15 7V3"/><path d="M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/></svg></span>
-          <div><h3>Any DAP client</h3><p><code>eyedbg dap</code> speaks standard DAP on stdio and joins a running session under the same rules — for nvim-dap, scripts or another editor.</p></div></li>
+          <div><h3>Any DAP client</h3><p><code>eyedbg dap</code> speaks standard DAP on stdio and joins a running session under the same rules, for nvim-dap, scripts or another editor.</p></div></li>
       </ul>
       <div>
         <div class="card lease" data-reveal="scale" id="lease-demo">
@@ -1152,7 +1152,7 @@ eyedbg lease grant human:alex                      # hand control to a human</co
 
 <!-- ============ demo: video and screenshots ============
      Slots for the demo video and screenshots. Until a source is set they show placeholders.
-     To publish one, set its data attribute — see site/README.md:
+     To publish one, set its data attribute (see site/README.md):
        video:       data-video="media/demo.mp4" (or an https:// URL, or a YouTube link), data-poster="media/demo-poster.webp"
        screenshots: data-shot="media/terminal.webp" -->
 <section id="demo">
@@ -1252,7 +1252,7 @@ eyedbg start rust --program ./target/debug/shop --bp src/main.rs:20</code></pre>
       </article>
       <article class="card glow" data-reveal>
         <div class="lang-top"><span class="badge" style="--c:#047857">{ }</span><div><h3>Your own</h3><small>an adapter manifest</small></div></div>
-        <p>A JSON manifest says how to download, find and launch a DAP adapter and how to fill its launch request. Yours live in <code>~/.eyedbg/adapters</code>, trusted like your shell config — never read from a project.</p>
+        <p>A JSON manifest says how to download, find and launch a DAP adapter and how to fill its launch request. Yours live in <code>~/.eyedbg/adapters</code>, trusted like your shell config, never read from a project.</p>
         <div class="code" data-lang="sh"><div class="code-bar"><span class="lang">Shell</span></div><pre><code>eyedbg adapters ls        # bundled and your own
 eyedbg adapters doctor    # checks each one it knows</code></pre></div>
       </article>
@@ -1368,7 +1368,7 @@ eyedbg adapters doctor</code></pre></div>
     <div class="sec-head" data-reveal>
       <span class="eyebrow">Features</span>
       <h2>A full debugger, <span class="grad">shaped for agents</span></h2>
-      <p class="lede">Launch and attach, breakpoints of every kind, stepping, threads, stacks, variables, eval and set — with output an LLM can read in one pass and a human can trust.</p>
+      <p class="lede">Launch and attach, breakpoints of every kind, stepping, threads, stacks, variables, eval and set, with output an LLM can read in one pass and a human can trust.</p>
     </div>
     <div class="bento" style="grid-auto-flow:dense" data-stagger>
       <article class="card glow wide" data-reveal>
@@ -1451,7 +1451,7 @@ session s-7f3k (dotnet, netcoredbg) stopped: step, thread 4242
     <div class="sec-head" data-reveal>
       <span class="eyebrow">.NET diagnostics</span>
       <h2>Slow, bloated or stuck? <span class="grad">Ask without pausing.</span></h2>
-      <p class="lede"><code>eyedbg dotnet</code> answers the questions that usually send you back to a paid IDE. A C# side helper reads EventPipe counters and traces and analyzes dumps with ClrMD — the CLI runs it for one command, no session or lease involved. The same four views are in VS Code.</p>
+      <p class="lede"><code>eyedbg dotnet</code> answers the questions that usually send you back to a paid IDE. A C# side helper reads EventPipe counters and traces and analyzes dumps with ClrMD. The CLI runs it for one command, no session or lease involved. The same four views are in VS Code.</p>
     </div>
     <div class="diag">
       <div class="qs" role="tablist" aria-label=".NET questions" aria-orientation="vertical" data-reveal>
@@ -1527,7 +1527,7 @@ threads 11, 12, 13 (3 threads, background, threadpool):
         </div>
         <div class="note">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
-          <span>Dumps and traces hold your program's memory and names. eyedbg keeps them in a private directory, prunes its own after 7 days (10 at most), never overwrites a file, prints names, counts and sizes — never values — and only inspects processes of your own user.</span>
+          <span>Dumps and traces hold your program's memory and names. eyedbg keeps them in a private directory, prunes its own after 7 days (10 at most), never overwrites a file, prints names, counts and sizes (never values) and only inspects processes of your own user.</span>
         </div>
       </div>
     </div>
@@ -1540,7 +1540,7 @@ threads 11, 12, 13 (3 threads, background, threadpool):
     <div class="sec-head" data-reveal>
       <span class="eyebrow">Built for agents</span>
       <h2>The help is the interface</h2>
-      <p class="lede">No schema to register and no server to run. An agent learns eyedbg the way it learns any command-line tool — by reading its help — and every page of that help is written, tested and kept in sync for exactly that reader.</p>
+      <p class="lede">No schema to register and no server to run. An agent learns eyedbg the way it learns any command-line tool, by reading its help, and every page of that help is written, tested and kept in sync for exactly that reader.</p>
     </div>
     <div class="agents" data-stagger>
       <article class="card glow" data-reveal>
@@ -1554,7 +1554,7 @@ eyedbg help --all --json    # the same, as data</code></pre></div>
       <article class="card glow" data-reveal>
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></svg></div>
         <h3>A skill in one command</h3>
-        <p><code>eyedbg skill install</code> writes SKILL.md — when to reach for the debugger, the standard loop, budgets, sharing etiquette and "always stop" — into Claude Code's skills folder. <code>--dir</code> targets another agent's.</p>
+        <p><code>eyedbg skill install</code> writes SKILL.md (when to reach for the debugger, the standard loop, budgets, sharing etiquette and "always stop") into Claude Code's skills folder. <code>--dir</code> targets another agent's.</p>
         <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg skill install
 installed /home/alex/.claude/skills/eyedbg/SKILL.md
 restart your agent (or start a new session) to load it</code></pre></div>
@@ -1574,10 +1574,10 @@ hint: ask human:alex to run 'eyedbg lease grant agent'; 'eyedbg events --wait --
         <table class="exit">
           <thead><tr><th>Exit</th><th>Means</th></tr></thead>
           <tbody>
-            <tr><td>0</td><td>Success — including a wait that timed out (the output says so)</td></tr>
+            <tr><td>0</td><td>Success, including a wait that timed out (the output says so)</td></tr>
             <tr><td>1</td><td>Usage: a bad request, <code>SIDE_EFFECTS</code>, an anchor not found</td></tr>
             <tr><td>2</td><td>State: no session, not stopped, <code>LEASE_HELD</code>, not the owner</td></tr>
-            <tr><td>3</td><td>Setup: adapter not installed, build or attach failed — run the hint</td></tr>
+            <tr><td>3</td><td>Setup: adapter not installed, build or attach failed, run the hint</td></tr>
             <tr><td>4</td><td>The adapter or side helper refused or can't do it</td></tr>
           </tbody>
         </table>
@@ -1595,11 +1595,11 @@ hint: ask human:alex to run 'eyedbg lease grant agent'; 'eyedbg events --wait --
       <p class="lede">Debug sessions hold secrets: tokens in variables, customer data in memory. eyedbg is built to keep them yours.</p>
     </div>
     <div class="sec-grid" data-stagger>
-      <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><path d="M2 8.8a15 15 0 0 1 20 0"/><path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><path d="M12 19.5h.01"/><path d="M3 3l18 18"/></svg></div><h3>Local only, no telemetry</h3><p>The daemon listens on a Unix socket in a private directory — never TCP — and checks a fresh random token on every connection. eyedbg has no telemetry — it even turns off the .NET CLI's for the builds it runs — and goes online only to download adapters you install.</p></article>
-      <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M16 11l2 2 4-4"/></svg></div><h3>Your processes only</h3><p><code>attach</code> and <code>eyedbg dotnet</code> check that a process is yours before anything runs, and show it as <code>pid N (name)</code> — never by its command line.</p></article>
-      <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></div><h3>Read-only eval by default</h3><p>Expressions that would change the program need <code>--allow-side-effects</code>, which takes the control lease and is recorded — so a stray eval can't quietly change state someone else is looking at.</p></article>
+      <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><path d="M2 8.8a15 15 0 0 1 20 0"/><path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><path d="M12 19.5h.01"/><path d="M3 3l18 18"/></svg></div><h3>Local only, no telemetry</h3><p>The daemon listens on a Unix socket in a private directory (never TCP) and checks a fresh random token on every connection. eyedbg has no telemetry (it even turns off the .NET CLI's for the builds it runs) and goes online only to download adapters you install.</p></article>
+      <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M16 11l2 2 4-4"/></svg></div><h3>Your processes only</h3><p><code>attach</code> and <code>eyedbg dotnet</code> check that a process is yours before anything runs, and show it as <code>pid N (name)</code>, never by its command line.</p></article>
+      <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></div><h3>Read-only eval by default</h3><p>Expressions that would change the program need <code>--allow-side-effects</code>, which takes the control lease and is recorded, so a stray eval can't quietly change state someone else is looking at.</p></article>
       <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5 9 5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></div><h3>Pinned, verified adapters</h3><p>Adapter downloads are https, size-capped and SHA-256-checked before extraction, through a staging directory that refuses escaping paths. Manifests are never read from a project.</p></article>
-      <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div><h3>Private dumps and traces</h3><p>Written under fresh random names in a directory only you can read, never overwritten, pruned after 7 days. Session recordings keep control events only — no output or values.</p></article>
+      <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div><h3>Private dumps and traces</h3><p>Written under fresh random names in a directory only you can read, never overwritten, pruned after 7 days. Session recordings keep control events only, no output or values.</p></article>
       <article class="card glow" data-reveal><div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg></div><h3>You pick the adapters</h3><p>eyedbg only fetches a debug adapter when you run <code>eyedbg adapters install</code>. For .NET that's netcoredbg (MIT) by default. SharpDbg is opt-in, and its license terms are worth a read first (see the FAQ).</p></article>
     </div>
   </div>
@@ -1615,12 +1615,12 @@ hint: ask human:alex to run 'eyedbg lease grant agent'; 'eyedbg events --wait --
       <h2>Questions, answered</h2>
     </div>
     <div class="faq" data-stagger>
-      <details data-reveal><summary>Is eyedbg an MCP server?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>No. The CLI is the interface: any agent that can run a shell command can use it, and <code>eyedbg help --all</code> teaches it the whole tool in one read. There's nothing to register and nothing to keep running — the daemon starts by itself.</p></div></div></details>
+      <details data-reveal><summary>Is eyedbg an MCP server?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>No. The CLI is the interface: any agent that can run a shell command can use it, and <code>eyedbg help --all</code> teaches it the whole tool in one read. There's nothing to register and nothing to keep running, the daemon starts by itself.</p></div></div></details>
       <details data-reveal><summary>Which agents does it work with?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>Any agent with a shell: Claude Code, Codex and others. <code>eyedbg skill install</code> installs SKILL.md for Claude Code; for other agents, install it with <code>--dir</code>, print it with <code>eyedbg skill print</code>, or let the agent read <code>eyedbg help --all</code>.</p></div></div></details>
       <details data-reveal><summary>Can an agent and I really drive the same session?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>Yes. The daemon owns the session; the agent's CLI and your editor are both clients of it. One control lease decides who may run, step or pause; everyone else can read state, set their own breakpoints and ask for control. Breakpoints on the same line are merged and keep their owners.</p></div></div></details>
-      <details data-reveal><summary>Will the agent take control away from me?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>Under the default <code>free</code> policy, whoever acts takes control. Switch to <code>human-priority</code> — VS Code offers it when you take over — and agents have to ask: a human can always take control from an agent, never the other way round. The agent skill tells agents never to force the lease over a human.</p></div></div></details>
+      <details data-reveal><summary>Will the agent take control away from me?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>Under the default <code>free</code> policy, whoever acts takes control. Switch to <code>human-priority</code> (VS Code offers it when you take over) and agents have to ask: a human can always take control from an agent, never the other way round. The agent skill tells agents never to force the lease over a human.</p></div></div></details>
       <details data-reveal><summary>Why netcoredbg and SharpDbg for .NET?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>netcoredbg (from Samsung, MIT) is the default. SharpDbg is opt-in: it adds lambdas and LINQ in eval and covers Intel Macs, where netcoredbg has no build. SharpDbg itself is MIT, but it bundles a Microsoft library under the Microsoft Software License Terms, which aren't open source. Read <code>eyedbg help adapters install</code> and only install it if you're fine with those terms.</p></div></div></details>
-      <details data-reveal><summary>Is eval safe to run on my program?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>It's read-only by intent: expressions that visibly change the program — method calls, assignments, <code>new</code>, <code>++</code> — are refused unless you pass <code>--allow-side-effects</code>. The check is best-effort: property getters still run code, as they would in any debugger.</p></div></div></details>
+      <details data-reveal><summary>Is eval safe to run on my program?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>It's read-only by intent: expressions that visibly change the program (method calls, assignments, <code>new</code>, <code>++</code>) are refused unless you pass <code>--allow-side-effects</code>. The check is best-effort: property getters still run code, as they would in any debugger.</p></div></div></details>
       <details data-reveal><summary>Does anything leave my machine?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>No. The daemon has no network listener and eyedbg has no telemetry. The only downloads are the adapters you ask for, pinned and checksum-verified.</p></div></div></details>
       <details data-reveal><summary>What does it run on?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>Linux, macOS and Windows, on x64 and arm64. netcoredbg has no build for Intel Macs, so an installed SharpDbg is the default there; it has none for Windows on Arm either, but SharpDbg needs <code>--adapter sharpdbg</code> explicitly there, and isn't verified yet.</p></div></div></details>
       <details data-reveal><summary>What does it cost?<span class="plus" aria-hidden="true"></span></summary><div class="ans"><div><p>Nothing. EyeDebugger is open source under the Apache-2.0 license, and contributions are welcome.</p></div></div></details>
@@ -1657,7 +1657,7 @@ hint: ask human:alex to run 'eyedbg lease grant agent'; 'eyedbg events --wait --
           </svg>
           EyeDebugger
         </a>
-        <p>The debugger your AI agent drives — in a live session you can join.</p>
+        <p>The debugger your AI agent drives, in a live session you can join.</p>
       </div>
       <div>
         <h4>Product</h4>
