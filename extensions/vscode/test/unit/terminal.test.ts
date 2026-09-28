@@ -63,7 +63,7 @@ const platforms = { all: ['linux', 'darwin', 'win32'], posix: ['linux', 'darwin'
 const vectors = (JSON.parse(fs.readFileSync(vectorsFile, 'utf8')) as { vectors: Vector[] }).vectors;
 
 test('terminal requests: every shared vector (internal/facade/testdata)', () => {
-  assert.equal(vectors.length, 71);
+  assert.equal(vectors.length, 74);
   let checked = 0;
   for (const v of vectors) {
     for (const platform of platforms[v.platform]) {

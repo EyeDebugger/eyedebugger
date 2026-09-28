@@ -1144,6 +1144,70 @@
    }
   },
   {
+   "name": "a single-space argument",
+   "platform": "windows",
+   "valid": false,
+   "rule": 7,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "C:\\Python313\\python.exe",
+     "C:\\debugpy\\launcher",
+     "5678",
+     "--",
+     "C:\\Users\\u\\proj\\app.py",
+     " "
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "two spaces (node-pty quotes them)",
+   "platform": "windows",
+   "valid": true,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "C:\\Python313\\python.exe",
+     "C:\\debugpy\\launcher",
+     "5678",
+     "--",
+     "C:\\Users\\u\\proj\\app.py",
+     "  "
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "a lone quote and a space (node-pty quotes it)",
+   "platform": "windows",
+   "valid": true,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "C:\\Python313\\python.exe",
+     "C:\\debugpy\\launcher",
+     "5678",
+     "--",
+     "C:\\Users\\u\\proj\\app.py",
+     "\" "
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
    "name": "quote-enclosed program",
    "platform": "windows",
    "valid": false,

@@ -145,9 +145,11 @@ it, the build streams as DAP `output`) and leaves the joining contract as it is.
   5. title, cwd, args and env together are at most 256 KiB of UTF-8;
   6. `args[0]` and `cwd` are local absolute paths — never two leading separators (`\\`, `//`:
      UNC, `\\?\`, `\\.\`); on Windows a drive root (`C:\` or `C:/`), elsewhere a leading `/`;
-  7. on Windows `args[0]` ends in `.exe` (any case), and no argument longer than one character both
-     starts and ends with `"` while holding a space (node-pty emits such an argument unquoted, and
-     the program's own parser would split it);
+  7. on Windows `args[0]` ends in `.exe` (any case), no argument is a single space, and no argument
+     longer than one character both starts and ends with `"` while holding a space (node-pty emits
+     both unquoted — its `argsToCommandLine` quotes a spaced argument only when it is longer than
+     one character and not enclosed in `"` — so the program's own parser would drop or split it;
+     rule 4 already refuses tabs);
   8. `env` has at most 1000 entries, names `^[A-Za-z_][A-Za-z0-9_]{0,127}$`, values strings or
      `null` (unset), nothing else;
   9. the title is at most 200 characters (empty: "eyedbg").
@@ -193,7 +195,7 @@ it, the build streams as DAP `output`) and leaves the joining contract as it is.
   clients have no terminal (follow-up: the standard request for clients that opt in), and only
   debugpy asks (D10).
 * Bad, because the table refuses some legitimate commands (a relative program, a UNC path, a
-  quote-enclosed spaced argument on Windows): such a launch uses `internalConsole`.
+  single-space or quote-enclosed spaced argument on Windows): such a launch uses `internalConsole`.
 * Neutral: a session launched by an editor that stays connected behaves as one joined by it; the
   agent sees who started it (`eyedbg events --kind started`).
 
