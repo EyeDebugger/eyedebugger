@@ -122,6 +122,16 @@ func TestFormatError(t *testing.T) {
 			errors.Join(api.NewError(api.CodeDaemonNotRunning, "not running", ""), errors.New("dial unix: no such file")),
 			"eyedbg: not running [DAEMON_NOT_RUNNING]\n",
 		},
+		{
+			"api error with output",
+			&api.Error{Code: api.CodeAdapterFailed, Message: "Failed to launch", Output: "Build Error: go build\nsyntax error"},
+			"eyedbg: Failed to launch [ADAPTER_ERROR]\nadapter output:\n  Build Error: go build\n  syntax error\n",
+		},
+		{
+			"api error with hint and output",
+			&api.Error{Code: api.CodeAdapterFailed, Message: "Failed to launch", Hint: "see the debug console", Output: "line\x01one"},
+			"eyedbg: Failed to launch [ADAPTER_ERROR]\nhint: see the debug console\nadapter output:\n  line?one\n",
+		},
 	}
 
 	for _, tt := range tests {

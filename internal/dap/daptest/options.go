@@ -76,6 +76,10 @@ type Options struct {
 	Child string `json:"child,omitempty"`
 	// FailLaunch answers a launch with an error, before initialized.
 	FailLaunch bool `json:"failLaunch,omitempty"`
+	// LaunchOutputs, with FailLaunch, emits these output events in order
+	// right before the launch fails, as Delve emits a stderr output event
+	// before its "Build error" (D3).
+	LaunchOutputs []OutputEvent `json:"launchOutputs,omitempty"`
 	// FailConfigurationDone answers a launch's configurationDone with an
 	// error, as netcoredbg sometimes does ("0x80004005").
 	FailConfigurationDone bool `json:"failConfigurationDone,omitempty"`
@@ -103,6 +107,12 @@ func (o Options) threadsList() []godap.Thread {
 	}
 
 	return []godap.Thread{{Id: threadID, Name: "main"}}
+}
+
+// OutputEvent is one output event [Options.LaunchOutputs] emits.
+type OutputEvent struct {
+	Category string `json:"category"`
+	Text     string `json:"text"`
 }
 
 // DefaultTerminal is the runInTerminal request a launch of program sends

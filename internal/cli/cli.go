@@ -20,6 +20,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -353,7 +354,25 @@ func formatError(name string, err error) string {
 		msg += "hint: " + apiErr.Hint + "\n"
 	}
 
+	if apiErr.Output != "" {
+		msg += "adapter output:\n" + indentOutput(apiErr.Output)
+	}
+
 	return msg
+}
+
+// indentOutput is text (a failed start's adapter output, D3) as a block:
+// each line, made printable, indented two spaces, one trailing newline.
+func indentOutput(text string) string {
+	var b strings.Builder
+
+	for line := range strings.SplitSeq(text, "\n") {
+		b.WriteString("  ")
+		b.WriteString(printable(line))
+		b.WriteByte('\n')
+	}
+
+	return b.String()
 }
 
 // finalizeCommandTree adds cobra's built-in "help" and "completion" commands

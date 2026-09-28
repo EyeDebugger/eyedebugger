@@ -282,6 +282,40 @@ func TestGoFunctionBreakpoint(t *testing.T) {
 	expectExit(t, s, pyResume(t, s, session.ExecContinue), 0)
 }
 
+// TestGoBuildErrorOutput: a syntax error Delve's own build hits during
+// launch surfaces its compiler output on the start's error (D3, F5),
+// instead of only "Failed to launch".
+func TestGoBuildErrorOutput(t *testing.T) {
+	app := requireGoApp(t)
+
+	src, err := os.ReadFile(app.src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	broken := string(src) + "\nfunc broken( {\n"
+	if err := os.WriteFile(app.src, []byte(broken), 0o600); err != nil { //nolint:gosec // app.src is main.go of the app requireGoApp just copied into t.TempDir().
+		t.Fatal(err)
+	}
+
+	_, startErr := goManager(t).Start(t.Context(), agent, api.StartParams{
+		Lang: "go", LaunchSpec: api.LaunchSpec{Program: app.dir, ClientDir: app.dir, Args: []string{"loop"}},
+	})
+
+	e, ok := startErr.(*api.Error) //nolint:errorlint // Returned unwrapped.
+	if !ok {
+		t.Fatalf("start err = %#v, want *api.Error", startErr)
+	}
+
+	if e.Code != api.CodeAdapterFailed {
+		t.Errorf("code = %s, want %s", e.Code, api.CodeAdapterFailed)
+	}
+
+	if !strings.Contains(e.Output, "syntax error") {
+		t.Errorf("Output = %q, want it to contain the compiler's own syntax error", e.Output)
+	}
+}
+
 // TestGoAttach: attach, pause, detach, the process keeps running. Linux
 // only (ptrace_scope 0): macOS needs the task_for_pid entitlement.
 func TestGoAttach(t *testing.T) {

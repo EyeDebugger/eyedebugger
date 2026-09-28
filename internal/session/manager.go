@@ -6,6 +6,7 @@ package session
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"io"
 	"log/slog"
 	"maps"
@@ -229,6 +230,7 @@ func (m *Manager) run(ctx context.Context, s *Session, launch Launch, bps []api.
 	m.saveIfLive(s)
 
 	if err := s.configure(ctx, launch, bps, hook); err != nil {
+		err = withStartOutput(s, err)
 		m.fail(ctx, s, err)
 
 		return nil, err
@@ -239,6 +241,27 @@ func (m *Manager) run(ctx context.Context, s *Session, launch Launch, bps []api.
 	go m.watch(s)
 
 	return s, nil
+}
+
+// withStartOutput is err (an error from [Session.configure]) with a copy
+// of its *api.Error's Output set to the adapter's stderr/important output
+// s logged before failing (D3), if any and if err is one. Anything else
+// (not an *api.Error, or no such output) is returned unchanged.
+func withStartOutput(s *Session, err error) error {
+	e, ok := errors.AsType[*api.Error](err)
+	if !ok {
+		return err
+	}
+
+	out := s.failedStartOutput()
+	if out == "" {
+		return err
+	}
+
+	cp := *e
+	cp.Output = out
+
+	return &cp
 }
 
 // fail ends a session whose start failed, and forgets it. A launched

@@ -560,6 +560,10 @@ func (a *adapter) launch(req godap.RequestMessage, raw []byte, attach bool) {
 	}
 
 	if a.opts.FailLaunch && !attach {
+		for _, o := range a.opts.LaunchOutputs {
+			a.emit("output", godap.OutputEventBody{Category: o.Category, Output: o.Text})
+		}
+
 		a.fail(req, "Failed to launch")
 
 		return

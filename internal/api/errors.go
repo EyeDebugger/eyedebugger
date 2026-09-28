@@ -88,6 +88,11 @@ type Error struct {
 	Code    Code   `json:"code"`
 	Message string `json:"message"`
 	Hint    string `json:"hint,omitempty"`
+	// Output is the debug adapter's stderr/important output logged before a
+	// failed session start (e.g. a compile error), bounded to the last few
+	// lines. Set only then; the daemon log never carries it (only Message,
+	// via Error()).
+	Output string `json:"output,omitempty"`
 }
 
 // Error implements error.
