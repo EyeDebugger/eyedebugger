@@ -38,6 +38,14 @@ const connectArgPrefix = "--eyedbg-fake-connect="
 // that Unix socket instead ([ServeConnect]). Otherwise it returns false at
 // once. Call it first in TestMain and return when it returns true.
 func MaybeRun() bool {
+	if addr := os.Getenv(EnvFakeChild); addr != "" {
+		if err := ServeChild(addr); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "fake child:", err)
+		}
+
+		return true
+	}
+
 	if os.Getenv(EnvFakeAdapter) != "1" {
 		return false
 	}
@@ -517,6 +525,20 @@ func (a *adapter) scopes() []godap.Scope {
 
 // launch loads the program of a launch or attach request.
 func (a *adapter) launch(req godap.RequestMessage, raw []byte, attach bool) {
+	if a.opts.Child != "" {
+		if err := startChild(a.opts.Child); err != nil {
+			a.fail(req, "start the child: "+err.Error())
+
+			return
+		}
+	}
+
+	if a.opts.FailLaunch && !attach {
+		a.fail(req, "Failed to launch")
+
+		return
+	}
+
 	var args launchArgs
 	if err := json.Unmarshal(raw, &args); err != nil || args.Program == "" || args.Lines < 1 {
 		a.fail(req, "invalid "+req.GetRequest().Command+" arguments: want program and lines")
@@ -553,6 +575,12 @@ func (a *adapter) launch(req godap.RequestMessage, raw []byte, attach bool) {
 func (a *adapter) configurationDone(req godap.RequestMessage) {
 	if a.attach != nil && a.attach.FailAttach {
 		a.fail(req, "Failed command 'configurationDone' : 0x80070057")
+
+		return
+	}
+
+	if a.opts.FailConfigurationDone && a.attach == nil {
+		a.fail(req, "Failed command 'configurationDone' : 0x80004005")
 
 		return
 	}

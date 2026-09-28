@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A launch start that fails once the debug adapter runs (e.g. netcoredbg answering
+  `configurationDone` with `0x80004005`) no longer leaves the launched program running: each
+  adapter now runs in its own process group (Unix) or process tree (Windows), which the daemon
+  kills before disconnecting. An attach start's target is never killed.
 - `--json` (all commands) now escapes C1 control characters (U+0080-U+009F) the same way it
   already escapes C0: `encoding/json` only escapes the latter, so a debuggee-controlled string
   (a variable value, program output, an exception message) could plant a raw C1 code in `--json`

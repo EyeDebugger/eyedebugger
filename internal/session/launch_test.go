@@ -545,11 +545,7 @@ func TestLaunchTerminalFails(t *testing.T) {
 				t.Errorf("sessions after a failed launch = %+v, want none", m.List())
 			}
 
-			// The adapter was answered with the failure before it was shut
-			// down: it reported it before answering the disconnect.
-			if got := outputs(s); len(got) == 0 || !strings.HasPrefix(got[0], "fake: runInTerminal failed: eyedbg: ") {
-				t.Errorf("adapter output = %q, want the failure it was answered with", got)
-			}
+			expectTerminalRefused(t, s)
 		})
 	}
 }
@@ -597,7 +593,19 @@ func TestLaunchTerminalCanceled(t *testing.T) {
 		t.Errorf("sessions after a canceled launch = %+v, want none", m.List())
 	}
 
-	if got := outputs(s); len(got) == 0 || !strings.HasPrefix(got[0], "fake: runInTerminal failed: eyedbg: ") {
-		t.Errorf("adapter output = %q, want the failure it was answered with", got)
+	expectTerminalRefused(t, s)
+}
+
+// expectTerminalRefused checks that the adapter of s, whose start failed
+// with its terminal, reported nothing but the refusal it was answered
+// with. A failed launch kills the adapter's process tree first thing
+// (Manager.fail), so it may be gone before it reports even that.
+func expectTerminalRefused(t *testing.T, s *Session) {
+	t.Helper()
+
+	for _, got := range outputs(s) {
+		if !strings.HasPrefix(got, "fake: runInTerminal failed: eyedbg: ") {
+			t.Errorf("adapter output %q, want only the failure it was answered with", got)
+		}
 	}
 }

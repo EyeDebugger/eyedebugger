@@ -241,9 +241,12 @@ func (m *Manager) run(ctx context.Context, s *Session, launch Launch, bps []api.
 	return s, nil
 }
 
-// fail ends a session whose start failed, and forgets it.
+// fail ends a session whose start failed, and forgets it. A launched
+// program goes first, with its adapter's process tree: the adapter may
+// not kill it on disconnect after a failed start.
 func (m *Manager) fail(ctx context.Context, s *Session, err error) {
 	m.logger.WarnContext(ctx, "session start failed", slog.String("session", s.ID), slog.Any("error", err))
+	s.killLaunched(ctx)
 	s.terminate(ctx, "", "its start failed")
 	m.remove(s.ID)
 	m.forget(ctx, s.ID)

@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"os/exec"
+	"runtime"
 	"sort"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/dap"
 	"github.com/eyedebugger/eyedebugger/internal/present"
+	"github.com/eyedebugger/eyedebugger/internal/proc"
 )
 
 // Timeouts for talking to an adapter, and size limits.
@@ -67,8 +69,17 @@ type Session struct {
 	// stdio), and exited is closed once its process has been waited for
 	// (nil on stdio: watchAdapter waits for it). All three are set with
 	// client, under mu, and never change after.
-	conn    net.Conn
-	exited  <-chan struct{}
+	conn   net.Conn
+	exited <-chan struct{}
+	// launched is whether the adapter was started for a launch request
+	// (not attach); set with cmd, under mu, and never changes after.
+	launched bool
+	// reapMu is held while the adapter's process tree is killed by pid
+	// (killLaunched) and while waited is set; waited is set, under it,
+	// just before a stdio adapter's process is waited for. On Windows a
+	// waited process's pid may be reused, so no kill by pid follows it.
+	reapMu  sync.Mutex
+	waited  bool
 	logger  *slog.Logger
 	starter api.Client
 	// life is the manager's context; shutdown work started by adapter
@@ -262,13 +273,15 @@ func (s *Session) startAdapter(ctx context.Context, launch Launch, stderr io.Wri
 		return fmt.Errorf("adapter stdout: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
-		return api.NewError(api.CodeAdapterFailed, "start "+launch.Adapter+": "+err.Error(), "check 'eyedbg adapters doctor'")
+	// In its own process group (Unix) or as the root of its own tree
+	// (Windows): killLaunched reaches a program it launched.
+	if err := proc.StartGroup(cmd); err != nil {
+		return adapterStartErr(launch.Adapter, err)
 	}
 
 	// Under mu: a test run's session is shared before its adapter starts.
 	s.mu.Lock()
-	s.cmd = cmd
+	s.cmd, s.launched = cmd, launch.Request != RequestAttach
 	s.client = dap.NewClient(stdout, stdin, dap.Handlers{Event: s.onEvent, Reverse: s.onReverse})
 	s.mu.Unlock()
 
@@ -590,6 +603,11 @@ func (s *Session) watchAdapter() {
 	if s.exited != nil {
 		<-s.exited
 	} else {
+		// Never while killLaunched kills by pid (see reapMu).
+		s.reapMu.Lock()
+		s.waited = true
+		s.reapMu.Unlock()
+
 		_ = s.cmd.Wait()
 	}
 
@@ -686,6 +704,71 @@ func (s *Session) shutdownAdapter(ctx context.Context, terminate bool) {
 	if s.conn != nil {
 		_ = s.conn.Close()
 	}
+}
+
+// killLaunched kills the adapter's process group (Unix) or process tree
+// (Windows) — with it the program it launched — if s's adapter was started
+// for a launch request; an attach's target is never killed. For a failed
+// start, before its disconnect: an adapter whose start failed may leave the
+// program it launched running (netcoredbg after a failed
+// configurationDone). A failure to kill is logged, never returned.
+//
+// Unix kills the group, which outlives its leader while any member lives.
+// Windows kills by pid (taskkill /T), so only while the adapter's process
+// has not been waited for, when its pid can't have been reused: on stdio
+// watchAdapter doesn't start its Wait while reapMu is held here; on a
+// socket the waiter goroutine owns Wait, so exited, closed after it, is
+// checked instead — which leaves a window, between the adapter exiting and
+// taskkill opening its pid, in which a reused pid could be hit.
+func (s *Session) killLaunched(ctx context.Context) {
+	s.mu.Lock()
+	cmd, launched, exited := s.cmd, s.launched, s.exited
+	s.mu.Unlock()
+
+	if cmd == nil || cmd.Process == nil || !launched {
+		return
+	}
+
+	s.reapMu.Lock()
+	defer s.reapMu.Unlock()
+
+	if runtime.GOOS == goosWindows && (s.waited || isClosed(exited)) {
+		s.logger.WarnContext(ctx, "not killing the debug adapter's process tree: it already exited", slog.Int("pid", cmd.Process.Pid))
+
+		return
+	}
+
+	// Bounded, and even when the start ended by its deadline.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
+	defer cancel()
+
+	if err := proc.KillGroup(ctx, cmd); err != nil {
+		s.logger.WarnContext(ctx, "kill the debug adapter's process tree", slog.Int("pid", cmd.Process.Pid), slog.Any("error", err))
+	}
+}
+
+// isClosed is whether ch (nil: never) is closed.
+func isClosed(ch <-chan struct{}) bool {
+	if ch == nil {
+		return false
+	}
+
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
+
+// adapterStartErr is the error for an adapter that failed to start: err
+// from proc.StartGroup, whose own "start PATH" prefix is dropped.
+func adapterStartErr(adapter string, err error) error {
+	if inner := errors.Unwrap(err); inner != nil {
+		err = inner
+	}
+
+	return api.NewError(api.CodeAdapterFailed, "start "+adapter+": "+err.Error(), "check 'eyedbg adapters doctor'")
 }
 
 // disconnectRequest is godap's DisconnectRequest, able to send

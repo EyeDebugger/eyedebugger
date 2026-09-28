@@ -18,6 +18,7 @@ import (
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/dap"
+	"github.com/eyedebugger/eyedebugger/internal/proc"
 )
 
 // The connect transport ([Launch.SocketArgs]).
@@ -31,6 +32,9 @@ const (
 	// socketName is the socket's name in its private directory.
 	socketName = "dap.sock"
 )
+
+// goosWindows is runtime.GOOS on Windows.
+const goosWindows = "windows"
 
 // startSocketAdapter is startAdapter on the connect transport. The socket
 // lives in a fresh directory only this user can enter — a 0700 directory
@@ -76,8 +80,9 @@ func (s *Session) startSocketAdapter(ctx context.Context, launch Launch, stderr 
 	// Stdin stays nil (the null device): DAP runs on the socket.
 	cmd.Stdout, cmd.Stderr = stderr, stderr
 
-	if err := cmd.Start(); err != nil {
-		return api.NewError(api.CodeAdapterFailed, "start "+launch.Adapter+": "+err.Error(), "check 'eyedbg adapters doctor'")
+	// As on stdio: in its own process group or tree (killLaunched).
+	if err := proc.StartGroup(cmd); err != nil {
+		return adapterStartErr(launch.Adapter, err)
 	}
 
 	// This goroutine alone waits for the process; exited tells everyone
@@ -100,6 +105,7 @@ func (s *Session) startSocketAdapter(ctx context.Context, launch Launch, stderr 
 	// Under mu: a test run's session is shared before its adapter starts.
 	s.mu.Lock()
 	s.cmd, s.conn, s.exited = cmd, conn, exited
+	s.launched = launch.Request != RequestAttach
 	s.client = dap.NewClient(conn, conn, dap.Handlers{Event: s.onEvent, Reverse: s.onReverse})
 	s.mu.Unlock()
 
@@ -112,7 +118,7 @@ func (s *Session) startSocketAdapter(ctx context.Context, launch Launch, stderr 
 // naming the variable that moves [socketParentDir] on this OS.
 func socketPathTooLong(path string) error {
 	hint := "set TMPDIR to a shorter directory"
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		hint = "set LOCALAPPDATA to a shorter directory"
 	}
 
@@ -132,7 +138,7 @@ func socketPathTooLong(path string) error {
 // and trusts (internal/daemon/paths.go's DefaultPaths), so it inherits that
 // same private, per-user ACL instead.
 func socketParentDir() (string, error) {
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != goosWindows {
 		return os.TempDir(), nil
 	}
 
