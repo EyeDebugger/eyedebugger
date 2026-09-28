@@ -82,7 +82,68 @@ manifest.
 
 ## Install
 
-Download an archive for your platform from
+Give this prompt to your AI agent and it installs eyedbg for you:
+
+<!-- install-prompt:start -->
+```text
+Please install eyedbg (EyeDebugger) on this machine for me. It's a free, open-source debugger that
+AI coding agents drive from the terminal, and I can join the same debug session from VS Code.
+Project: https://github.com/EyeDebugger/eyedebugger
+
+1. Work out my OS (Linux, macOS or Windows) and CPU (x64 or arm64).
+
+2. Before installing anything, ask me which of these I want. Use your question tool if you have
+   one, otherwise show a numbered list; I can pick several.
+   - eyedbg itself: the eyedbg CLI and its eyedbgd daemon (always installed)
+   - .NET: netcoredbg (the default), and optionally SharpDbg (it bundles a Microsoft library whose
+     license isn't open source; `eyedbg help adapters install` explains)
+   - Python: debugpy
+   - Go: Delve
+   - C, C++ and Rust: LLVM's lldb-dap (from my OS's LLVM package, not from eyedbg)
+   - The VS Code extension
+   - The eyedbg skill for you (the agent)
+
+3. Open https://github.com/EyeDebugger/eyedebugger/releases and take the newest release (the newest
+   stable one; if there is none yet, the newest pre-release). Download checksums.txt and the archive
+   for my system: eyedebugger_<version>_<os>_<arch>.tar.gz on Linux and macOS, .zip on Windows,
+   where <os> is linux, darwin or windows and <arch> is amd64 or arm64.
+
+4. Check the archive before using it. checksums.txt has one "<sha256>  <file name>" line per file.
+   Find the line whose file name is exactly the archive's name, compute the archive's SHA-256, and
+   compare (ignore upper/lower case). If there is no such line, more than one, or the hashes differ,
+   stop and tell me; don't continue without that check. If the gh CLI is installed, also run
+   gh attestation verify <archive> -R EyeDebugger/eyedebugger and stop if it fails.
+
+5. Unpack the whole archive into a folder of its own that my user owns (for example
+   ~/.local/share/eyedbg, or %LOCALAPPDATA%\Programs\eyedbg on Windows). Keep eyedbg, eyedbgd and
+   the helpers folder together in it. Add that folder to my PATH for new terminals (or link eyedbg
+   and eyedbgd into a folder already on PATH). Don't use sudo or admin rights unless I say so.
+
+6. Run: eyedbg version
+
+7. For each language I picked, run the matching command:
+   eyedbg adapters install netcoredbg
+   eyedbg adapters install sharpdbg
+   eyedbg adapters install debugpy
+   eyedbg adapters install delve
+   For C, C++ or Rust, install lldb-dap 18 or newer with my OS's package manager (ask me first). If
+   it isn't on PATH as lldb-dap, set EYEDBG_LLDB_DAP to its full path.
+   Then run eyedbg adapters doctor with the languages I picked (for example:
+   eyedbg adapters doctor dotnet python) and fix what it reports.
+
+8. VS Code extension: download eyedebugger_<version>_vscode.vsix from the same release, check it
+   against checksums.txt the same way as in step 4, then run:
+   code --install-extension <the .vsix file>
+
+9. The skill: eyedbg skill install puts it where Claude Code looks. For another agent, use
+   eyedbg skill install --dir <your skills folder>. Tell me to restart you so you load it.
+
+Only use the debug adapters eyedbg installs or finds itself. Don't download or set up any other
+debugger. When you're done, tell me what you installed, where, and anything I still need to do.
+```
+<!-- install-prompt:end -->
+
+Or install it by hand. Download an archive for your platform from
 [Releases](https://github.com/EyeDebugger/eyedebugger/releases) (`gh attestation verify <archive>
 -R EyeDebugger/eyedebugger` checks it was built by this repo's release workflow), or with Go 1.26+:
 
