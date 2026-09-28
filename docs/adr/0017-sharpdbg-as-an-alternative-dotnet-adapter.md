@@ -219,3 +219,12 @@ runs before .NET has seen the process exit, the real code is lost; attach is alw
 `ExitCodeUnknown` now names SharpDbg on every platform, so its sessions end without an exit code
 (the end reason says why) instead of a possibly wrong 0; a VSTest run keeps `dotnet test`'s. Lift
 it once a SharpDbg release waits for the real exit code (re-check on every manifest bump).
+
+## Addendum (2026-09-29): netcoredbg's pause before a first stop, fixed
+
+The table above ("pause: ok after a first stop") and the "Found while measuring" note above it were
+wrong: netcoredbg lists its threads while the program is still running, it's `eyedbg`'s own pause
+that sent thread id 0 unconditionally. Fixed in the p2-followups task, step 2 (commit cf1aa12): a
+pause with no thread given asks the adapter for `threads` first and picks the last stop's thread if
+still listed, else the first one, before sending pause — no adapter-side follow-up was needed. Left
+as a historical record, not rewritten; see DESIGN.md and CHANGELOG.md for the current behaviour.

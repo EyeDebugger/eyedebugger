@@ -1192,7 +1192,7 @@ func (s *Session) execute(ctx context.Context, r execRequest) (execution, error)
 	defer s.execMu.Unlock()
 
 	var pauseThread int
-	if r.kind == ExecPause && r.thread == 0 && s.pauseReady() {
+	if r.kind == ExecPause && r.thread == 0 && s.pauseReady(r.client) {
 		// D2: ask the adapter which threads exist before picking one to
 		// admit and send a pause for. Side-effect-free (a read-only
 		// request); admit's own refusal (capability/state/lease) still
@@ -1275,15 +1275,16 @@ func (s *Session) admit(r execRequest, pauseThread int) (execution, int, error) 
 	return execution{before: s.stops}, thread, nil
 }
 
-// pauseReady reports whether an ExecPause would reach admit's threads/state
-// check (capability and state only, no lease): whether it is worth a
-// threads request before picking a thread for it (D2). A refusal here has
-// no side effect, same as admit's.
-func (s *Session) pauseReady() bool {
+// pauseReady reports whether an ExecPause from c would reach admit's send
+// (capability, state and lease): whether it is worth a threads request
+// before picking a thread for it (D2). A refusal here has no side effect,
+// same as admit's — a pause refused by the lease costs no threads round
+// trip (F2).
+func (s *Session) pauseReady(c api.Client) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.pauseUnsupported == "" && s.state == api.StateRunning
+	return s.pauseUnsupported == "" && s.state == api.StateRunning && s.lease.allows(opExec, c, false)
 }
 
 // pauseThread resolves which thread a pause with no thread given should
