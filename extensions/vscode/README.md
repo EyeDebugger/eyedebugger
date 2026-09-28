@@ -246,6 +246,3 @@ kept); the views show and copy their paths, and never read, copy, move or delete
   sample shows about a second late.
 - A heap dump suspends the program while it's written (a second or more for a small program).
 - On Windows a heap dump has no source lines, so the Threads view can't open a frame's file there.
-- Cancelling a dump or a trace on Windows ends `eyedbg` at once (Windows has no Ctrl-C for it), so
-  its partial file stays in eyedbg's private directory until it's pruned (7 days, at most 10 kept).
-  Elsewhere eyedbg removes it.

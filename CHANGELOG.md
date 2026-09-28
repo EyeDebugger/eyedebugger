@@ -48,6 +48,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   later one): a `setBreakpoints`/`setFunctionBreakpoints` of many entries no longer costs the
   connection an O(every breakpoint) reconcile per entry. The events an editor receives are
   unchanged.
+- Cancelling a `dotnet dump` or `dotnet trace` on Windows no longer leaves a partial file: with the
+  new opt-in `EYEDBG_CANCEL_ON_STDIN_EOF=1`, eyedbg treats stdin EOF (or a read error on it) like
+  Ctrl-C — off by default, since a caller whose own stdin is already at EOF would otherwise cancel
+  every command at once. The VS Code extension sets it and closes stdin to cancel on every OS (off
+  Windows it also still sends SIGINT, faster than the stdin round trip); Windows has no graceful
+  way to end a child process with a signal, which was the cause.
 
 ## [0.2.0-beta.1] - 2026-09-28
 

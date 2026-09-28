@@ -76,6 +76,11 @@ and on Windows possibly acting with your identity. There, give the program and e
 only you can write (macOS's default already is). On Windows a decoy dotnet-diagnostic-dsrouter-PID
 pipe is refused; other decoys are not, so don't use it where other users aren't trusted.
 
+A long-running command (dump, trace, counters --watch) is canceled by Ctrl-C: a dump or trace in
+progress is discarded, a --watch ends (exit 0). Tools that can't send Ctrl-C can set
+$EYEDBG_CANCEL_ON_STDIN_EOF=1 and close stdin instead — off by default, since a caller whose own
+stdin is already at EOF would otherwise cancel every command at once.
+
 Exit codes: 0 success; 1 INVALID_REQUEST (bad flags, no such process, another user's); 2
 NO_SESSION, NOT_RUNNING, SESSION_EXITED, NOT_DOTNET (no .NET diagnostics endpoint, or a session of
 another language), DIAGNOSTICS_DISABLED (a .NET process with its endpoint off:

@@ -287,8 +287,10 @@ test(
   deadline,
 );
 
-// I18: a cancelled trace ends at once and (off Windows) leaves no file; a
-// Python session and an exited process are refused with the CLI's codes.
+// I18: a cancelled trace ends at once and leaves no file, on every OS
+// (EYEDBG_CANCEL_ON_STDIN_EOF=1 plus closing stdin on Windows, since it has
+// no graceful Ctrl-C for a child process); a Python session and an exited
+// process are refused with the CLI's codes.
 test(
   'I18 dotnet cancel and errors',
   async (ctx) => {
@@ -317,11 +319,7 @@ test(
     ctx.log(`trace canceled in ${Date.now() - t0} ms`);
     assert.equal(api.dotnet().trace.lastError, '');
     const left = files(traces).filter((f) => !before.includes(f));
-    if (process.platform === 'win32') {
-      ctx.log(`NOTE I18: Windows ends eyedbg forcefully: ${left.length} partial trace file(s) left for pruning`);
-    } else {
-      assert.deepEqual(left, [], 'eyedbg discarded the canceled trace');
-    }
+    assert.deepEqual(left, [], 'eyedbg discarded the canceled trace');
 
     // A process that exited.
     bare.end();
