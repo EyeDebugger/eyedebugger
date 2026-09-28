@@ -328,15 +328,18 @@ func assertGuideExamples(t *testing.T, g *cobra.Command, pkg extensionSchema, la
 // launch.json body meant to be copied verbatim.
 var launchJSONCaptionRE = regexp.MustCompile(`(?m)^[ \t]*-- launch\.json:.*$`)
 
-// assertLaunchJSONCaptionsParse checks that the JSON object right after
-// every "-- launch.json:" caption in text really decodes as an "eyedbg"
-// example: jsonExamples silently drops anything that fails to decode (by
-// design, so one bad "{" doesn't desync the scan), so without a check tied
-// to the caption itself, a broken example — the exact text an agent then
-// pastes — would only be caught by luck, through the weaker "at least one
-// launch and one attach" count above.
-func assertLaunchJSONCaptionsParse(t *testing.T, g *cobra.Command, text string) {
-	t.Helper()
+// launchJSONCaptionErrors checks that the JSON object right after every
+// "-- launch.json:" caption in text really decodes as an "eyedbg" example:
+// jsonExamples silently drops anything that fails to decode (by design, so
+// one bad "{" doesn't desync the scan), so without a check tied to the
+// caption itself, a broken example — the exact text an agent then pastes —
+// would only be caught by luck, through the weaker "at least one launch and
+// one attach" count in assertGuideExamples. Split out from
+// assertLaunchJSONCaptionsParse so the check itself (a trailing comma, a
+// caption with no object following it, a wrong "type") is unit-testable
+// without a *cobra.Command or a *testing.T.
+func launchJSONCaptionErrors(text string) []error {
+	var errs []error
 
 	for _, loc := range launchJSONCaptionRE.FindAllStringIndex(text, -1) {
 		caption := strings.TrimSpace(text[loc[0]:loc[1]])
@@ -344,19 +347,31 @@ func assertLaunchJSONCaptionsParse(t *testing.T, g *cobra.Command, text string) 
 
 		start := strings.IndexByte(rest, '{')
 		if start < 0 {
-			t.Errorf("%s: %q: no JSON object follows this caption", g.CommandPath(), caption)
+			errs = append(errs, fmt.Errorf("%q: no JSON object follows this caption", caption))
 			continue
 		}
 
 		var m map[string]any
 		if err := json.NewDecoder(strings.NewReader(rest[start:])).Decode(&m); err != nil {
-			t.Errorf("%s: %q: JSON does not decode: %v", g.CommandPath(), caption, err)
+			errs = append(errs, fmt.Errorf("%q: JSON does not decode: %w", caption, err))
 			continue
 		}
 
 		if m["type"] != "eyedbg" {
-			t.Errorf("%s: %q: JSON's \"type\" is %v, want %q", g.CommandPath(), caption, m["type"], "eyedbg")
+			errs = append(errs, fmt.Errorf("%q: JSON's \"type\" is %v, want %q", caption, m["type"], "eyedbg"))
 		}
+	}
+
+	return errs
+}
+
+// assertLaunchJSONCaptionsParse reports every error launchJSONCaptionErrors
+// finds in text against g.
+func assertLaunchJSONCaptionsParse(t *testing.T, g *cobra.Command, text string) {
+	t.Helper()
+
+	for _, err := range launchJSONCaptionErrors(text) {
+		t.Errorf("%s: %v", g.CommandPath(), err)
 	}
 }
 
@@ -425,6 +440,132 @@ func exampleInvocations(example string) [][]string {
 	}
 
 	return out
+}
+
+// equalInvocationSlices reports whether a and b hold the same invocations in
+// the same order.
+func equalInvocationSlices(a, b [][]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		if !equalStrings(a[i], b[i]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// TestLongInvocations covers longInvocations directly: reverting its regex
+// from `'eyedbg\s+` back to a literal `'eyedbg ` (or dropping the
+// whitespace-collapse before splitting) would make it silently miss a span
+// the ~100-column wrap broke right after the word, and TestGuideInvocationsResolve
+// alone would keep passing (nothing else in a real guide happens to hit that
+// exact spot today).
+func TestLongInvocations(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		long string
+		want [][]string
+	}{
+		{
+			name: "plain single-quoted span",
+			long: "Run 'eyedbg version' first.",
+			want: [][]string{{"version"}},
+		},
+		{
+			name: "span wrapped right after the word",
+			long: "See 'eyedbg\nadapters doctor' for details.",
+			want: [][]string{{"adapters", "doctor"}},
+		},
+		{
+			name: "span wrapped mid-invocation",
+			long: "See 'eyedbg lease\ntake --force' here.",
+			want: [][]string{{"lease", "take", "--force"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := longInvocations(tt.long); !equalInvocationSlices(got, tt.want) {
+				t.Errorf("longInvocations(%q) = %v, want %v", tt.long, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestTableInvocations covers tableInvocations directly, over a row shaped
+// like the 'lang' index guide's own table: reverting or removing the
+// tableInvocations call would make the INSTALL/GUIDE columns silently
+// unchecked again (F2's second hole), and TestGuideInvocationsResolve alone
+// wouldn't show it, since the other scanners already find enough
+// invocations elsewhere in the same guide to pass its "found something"
+// check.
+func TestTableInvocations(t *testing.T) {
+	t.Parallel()
+
+	long := "LANG      INSTALL                                GUIDE\n" +
+		"dotnet    eyedbg adapters install netcoredbg      eyedbg help lang dotnet\n"
+
+	want := [][]string{
+		{"adapters", "install", "netcoredbg"},
+		{"help", "lang", "dotnet"},
+	}
+
+	if got := tableInvocations(long); !equalInvocationSlices(got, want) {
+		t.Errorf("tableInvocations(%q) = %v, want %v", long, got, want)
+	}
+}
+
+// TestLaunchJSONCaptionErrors covers launchJSONCaptionErrors directly: a
+// trailing comma, a caption with no JSON object after it, and a wrong
+// "type" must all be reported, and a caption whose JSON is a real "eyedbg"
+// example must not be.
+func TestLaunchJSONCaptionErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		text    string
+		wantErr bool
+	}{
+		{
+			name: "valid caption",
+			text: "-- launch.json:\n{\"type\": \"eyedbg\", \"request\": \"launch\"}\n",
+		},
+		{
+			name:    "no object follows the caption",
+			text:    "-- launch.json:\nsee below\n",
+			wantErr: true,
+		},
+		{
+			name:    "trailing comma",
+			text:    "-- launch.json:\n{\"type\": \"eyedbg\",}\n",
+			wantErr: true,
+		},
+		{
+			name:    "wrong type",
+			text:    "-- launch.json:\n{\"type\": \"other\"}\n",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			errs := launchJSONCaptionErrors(tt.text)
+			if (len(errs) > 0) != tt.wantErr {
+				t.Errorf("launchJSONCaptionErrors(%q) = %v, want error = %v", tt.text, errs, tt.wantErr)
+			}
+		})
+	}
 }
 
 // TestGuideInvocationsResolve keeps a guide's own invocations honest: every

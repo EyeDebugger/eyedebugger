@@ -85,6 +85,12 @@ func invocationRegions(md string) []string {
 		trimmed := strings.TrimSpace(line)
 
 		if info, ok := strings.CutPrefix(trimmed, "```"); ok {
+			// CommonMark lets a fence interrupt a paragraph: flush before
+			// toggling so prose above the fence isn't later joined to prose
+			// after it (which would mis-pair their backticks). No-op on the
+			// closing fence: nothing is added to paragraph while inFence.
+			flushParagraph()
+
 			if !inFence {
 				fenceJSON = info == "json"
 			}
@@ -470,6 +476,25 @@ func TestTruncateAtDelimiter(t *testing.T) {
 		if got := truncateAtDelimiter(tt.in); got != tt.want {
 			t.Errorf("truncateAtDelimiter(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+// TestInvocationRegionsFlushesBeforeFence checks that a fence interrupts the
+// current paragraph instead of letting prose from either side of it join
+// into one flushed region: without the flush, the stray backtick before the
+// fence pairs with the first backtick after it instead of its own partner,
+// and the span naming "eyedbg lease bogus" is silently dropped rather than
+// found and rejected.
+func TestInvocationRegionsFlushesBeforeFence(t *testing.T) {
+	t.Parallel()
+
+	md := "Text with stray ` backtick\n```sh\neyedbg next\n```\nthen `eyedbg lease bogus` here"
+
+	want := []string{"eyedbg next", "eyedbg lease bogus"}
+
+	got := invocationRegions(md)
+	if !equalStrings(got, want) {
+		t.Fatalf("invocationRegions(%q) = %q, want %q", md, got, want)
 	}
 }
 
