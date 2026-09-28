@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -878,6 +879,39 @@ func (s *Session) appendOutputLocked(category, text string) {
 	cut := present.CutText(text, maxOutputChunk, false)
 	e := s.log.append(api.Event{Kind: api.EventOutput, Category: category, Text: cut, Truncated: len(cut) < len(text)})
 	s.lastOutput = e.Seq
+}
+
+// Bounds on the adapter output a failed start's error carries (D3b).
+const (
+	maxFailedStartLines = 20
+	maxFailedStartBytes = 4096
+)
+
+// failedStartOutput is the adapter's stderr/important output logged so far
+// (oldest first), bounded to the last [maxFailedStartLines] lines and
+// [maxFailedStartBytes] bytes, or "" if none was logged. Called only from
+// [Manager.run]'s configure failure branch, whose caller decides whether to
+// attach it to the start's error.
+func (s *Session) failedStartOutput() string {
+	var b strings.Builder
+
+	for _, l := range s.log.outputSince(0) {
+		if l.Category == "stderr" || l.Category == "important" {
+			b.WriteString(l.Text)
+		}
+	}
+
+	text := strings.TrimRight(b.String(), "\n")
+	if text == "" {
+		return ""
+	}
+
+	lines := strings.Split(text, "\n")
+	if len(lines) > maxFailedStartLines {
+		lines = lines[len(lines)-maxFailedStartLines:]
+	}
+
+	return present.CutText(strings.Join(lines, "\n"), maxFailedStartBytes, true)
 }
 
 // Info returns the session's summary.

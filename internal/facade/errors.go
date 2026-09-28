@@ -71,6 +71,10 @@ func errorResponse(command string, err error, holder string, showUser bool) (mes
 		format += " — " + e.Hint
 	}
 
+	if e.Output != "" {
+		format += "\n" + e.Output
+	}
+
 	vars := map[string]string{"code": string(e.Code)}
 	if e.Code == api.CodeLeaseHeld && holder != "" {
 		vars["holder"] = holder

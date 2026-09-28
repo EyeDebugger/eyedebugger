@@ -362,6 +362,15 @@ func TestErrorResponse(t *testing.T) {
 			want:    godap.ErrorMessage{Id: 7000, Format: "no anchor", Variables: map[string]string{"code": "ANCHOR_NOT_FOUND"}},
 		},
 		{
+			name:    "output appended after the hint",
+			err:     &api.Error{Code: api.CodeAdapterFailed, Message: "Failed to launch", Hint: "check the build", Output: "Build Error: …\nsyntax error"},
+			message: "ADAPTER_ERROR",
+			want: godap.ErrorMessage{
+				Id: 7010, Format: "Failed to launch — check the build\nBuild Error: …\nsyntax error",
+				Variables: map[string]string{"code": "ADAPTER_ERROR"},
+			},
+		},
+		{
 			name: "internal", err: errors.New("secret value 42"),
 			message: "INTERNAL",
 			want: godap.ErrorMessage{

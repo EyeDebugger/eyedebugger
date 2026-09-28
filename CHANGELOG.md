@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   last stop's, if it's still listed, else the first), falling back to today's choice when the
   answer is empty or the request fails. netcoredbg lists its threads while the program runs (the
   design doc previously said otherwise).
+- A session start that fails once its debug adapter logged stderr/important output (e.g. Delve's
+  build error) now shows that output — errors gain an optional `output` field, the CLI prints it
+  after the hint, and the DAP facade appends it to the error shown in the editor — instead of only
+  a generic "Failed to launch". It is never written to the daemon log.
 
 ## [0.2.0-beta.1] - 2026-09-28
 
