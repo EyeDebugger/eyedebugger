@@ -102,6 +102,10 @@ first) and a built .NET program.
 
 ![The EyeDebugger snippets in Add Configuration](images/snippets.png)
 
+Go, C, C++ and Rust also launch through `lang` (`go`, `c`, `cpp`, `rust`) — no built-in snippet
+yet, but the same shape as the Python one above. More examples: `eyedbg help vscode`, `eyedbg help
+lang <lang>`.
+
 ## Control
 
 Whoever holds a session's control lease drives it: continue, step, pause, set variables. The status

@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/EyeDebugger/eyedebugger/actions/workflows/ci.yml/badge.svg)](https://github.com/EyeDebugger/eyedebugger/actions/workflows/ci.yml)
 
-> **Alpha (v0.1).** Debug .NET (netcoredbg, or the opt-in SharpDbg), Python (debugpy), C, C++,
+> **Beta (v0.2.0-beta.1).** Debug .NET (netcoredbg, or the opt-in SharpDbg), Python (debugpy), C, C++,
 > Rust (lldb-dap) and Go (Delve) programs on Linux, macOS and Windows (x64 and arm64; .NET on Intel
 > Macs through SharpDbg only, `eyedbg adapters install sharpdbg`, and on Windows on Arm with
 > `--adapter sharpdbg`, unverified; C/C++/Rust need
@@ -15,15 +15,15 @@
 Every existing agent debugger is either an MCP server or IDE-bound, and none lets an agent and a
 human both *drive* one session: mcp-debugger's IDE view is read-only, and delve's multiclient has
 no event fan-out. EyeDebugger's daemon owns the session, so a stateless CLI — with complete
-built-in help, the agent interface — and (phase 2) a VS Code extension can both attach to the same
-live debug session.
+built-in help, the agent interface — and a VS Code extension can both attach to the same live
+debug session.
 
 ## How it works
 
 ```
 eyedbg CLI (stateless) ──┐
                          ├── local IPC (JSON-RPC 2.0) ──► eyedbgd (daemon, per user)
-VS Code extension (P2) ──┘     + per-session DAP facade (P2)       │
+VS Code extension      ──┘     + per-session DAP facade            │
                                                                    ├── Session ── DAP ──► adapter process
                                                                    │   (netcoredbg | sharpdbg | debugpy | lldb-dap | delve; js-debug planned)
                                                                    └── Side helpers (JSON-RPC over stdio)
@@ -41,6 +41,24 @@ VS Code extension (P2) ──┘     + per-session DAP facade (P2)       │
   [ADR 0013](docs/adr/0013-socket-transport-and-native-manifest-languages.md)).
 
 Full design: [docs/DESIGN.md](docs/DESIGN.md).
+
+## VS Code
+
+Join an agent's live session from VS Code, or start your own and let the agent join you:
+
+```sh
+code --install-extension eyedebugger_0.2.0-beta.1_vscode.vsix   # from a GitHub release
+```
+
+```json
+{ "type": "eyedbg", "request": "attach", "name": "Join eyedbg session" }
+```
+
+```json
+{ "type": "eyedbg", "request": "launch", "name": "Debug app.py", "lang": "python", "program": "${workspaceFolder}/app.py" }
+```
+
+Full guide: [extensions/vscode/README.md](extensions/vscode/README.md), `eyedbg help vscode`.
 
 ## Roadmap
 

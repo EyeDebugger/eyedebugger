@@ -70,6 +70,10 @@
   structured data (`internal/cli/help.go`); both are built from the same `Short`/`Long`/`Example`
   and flags, so there is nothing extra to maintain.
 - Help text is a tested, reviewed artifact: change it deliberately, the same as `--json` output.
+- Some commands exist to print a guide, not to act (`eyedbg vscode`, `eyedbg lang`, `eyedbg lang
+  dotnet|python|go|native`): their `Long`/`Example` carry real, VM-verified usage, and
+  `internal/cli`'s tests tie their examples to the extension's schema and the command tree so they
+  can't drift silently.
 
 ## Testing
 
