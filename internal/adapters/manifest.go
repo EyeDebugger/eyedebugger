@@ -182,6 +182,10 @@ type Template struct {
 	// must be set.
 	Require   []string       `json:"require,omitempty"`
 	Arguments map[string]any `json:"arguments"`
+	// Terminal (launch only) is merged over Arguments, its top-level keys
+	// replacing theirs, for a launch that runs the program in the editor's
+	// terminal (the adapter's runInTerminal); without it the adapter can't.
+	Terminal map[string]any `json:"terminal,omitempty"`
 }
 
 // EvalGuard is data for the generic check that keeps eval from changing

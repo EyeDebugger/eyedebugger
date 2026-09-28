@@ -166,8 +166,16 @@ func (d *Driver) Prepare(ctx context.Context, spec session.LaunchSpec) (session.
 }
 
 // PrepareWith implements session.OptionsPreparer: Prepare, with the build's
-// output streamed to opts.Output when it is set (see buildStreamed).
+// output streamed to opts.Output when it is set (see buildStreamed). A
+// launch in a terminal (opts.Terminal) is UNSUPPORTED_BY_ADAPTER.
 func (d *Driver) PrepareWith(ctx context.Context, spec session.LaunchSpec, opts session.PrepareOptions) (session.Launch, error) {
+	if opts.Terminal {
+		// SharpDbg's runInTerminal is unverified (docs/adr/0019).
+		return session.Launch{}, api.NewError(api.CodeUnsupported,
+			"the dotnet debug adapter runs the program without a terminal (netcoredbg has no runInTerminal)",
+			`use "console": "internalConsole"`)
+	}
+
 	if len(spec.Options) > 0 {
 		return session.Launch{}, api.NewError(api.CodeInvalidRequest, "dotnet takes no --opt options", "see 'eyedbg help start'")
 	}

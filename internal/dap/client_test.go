@@ -405,3 +405,131 @@ func customExchange(t *testing.T, h Handlers) godap.Message {
 
 	return got.resp
 }
+
+// TestReverseAnsweredLater: a reverse request Reverse takes is answered
+// when reply is called, from another goroutine, exactly once; one it
+// leaves goes to Request (else "not supported"); a reply once the stream
+// has ended returns without writing.
+func TestReverseAnsweredLater(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		take    bool
+		wantPID int // 0: a failed "not supported" answer
+	}{
+		{name: "taken", take: true, wantPID: 42},
+		{name: "left", take: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			replies := make(chan func(godap.ResponseMessage), 1)
+			c, fa := pipeClient(t, Handlers{Reverse: func(_ godap.RequestMessage, reply func(godap.ResponseMessage)) bool {
+				if tt.take {
+					replies <- reply
+				}
+
+				return tt.take
+			}})
+
+			fa.seq++
+			fa.write(&godap.RunInTerminalRequest{Request: godap.Request{
+				ProtocolMessage: godap.ProtocolMessage{Seq: fa.seq, Type: "request"}, Command: "runInTerminal",
+			}})
+
+			// Two replies race; the pipe blocks each write until it is read,
+			// so the replies are awaited after the read.
+			var wg sync.WaitGroup
+
+			if tt.take {
+				reply := <-replies
+
+				for range 2 {
+					wg.Go(func() {
+						reply(&godap.RunInTerminalResponse{
+							Response: godap.Response{Success: true},
+							Body:     godap.RunInTerminalResponseBody{ProcessId: tt.wantPID},
+						})
+					})
+				}
+			}
+
+			resp := fa.read()
+			wg.Wait()
+			checkTerminalResponse(t, resp, fa.seq, tt.wantPID)
+
+			// The next message is the client's own request: no second
+			// response was written.
+			go func() { _, _ = c.Do(t.Context(), &godap.Request{Command: "threads"}) }()
+
+			if next, ok := fa.read().(godap.RequestMessage); !ok || next.GetRequest().Command != "threads" {
+				t.Errorf("next message = %#v, want the threads request", next)
+			}
+		})
+	}
+}
+
+// checkTerminalResponse checks msg is the answer to runInTerminal request
+// seq: processId pid, or with pid 0 a failure.
+func checkTerminalResponse(t *testing.T, msg godap.Message, seq, pid int) {
+	t.Helper()
+
+	resp, ok := msg.(godap.ResponseMessage)
+	if !ok {
+		t.Fatalf("got %#v, want a response to the reverse request", msg)
+	}
+
+	r := resp.GetResponse()
+	if r.RequestSeq != seq || r.Command != "runInTerminal" || r.Type != typeResponse || r.Seq < 1 {
+		t.Errorf("response header = %+v, want a response to runInTerminal seq %d", r, seq)
+	}
+
+	if pid == 0 {
+		if r.Success {
+			t.Errorf("response = %+v, want a failed one", r)
+		}
+
+		return
+	}
+
+	if rt, ok := resp.(*godap.RunInTerminalResponse); !ok || !r.Success || rt.Body.ProcessId != pid {
+		t.Errorf("response = %#v, want processId %d", resp, pid)
+	}
+}
+
+func TestReverseReplyAfterClose(t *testing.T) {
+	t.Parallel()
+
+	replies := make(chan func(godap.ResponseMessage), 1)
+	c, fa := pipeClient(t, Handlers{Reverse: func(_ godap.RequestMessage, reply func(godap.ResponseMessage)) bool {
+		replies <- reply
+
+		return true
+	}})
+
+	fa.write(&godap.RunInTerminalRequest{Request: godap.Request{
+		ProtocolMessage: godap.ProtocolMessage{Seq: 1, Type: "request"}, Command: "runInTerminal",
+	}})
+
+	reply := <-replies
+
+	_ = fa.out.Close()
+	<-c.Done()
+
+	// Nothing reads the pipe to the adapter any more: a write would block.
+	done := make(chan struct{})
+
+	go func() {
+		reply(&godap.RunInTerminalResponse{Response: godap.Response{Success: true}})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reply after the stream ended did not return")
+	}
+}

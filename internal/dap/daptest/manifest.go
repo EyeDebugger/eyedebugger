@@ -29,6 +29,9 @@ func UserManifest(entry, attached string) map[string]any {
 			"arguments": map[string]any{
 				argProgram: "${program}", argLines: "${opt.lines}", "stopAtEntry": "${stopOnEntry}", "laps": "${opt.laps}",
 			},
+			// In a terminal, the fake asks its client to run the program
+			// there ([ProgramArgs.Terminal]).
+			"terminal": map[string]any{argTerminal: true},
 		},
 		"attachUnsupported": "start it with 'eyedbg start fakelang'",
 		"exceptions":        map[string]any{filterAll: []any{filterAll}, "uncaught": []any{filterUserUnhandled}},

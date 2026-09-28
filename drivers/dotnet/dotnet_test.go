@@ -175,6 +175,27 @@ func TestPrepareRejectsOptions(t *testing.T) {
 	}
 }
 
+// TestPrepareRefusesTerminal: neither netcoredbg nor SharpDbg runs the
+// program in a terminal; refused before anything is looked for or built.
+func TestPrepareRefusesTerminal(t *testing.T) {
+	t.Parallel()
+
+	netcoredbg, sharpdbg := bundled(t)
+
+	for _, pick := range []string{"", "netcoredbg", "sharpdbg"} {
+		t.Run("adapter "+pick, func(t *testing.T) {
+			t.Parallel()
+
+			d := bind(t, &Driver{m: netcoredbg, sharp: sharpdbg, env: fakeAdapters{"found", "found"}.env("linux", "amd64")}, pick)
+
+			_, err := d.PrepareWith(t.Context(), session.LaunchSpec{Project: "/nonexistent"}, session.PrepareOptions{Terminal: true})
+			if api.CodeOf(err) != api.CodeUnsupported || !strings.Contains(err.Error(), "without a terminal") {
+				t.Fatalf("PrepareWith in a terminal: err = %v, want UNSUPPORTED_BY_ADAPTER", err)
+			}
+		})
+	}
+}
+
 // bundled returns the bundled registry's netcoredbg and sharpdbg manifests.
 func bundled(t *testing.T) (netcoredbg, sharpdbg *adapters.Manifest) {
 	t.Helper()

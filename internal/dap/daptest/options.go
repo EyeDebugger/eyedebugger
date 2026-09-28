@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	godap "github.com/google/go-dap"
 )
@@ -22,8 +23,9 @@ const (
 
 // Launch (and attach) argument field names, shared with [UserManifest].
 const (
-	argProgram = "program"
-	argLines   = "lines"
+	argProgram  = "program"
+	argLines    = "lines"
+	argTerminal = "terminal"
 )
 
 // Options change how the fake adapter behaves.
@@ -60,6 +62,26 @@ type Options struct {
 	// Unanswered lists commands whose requests it never answers: a request
 	// held in flight at the adapter until the client gives up on it.
 	Unanswered []string `json:"unanswered,omitempty"`
+	// Terminal is the runInTerminal request a launch with "terminal": true
+	// sends (nil: [DefaultTerminal] for the launched program).
+	Terminal *godap.RunInTerminalRequestArguments `json:"terminal,omitempty"`
+	// TerminalAgain makes such a launch send a second runInTerminal at
+	// configurationDone, reporting its answer in an output event without
+	// failing.
+	TerminalAgain bool `json:"terminalAgain,omitempty"`
+}
+
+// DefaultTerminal is the runInTerminal request a launch of program sends
+// when [Options.Terminal] is nil: this executable, in program's directory.
+func DefaultTerminal(program string) godap.RunInTerminalRequestArguments {
+	exe, err := os.Executable()
+	if err != nil {
+		exe = "fake-adapter"
+	}
+
+	return godap.RunInTerminalRequestArguments{
+		Kind: "integrated", Title: "Fake Debug Console", Cwd: filepath.Dir(program), Args: []string{exe, program},
+	}
 }
 
 // DefaultCaps are the capabilities the fake adapter declares by default:
@@ -120,6 +142,12 @@ type ProgramArgs struct {
 	FailAttach bool `json:"failAttach,omitempty"`
 	// ExitCode is the program's exit code at its last line (0: none).
 	ExitCode int `json:"exitCode,omitempty"`
+	// Terminal makes a launch ask the client to run the program in a
+	// terminal (runInTerminal, [Options.Terminal]) before answering: its
+	// answer is reported in an output event ("fake: runInTerminal
+	// processId=N" or "fake: runInTerminal failed: MSG"), and a failed one
+	// fails the launch.
+	Terminal bool `json:"terminal,omitempty"`
 }
 
 // Map returns the arguments as a request body.
@@ -144,6 +172,10 @@ func (a ProgramArgs) Map() map[string]any {
 
 	if a.ExitCode != 0 {
 		m["exitCode"] = a.ExitCode
+	}
+
+	if a.Terminal {
+		m[argTerminal] = true
 	}
 
 	return m

@@ -230,6 +230,20 @@ func TestParseInvalid(t *testing.T) {
 			at(m, "launch.arguments")["x"] = []any{map[string]any{"y": "${opt.nope}"}}
 		}, "no such option"},
 		{"attach require", func(m map[string]any) { at(m, "attach")["require"] = []any{"program"} }, "attach.require:"},
+		{"terminal on attach", func(m map[string]any) {
+			at(m, "attach")["terminal"] = map[string]any{"console": "integratedTerminal"}
+		}, "attach.terminal: is only for launch"},
+		{"empty terminal", func(m map[string]any) { at(m, "launch")["terminal"] = map[string]any{} }, "launch.terminal: must set"},
+		{"terminal unknown variable", func(m map[string]any) {
+			at(m, "launch")["terminal"] = map[string]any{"x": "${nope}"}
+		}, "launch.terminal: ${nope} is not a variable"},
+		{"terminal pid", func(m map[string]any) {
+			at(m, "launch")["terminal"] = map[string]any{"x": "${pid}"}
+		}, "launch.terminal:"},
+		{"terminal reference in a key", func(m map[string]any) {
+			at(m, "launch")["terminal"] = map[string]any{"${program}": true}
+		}, "launch.terminal: key"},
+		{"terminal not an object", func(m map[string]any) { at(m, "launch")["terminal"] = "integratedTerminal" }, "launch.terminal"},
 	}
 
 	for _, tt := range tests {

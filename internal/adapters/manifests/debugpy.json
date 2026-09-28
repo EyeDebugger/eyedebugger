@@ -32,7 +32,8 @@
       "justMyCode": "${opt.justMyCode}", "console": "internalConsole", "redirectOutput": true,
       "subProcess": false, "showReturnValue": true,
       "variablePresentation": {"special": "hide", "function": "hide", "class": "group", "protected": "inline"}
-    }
+    },
+    "terminal": {"console": "integratedTerminal"}
   },
   "attachUnsupported": "attaching to a running Python process needs gdb or lldb and isn't supported yet; start it under the debugger with 'eyedbg start python --program FILE'",
   "exceptions": {"all": ["raised", "uncaught"], "uncaught": ["uncaught", "userUnhandled"]},

@@ -117,6 +117,9 @@ type Session struct {
 	stopping, stopReason string
 	changed              chan struct{} // closed and replaced on every state change
 	ended                bool          // adapter torn down
+	// term is the terminal route of a start that has one (launch.go),
+	// open while that start runs; nil otherwise.
+	term *terminalRoute
 	// caps are the adapter's capabilities, known once it answered
 	// initialize.
 	caps      godap.Capabilities
@@ -266,7 +269,7 @@ func (s *Session) startAdapter(ctx context.Context, launch Launch, stderr io.Wri
 	// Under mu: a test run's session is shared before its adapter starts.
 	s.mu.Lock()
 	s.cmd = cmd
-	s.client = dap.NewClient(stdout, stdin, dap.Handlers{Event: s.onEvent})
+	s.client = dap.NewClient(stdout, stdin, dap.Handlers{Event: s.onEvent, Reverse: s.onReverse})
 	s.mu.Unlock()
 
 	go s.watchAdapter()
@@ -349,12 +352,18 @@ func (s *Session) configure(ctx context.Context, launch Launch, bps []api.Breakp
 }
 
 func (s *Session) initialize(ctx context.Context, adapterID string) error {
+	// Only a start with a terminal route runs the program in a terminal:
+	// every other adapter is told it can't (docs/DESIGN.md §3).
+	s.mu.Lock()
+	terminal := s.term != nil
+	s.mu.Unlock()
+
 	resp, err := dap.Call[*godap.InitializeResponse](ctx, s.client, &godap.InitializeRequest{
 		Request: godap.Request{Command: "initialize"},
 		Arguments: godap.InitializeRequestArguments{
 			ClientID: "eyedbg", ClientName: "EyeDebugger", AdapterID: adapterID,
 			LinesStartAt1: true, ColumnsStartAt1: true, PathFormat: "path",
-			SupportsVariableType: true,
+			SupportsVariableType: true, SupportsRunInTerminalRequest: terminal,
 		},
 	})
 	if err != nil {
