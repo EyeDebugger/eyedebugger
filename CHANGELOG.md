@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `eyedbg`/`eyedbgd` (go-dap, cobra, mousetrap: Apache-2.0; pflag: BSD-3-Clause) and their license
   texts; bundled in every release archive alongside LICENSE and NOTICE.
 
+### Fixed
+
+- `--json` (all commands) now escapes C1 control characters (U+0080-U+009F) the same way it
+  already escapes C0: `encoding/json` only escapes the latter, so a debuggee-controlled string
+  (a variable value, program output, an exception message) could plant a raw C1 code in `--json`
+  output, which some terminals read as the 8-bit form of an ESC-prefixed escape sequence.
+
 ## [0.2.0-beta.1] - 2026-09-28
 
 ### Added
