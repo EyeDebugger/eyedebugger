@@ -97,7 +97,7 @@ func TestFailedStartOutputBytes(t *testing.T) {
 		t.Fatalf("start err = %#v, want *api.Error", err)
 	}
 
-	if len(e.Output) == 0 || len(e.Output) > maxFailedStartBytes {
+	if e.Output == "" || len(e.Output) > maxFailedStartBytes {
 		t.Errorf("Output is %d bytes, want (0, %d]", len(e.Output), maxFailedStartBytes)
 	}
 

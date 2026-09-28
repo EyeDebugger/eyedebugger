@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"testing"
 )
 
@@ -97,4 +98,69 @@ func TestCancelOnEOFDrains(t *testing.T) {
 
 	_ = w.Close()
 	<-ctx.Done()
+}
+
+// TestWrapCancelOnEOFClearsEnv: WrapCancelOnEOF always clears the env var it
+// read, enabled or not, so an autostarted daemon, its adapters and the
+// debuggee never inherit it (F5) — they all build their own environment
+// from this process's.
+func TestWrapCancelOnEOFClearsEnv(t *testing.T) {
+	// Not t.Parallel(): sets an env var (t.Setenv forbids it anyway).
+	for _, value := range []string{"1", "0", ""} {
+		t.Setenv(EnvCancelOnStdinEOF, value)
+
+		root := NewEyedbgCommand(testInfo)
+
+		_, cancel := WrapCancelOnEOF(t.Context(), root, []string{"status"})
+		cancel()
+
+		if v, ok := os.LookupEnv(EnvCancelOnStdinEOF); ok {
+			t.Errorf("value %q: env var still set to %q after WrapCancelOnEOF", value, v)
+		}
+	}
+}
+
+// TestWrapCancelOnEOFDisabled: unset (or not "1"), WrapCancelOnEOF returns
+// ctx unchanged — no goroutine reads root's stdin at all.
+func TestWrapCancelOnEOFDisabled(t *testing.T) {
+	// Not t.Parallel(): sets an env var.
+	t.Setenv(EnvCancelOnStdinEOF, "0")
+
+	root := NewEyedbgCommand(testInfo)
+
+	parent := t.Context()
+
+	got, cancel := WrapCancelOnEOF(parent, root, []string{"status"})
+	defer cancel()
+
+	if got != parent {
+		t.Error("WrapCancelOnEOF wrapped ctx while disabled")
+	}
+}
+
+// TestWrapCancelOnEOFAppliesToOtherCommands: enabled, for any command but
+// 'dap', stdin EOF cancels the returned context, same as CancelOnEOF alone.
+func TestWrapCancelOnEOFAppliesToOtherCommands(t *testing.T) {
+	// Not t.Parallel(): sets an env var.
+	t.Setenv(EnvCancelOnStdinEOF, "1")
+
+	root := NewEyedbgCommand(testInfo)
+
+	r, w := io.Pipe()
+	t.Cleanup(func() { _ = w.Close() })
+	root.SetIn(r)
+
+	ctx, cancel := WrapCancelOnEOF(t.Context(), root, []string{"status"})
+	t.Cleanup(cancel)
+
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("ctx already done: %v", err)
+	}
+
+	_ = w.Close()
+	<-ctx.Done()
+
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		t.Errorf("ctx.Err() = %v, want context.Canceled", ctx.Err())
+	}
 }
