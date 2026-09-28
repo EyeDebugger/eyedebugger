@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	godap "github.com/google/go-dap"
 )
@@ -160,7 +161,30 @@ type adapter struct {
 	// gate is the connection to a fake test runner this adapter attached
 	// to; the runner waits until it closes.
 	gate net.Conn
+	// in delivers what the client sends; backlog holds what arrived while
+	// a reverse request waited for its answer, handled first.
+	in      <-chan inbound
+	backlog []inbound
+	// runInTerminal is whether initialize said the client supports
+	// runInTerminal; terminalAgain whether configurationDone asks again.
+	runInTerminal bool
+	terminalAgain bool
+	// program is the launched program.
+	program string
 }
+
+// inbound is one message from the client, or why reading ended.
+type inbound struct {
+	msg godap.Message
+	raw []byte
+	err error
+}
+
+// terminalWait bounds the wait for a runInTerminal answer.
+const terminalWait = 10 * time.Second
+
+// typeString is the type of the string values evaluate answers with.
+const typeString = "string"
 
 // Serve speaks DAP on r and w until the client disconnects or r ends.
 func Serve(r io.Reader, w io.Writer) error {
@@ -169,9 +193,15 @@ func Serve(r io.Reader, w io.Writer) error {
 
 // ServeWith is [Serve] with opts.
 func ServeWith(r io.Reader, w io.Writer, opts Options) error {
-	a := &adapter{opts: opts, w: w}
+	in := make(chan inbound)
+	quit := make(chan struct{})
+
+	defer close(quit)
+
+	go readInbound(bufio.NewReader(r), in, quit)
+
+	a := &adapter{opts: opts, w: w, in: in}
 	a.prog = newProgram(a.emit, opts.StepHitsBreakpoints, opts.LateVerify)
-	br := bufio.NewReader(r)
 
 	defer func() {
 		if a.gate != nil {
@@ -180,26 +210,147 @@ func ServeWith(r io.Reader, w io.Writer, opts Options) error {
 	}()
 
 	for !a.done && a.err == nil {
-		content, err := godap.ReadBaseMessage(br)
-		if errors.Is(err, io.EOF) {
+		m := a.next()
+		if errors.Is(m.err, io.EOF) {
 			return nil
 		}
 
-		if err != nil {
-			return fmt.Errorf("read request: %w", err)
+		if m.err != nil {
+			return m.err
 		}
 
-		msg, err := godap.DecodeProtocolMessage(content)
-		if err != nil {
-			return fmt.Errorf("decode request: %w", err)
-		}
-
-		if req, ok := msg.(godap.RequestMessage); ok {
-			a.handle(req, content)
+		if req, ok := m.msg.(godap.RequestMessage); ok {
+			a.handle(req, m.raw)
 		}
 	}
 
 	return a.err
+}
+
+// readInbound decodes what the client sends into in until reading fails
+// (the last value carries why) or quit is closed.
+func readInbound(br *bufio.Reader, in chan<- inbound, quit <-chan struct{}) {
+	for {
+		var m inbound
+
+		content, err := godap.ReadBaseMessage(br)
+
+		switch {
+		case errors.Is(err, io.EOF):
+			m.err = io.EOF
+		case err != nil:
+			m.err = fmt.Errorf("read request: %w", err)
+		default:
+			m.raw = content
+			if m.msg, err = godap.DecodeProtocolMessage(content); err != nil {
+				m.err = fmt.Errorf("decode request: %w", err)
+			}
+		}
+
+		select {
+		case in <- m:
+		case <-quit:
+			return
+		}
+
+		if m.err != nil {
+			return
+		}
+	}
+}
+
+// next is the next message to handle: the backlog's first, else the
+// client's next.
+func (a *adapter) next() inbound {
+	if len(a.backlog) > 0 {
+		m := a.backlog[0]
+		a.backlog = a.backlog[1:]
+
+		return m
+	}
+
+	return <-a.in
+}
+
+// runInTerminalRequest asks the client to run args, waiting at most
+// terminalWait for its answer: the process id, or why it failed. What
+// arrives meanwhile is handled after.
+func (a *adapter) runInTerminalRequest(args godap.RunInTerminalRequestArguments) (int, error) {
+	a.seq++
+	seq := a.seq
+	a.write(&godap.RunInTerminalRequest{
+		Request:   godap.Request{ProtocolMessage: godap.ProtocolMessage{Seq: seq, Type: "request"}, Command: "runInTerminal"},
+		Arguments: args,
+	})
+
+	if a.err != nil {
+		return 0, a.err
+	}
+
+	timer := time.NewTimer(terminalWait)
+	defer timer.Stop()
+
+	for {
+		select {
+		case m := <-a.in:
+			if m.err != nil {
+				a.backlog = append(a.backlog, m)
+
+				return 0, errors.New("the client went away")
+			}
+
+			resp, ok := m.msg.(godap.ResponseMessage)
+			if !ok || resp.GetResponse().RequestSeq != seq {
+				a.backlog = append(a.backlog, m)
+
+				continue
+			}
+
+			return terminalAnswer(resp)
+		case <-timer.C:
+			return 0, fmt.Errorf("no answer within %v", terminalWait)
+		}
+	}
+}
+
+// terminalAnswer is a runInTerminal response's process id, or its error.
+func terminalAnswer(resp godap.ResponseMessage) (int, error) {
+	switch r := resp.(type) {
+	case *godap.ErrorResponse:
+		if r.Body.Error != nil && r.Body.Error.Format != "" {
+			return 0, errors.New(r.Body.Error.Format)
+		}
+
+		return 0, errors.New(r.Message)
+	case *godap.RunInTerminalResponse:
+		if !r.Success {
+			return 0, errors.New(r.Message)
+		}
+
+		return r.Body.ProcessId, nil
+	}
+
+	return 0, fmt.Errorf("unexpected answer %T", resp)
+}
+
+// terminal asks the client to run the launched program in a terminal
+// and reports the answer in an output event.
+func (a *adapter) terminal() (int, error) {
+	args := DefaultTerminal(a.program)
+	if a.opts.Terminal != nil {
+		args = *a.opts.Terminal
+	}
+
+	pid, err := a.runInTerminalRequest(args)
+
+	text := "fake: runInTerminal processId=" + strconv.Itoa(pid) + "\n"
+	if err != nil {
+		text = "fake: runInTerminal failed: " + err.Error() + "\n"
+	}
+
+	a.emit("output", godap.OutputEventBody{Category: "console", Output: text})
+
+	return pid, err
 }
 
 func (a *adapter) write(m godap.Message) {
@@ -255,6 +406,7 @@ func (a *adapter) handle(req godap.RequestMessage, raw []byte) {
 
 	switch r := req.(type) {
 	case *godap.InitializeRequest:
+		a.runInTerminal = r.Arguments.SupportsRunInTerminalRequest
 		a.respond(req, a.opts.caps())
 	case *godap.LaunchRequest:
 		a.launch(req, r.Arguments, false)
@@ -374,9 +526,20 @@ func (a *adapter) launch(req godap.RequestMessage, raw []byte, attach bool) {
 
 	a.prog.load(args, attach)
 	a.stopAtEntry = args.StopAtEntry && !attach
+	a.program = args.Program
 
 	if attach {
 		a.attach = &args
+	}
+
+	if args.Terminal && !attach {
+		if _, err := a.terminal(); err != nil {
+			a.fail(req, "runInTerminal failed: "+err.Error())
+
+			return
+		}
+
+		a.terminalAgain = a.opts.TerminalAgain
 	}
 
 	a.respond(req, nil)
@@ -396,6 +559,10 @@ func (a *adapter) configurationDone(req godap.RequestMessage) {
 
 	if a.attach != nil && a.attach.ProcessID > 0 {
 		a.gate = dialGate(a.attach.ProcessID)
+	}
+
+	if a.terminalAgain {
+		_, _ = a.terminal()
 	}
 
 	a.respond(req, nil)
@@ -447,7 +614,25 @@ func (a *adapter) resume(req godap.RequestMessage) {
 // context.
 func (a *adapter) evaluate(req *godap.EvaluateRequest) {
 	if req.Arguments.Expression == "$context" {
-		a.respond(req, godap.EvaluateResponseBody{Result: req.Arguments.Context, Type: "string"})
+		a.respond(req, godap.EvaluateResponseBody{Result: req.Arguments.Context, Type: typeString})
+
+		return
+	}
+
+	// What initialize said of runInTerminal, and a runInTerminal asked for
+	// now, answered with the client's answer.
+	switch req.Arguments.Expression {
+	case "$supportsRunInTerminalRequest":
+		a.respond(req, godap.EvaluateResponseBody{Result: strconv.FormatBool(a.runInTerminal), Type: "bool"})
+
+		return
+	case "$runInTerminal":
+		result := "failed"
+		if pid, err := a.terminal(); err == nil {
+			result = "processId=" + strconv.Itoa(pid)
+		}
+
+		a.respond(req, godap.EvaluateResponseBody{Result: result, Type: typeString})
 
 		return
 	}
@@ -468,5 +653,5 @@ func (a *adapter) evaluate(req *godap.EvaluateRequest) {
 		return
 	}
 
-	a.respond(req, godap.EvaluateResponseBody{Result: value, Type: "string", VariablesReference: ref})
+	a.respond(req, godap.EvaluateResponseBody{Result: value, Type: typeString, VariablesReference: ref})
 }

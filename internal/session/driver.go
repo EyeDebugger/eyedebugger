@@ -28,6 +28,10 @@ type PrepareOptions struct {
 	// streamed build); it is not written to once PrepareWith returns. Nil
 	// prepares as [Driver.Prepare] does.
 	Output io.Writer
+	// Terminal asks for a launch whose adapter runs the program in the
+	// editor's terminal (its runInTerminal request). A driver whose
+	// adapter can't returns an UNSUPPORTED_BY_ADAPTER error.
+	Terminal bool
 }
 
 // OptionsPreparer is a [Driver] that can prepare a launch with

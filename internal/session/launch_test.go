@@ -11,10 +11,15 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	godap "github.com/google/go-dap"
+
 	"github.com/eyedebugger/eyedebugger/internal/api"
+	"github.com/eyedebugger/eyedebugger/internal/dap/daptest"
 )
 
 // streamingDriver is a fake driver that streams its build: PrepareWith
@@ -287,5 +292,312 @@ func TestLaunchRefuses(t *testing.T) {
 				t.Errorf("hook called %v, sessions %+v; want neither", called, m.List())
 			}
 		})
+	}
+}
+
+// terminalDriver is the fake driver prepared for a terminal: with
+// PrepareOptions.Terminal its launch makes the fake ask for one.
+type terminalDriver struct{ fakeDriver }
+
+func (d terminalDriver) PrepareWith(ctx context.Context, spec LaunchSpec, opts PrepareOptions) (Launch, error) {
+	l, err := d.Prepare(ctx, spec)
+	if err == nil && opts.Terminal {
+		l.Arguments["terminal"] = true
+	}
+
+	return l, err
+}
+
+// terminalCalls records a Terminal hook's calls and answers them.
+type terminalCalls struct {
+	mu    sync.Mutex
+	calls []godap.RunInTerminalRequestArguments
+	pid   int
+	err   error
+}
+
+func (tc *terminalCalls) hook(_ context.Context, args godap.RunInTerminalRequestArguments) (int, error) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	tc.calls = append(tc.calls, args)
+
+	return tc.pid, tc.err
+}
+
+// check checks the hook was called n times (0 or 1), with want.
+func (tc *terminalCalls) check(t *testing.T, n int, want godap.RunInTerminalRequestArguments) {
+	t.Helper()
+
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	if len(tc.calls) != n {
+		t.Fatalf("hook called %d times, want %d", len(tc.calls), n)
+	}
+
+	if n == 0 {
+		return
+	}
+
+	if got := tc.calls[0]; got.Title != want.Title || got.Cwd != want.Cwd || !slices.Equal(got.Args, want.Args) || got.Kind != want.Kind {
+		t.Errorf("hook args = %+v, want %+v", got, want)
+	}
+}
+
+func (tc *terminalCalls) count() int {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	return len(tc.calls)
+}
+
+// outputs are the session's output event texts.
+func outputs(s *Session) []string {
+	var out []string
+	for _, e := range eventsOf(s, api.EventOutput) { //nolint:gocritic // A test helper: the copies don't matter.
+		out = append(out, e.Text)
+	}
+
+	return out
+}
+
+// TestLaunchTerminal checks the terminal route: the adapter is told it may
+// ask (and only then), its first runInTerminal in the start reaches the
+// hook once and gets the hook's process id, and a second one in the start,
+// one after Launch returned, and one of a start without the hook are
+// refused.
+func TestLaunchTerminal(t *testing.T) {
+	t.Parallel()
+
+	const refused = "fake: runInTerminal failed: runInTerminal is not supported by eyedbg\n"
+
+	prog := fakeProgram(t)
+
+	tests := []struct {
+		name string
+		drv  Driver
+		// want: the output lines about runInTerminal during the start.
+		want []string
+	}{
+		{name: "once", drv: terminalDriver{}, want: []string{"fake: runInTerminal processId=4242\n"}},
+		{
+			name: "a second in the start", drv: terminalDriver{fakeDriver{opts: daptest.Options{TerminalAgain: true}}},
+			want: []string{"fake: runInTerminal processId=4242\n", refused},
+		},
+		// The adapter never asks during the start.
+		{name: "none in the start", drv: streamingDriver{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := newTestManagerWith(t, nil, tt.drv)
+			tc := &terminalCalls{pid: 4242}
+
+			s, err := m.Launch(t.Context(), humanC, api.StartParams{
+				Lang: "fake", LaunchSpec: api.LaunchSpec{Program: prog, StopOnEntry: true},
+			}, LaunchHooks{Terminal: tc.hook})
+			if err != nil {
+				t.Fatalf("launch: %v", err)
+			}
+
+			expectStopped(t, s.Wait(t.Context(), 0, testWait, api.DumpSpec{}), "entry", 1)
+
+			if got := outputs(s); !slices.Equal(got, tt.want) {
+				t.Errorf("output = %q, want %q", got, tt.want)
+			}
+
+			calls := min(len(tt.want), 1)
+			tc.check(t, calls, daptest.DefaultTerminal(prog))
+
+			if got := evalValue(t, s, "$supportsRunInTerminalRequest"); got != "true" {
+				t.Errorf("supportsRunInTerminalRequest = %s, want true", got)
+			}
+
+			// After Launch returned: refused at once, the hook not called.
+			if got := evalValue(t, s, "$runInTerminal"); got != "failed" {
+				t.Errorf("runInTerminal after the start = %s, want failed", got)
+			}
+
+			if got := outputs(s); len(got) != len(tt.want)+1 || got[len(got)-1] != refused {
+				t.Errorf("output = %q, want the refusal last", got)
+			}
+
+			tc.check(t, calls, daptest.DefaultTerminal(prog))
+		})
+	}
+}
+
+// TestTerminalWithoutHook checks that a start without a Terminal hook
+// neither tells the adapter it may run a terminal nor serves one: a CLI
+// start whose adapter asks anyway fails with the refusal, and a driver
+// that can't prepare for a terminal refuses a Launch with the hook.
+func TestTerminalWithoutHook(t *testing.T) {
+	t.Parallel()
+
+	t.Run("capability", func(t *testing.T) {
+		t.Parallel()
+
+		m := newTestManagerWith(t, nil, terminalDriver{})
+
+		s := start(t, m, humanC, api.StartParams{LaunchSpec: api.LaunchSpec{StopOnEntry: true}})
+		if got := evalValue(t, s, "$supportsRunInTerminalRequest"); got != "false" {
+			t.Errorf("CLI start: supportsRunInTerminalRequest = %s, want false", got)
+		}
+
+		l, err := m.Launch(t.Context(), humanC, api.StartParams{
+			Lang: "fake", LaunchSpec: api.LaunchSpec{Program: fakeProgram(t), StopOnEntry: true},
+		}, LaunchHooks{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		expectStopped(t, l.Wait(t.Context(), 0, testWait, api.DumpSpec{}), "entry", 1)
+
+		if got := evalValue(t, l, "$supportsRunInTerminalRequest"); got != "false" {
+			t.Errorf("launch without a terminal: supportsRunInTerminalRequest = %s, want false", got)
+		}
+	})
+
+	t.Run("CLI start asked anyway", func(t *testing.T) {
+		t.Parallel()
+
+		m := newTestManager(t, nil)
+
+		_, err := m.Start(t.Context(), humanC, api.StartParams{
+			Lang: "fake", LaunchSpec: api.LaunchSpec{Program: fakeProgram(t), Args: []string{"terminal"}},
+		})
+		expectCode(t, err, api.CodeAdapterFailed)
+
+		if !strings.Contains(err.Error(), "runInTerminal is not supported by eyedbg") {
+			t.Errorf("err = %v, want the refusal", err)
+		}
+	})
+
+	t.Run("driver can't", func(t *testing.T) {
+		t.Parallel()
+
+		m := newTestManager(t, nil)
+		tc := &terminalCalls{pid: 1}
+
+		_, err := m.Launch(t.Context(), humanC, api.StartParams{
+			Lang: "fake", LaunchSpec: api.LaunchSpec{Program: fakeProgram(t)},
+		}, LaunchHooks{Terminal: tc.hook})
+		expectCode(t, err, api.CodeUnsupported)
+
+		if tc.count() != 0 || len(m.List()) != 0 {
+			t.Errorf("hook called %d times, sessions %+v; want neither", tc.count(), m.List())
+		}
+	})
+}
+
+// TestLaunchTerminalFails checks that a failing hook fails the start at
+// once with its error (an *api.Error unchanged, anything else as
+// ADAPTER_ERROR), the adapter answered with the failure, and nothing
+// listed.
+func TestLaunchTerminalFails(t *testing.T) {
+	t.Parallel()
+
+	apiErr := api.NewError(api.CodeAdapterFailed, "the editor didn't start the program's terminal: no", "h")
+
+	tests := []struct {
+		name     string
+		pid      int
+		err      error
+		wantText string
+	}{
+		{name: "api error", err: apiErr, wantText: apiErr.Message},
+		{name: "other error", err: errors.New("the editor went away"), wantText: "the editor went away"},
+		{name: "no process id", pid: 0, wantText: "no process id"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := newTestManagerWith(t, nil, terminalDriver{})
+			tc := &terminalCalls{pid: tt.pid, err: tt.err}
+
+			var s *Session
+
+			hook := func(ctx context.Context, args godap.RunInTerminalRequestArguments) (int, error) {
+				s, _ = m.Get(m.List()[0].ID)
+
+				return tc.hook(ctx, args)
+			}
+
+			_, err := m.Launch(t.Context(), humanC, api.StartParams{
+				Lang: "fake", LaunchSpec: api.LaunchSpec{Program: fakeProgram(t), Args: []string{"hang"}},
+			}, LaunchHooks{Terminal: hook})
+			expectCode(t, err, api.CodeAdapterFailed)
+
+			if tt.err == apiErr && err != apiErr { //nolint:errorlint // Unchanged: the very error.
+				t.Errorf("err = %#v, want the hook's *api.Error unchanged", err)
+			}
+
+			if !strings.Contains(err.Error(), tt.wantText) {
+				t.Errorf("err = %v, want %q", err, tt.wantText)
+			}
+
+			if len(m.List()) != 0 {
+				t.Errorf("sessions after a failed launch = %+v, want none", m.List())
+			}
+
+			// The adapter was answered with the failure before it was shut
+			// down: it reported it before answering the disconnect.
+			if got := outputs(s); len(got) == 0 || !strings.HasPrefix(got[0], "fake: runInTerminal failed: eyedbg: ") {
+				t.Errorf("adapter output = %q, want the failure it was answered with", got)
+			}
+		})
+	}
+}
+
+// TestLaunchTerminalCanceled checks that the start's ctx ending while the
+// hook runs ends the hook, fails the start and answers the adapter, and
+// that Launch returns only once the hook has.
+func TestLaunchTerminalCanceled(t *testing.T) {
+	t.Parallel()
+
+	m := newTestManagerWith(t, nil, terminalDriver{})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	var s *Session
+
+	returned := make(chan struct{})
+
+	hook := func(hctx context.Context, _ godap.RunInTerminalRequestArguments) (int, error) {
+		defer close(returned)
+
+		s, _ = m.Get(m.List()[0].ID)
+
+		cancel()
+		<-hctx.Done()
+
+		return 0, hctx.Err()
+	}
+
+	_, err := m.Launch(ctx, humanC, api.StartParams{
+		Lang: "fake", LaunchSpec: api.LaunchSpec{Program: fakeProgram(t), Args: []string{"hang"}},
+	}, LaunchHooks{Terminal: hook})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("launch err = %v, want canceled", err)
+	}
+
+	select {
+	case <-returned:
+	default:
+		t.Fatal("Launch returned before the hook did")
+	}
+
+	if len(m.List()) != 0 {
+		t.Errorf("sessions after a canceled launch = %+v, want none", m.List())
+	}
+
+	if got := outputs(s); len(got) == 0 || !strings.HasPrefix(got[0], "fake: runInTerminal failed: eyedbg: ") {
+		t.Errorf("adapter output = %q, want the failure it was answered with", got)
 	}
 }

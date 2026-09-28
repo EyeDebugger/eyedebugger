@@ -194,7 +194,8 @@ func (d fakeDriver) testLaunchCommand(spec TestSpec) (TestCommand, error) {
 	return TestCommand{Program: "fake test " + spec.Filter, Launch: &launch}, nil
 }
 
-// parseProgramArgs applies lines=, laps=, throws= and exitCode= arguments.
+// parseProgramArgs applies lines=, laps=, throws= and exitCode= arguments,
+// and terminal (the launch asks for a terminal).
 func parseProgramArgs(pa *daptest.ProgramArgs, args []string) error {
 	for _, a := range args {
 		name, value, _ := strings.Cut(a, "=")
@@ -202,6 +203,8 @@ func parseProgramArgs(pa *daptest.ProgramArgs, args []string) error {
 		var err error
 
 		switch name {
+		case "terminal":
+			pa.Terminal = true
 		case "lines":
 			pa.Lines, err = strconv.Atoi(value)
 		case "laps":

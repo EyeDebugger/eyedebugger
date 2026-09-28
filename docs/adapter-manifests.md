@@ -201,7 +201,16 @@ default), `bool` or `int`; `default` is written as a string (`"true"`, `"2"`); `
 `INVALID_REQUEST` listing the options.
 
 `launch`: `require` (inputs of which at least one must be set: `program` for `--program`, or
-`opt.NAME`) and `arguments` (the launch request body, a template). `attach`: `arguments` only.
+`opt.NAME`), `arguments` (the launch request body, a template) and, optionally, `terminal` (a
+template like `arguments`, not empty). `attach`: `arguments` only.
+
+`launch.terminal` says how the adapter runs the program in the editor's terminal: for a launch
+that asks for one (an editor's DAP `launch` with `"console": "integratedTerminal"` through
+`eyedbg dap --launch`, docs/adr/0019), it is rendered like `arguments` and merged over them, its
+top-level keys replacing theirs (debugpy: `{"console": "integratedTerminal"}`). Only such a launch
+tells the adapter it may send `runInTerminal`, and eyedbg serves one of those, from that start
+only. Without `launch.terminal` a launch in a terminal is `UNSUPPORTED_BY_ADAPTER`. A manifest
+using it needs an eyedbg newer than 0.2.0-beta.1: older ones reject it as an unknown field.
 
 `exceptions`: `{"all": [...], "uncaught": [...]}`, the adapter's exception filter ids for each
 mode of `eyedbg bp exceptions` (`none` sets no filters). A mode left out uses its own name as the
@@ -221,7 +230,8 @@ operators and dunder methods still run code.
 
 ## Templates
 
-`launch.arguments` and `attach.arguments` are JSON with references to these variables:
+`launch.arguments`, `launch.terminal` and `attach.arguments` are JSON with references to these
+variables:
 
 | variable | type | value |
 |---|---|---|
@@ -311,7 +321,8 @@ debugpy's manifest, the reference for a generic language:
       "justMyCode": "${opt.justMyCode}", "console": "internalConsole", "redirectOutput": true,
       "subProcess": false, "showReturnValue": true,
       "variablePresentation": {"special": "hide", "function": "hide", "class": "group", "protected": "inline"}
-    }
+    },
+    "terminal": {"console": "integratedTerminal"}
   },
   "attachUnsupported": "attaching to a running Python process needs gdb or lldb and isn't supported yet; start it under the debugger with 'eyedbg start python --program FILE'",
   "exceptions": {"all": ["raised", "uncaught"], "uncaught": ["uncaught", "userUnhandled"]},

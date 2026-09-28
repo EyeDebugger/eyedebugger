@@ -5,6 +5,7 @@ package generic
 
 import (
 	"context"
+	"maps"
 	"path/filepath"
 	"slices"
 
@@ -72,6 +73,19 @@ func (d *Driver) Manifest() *adapters.Manifest { return d.m }
 // renders the manifest's launch arguments. Project and NoBuild are
 // ignored: nothing is built.
 func (d *Driver) Prepare(ctx context.Context, spec session.LaunchSpec) (session.Launch, error) {
+	return d.PrepareWith(ctx, spec, session.PrepareOptions{})
+}
+
+// PrepareWith implements session.OptionsPreparer: Prepare, and with
+// o.Terminal the manifest's launch.terminal arguments rendered and merged
+// over the launch arguments (a manifest without them can't: an
+// UNSUPPORTED_BY_ADAPTER error). o.Output is unused: nothing is built.
+func (d *Driver) PrepareWith(ctx context.Context, spec session.LaunchSpec, o session.PrepareOptions) (session.Launch, error) {
+	if o.Terminal && d.m.Launch.Terminal == nil {
+		return session.Launch{}, api.NewError(api.CodeUnsupported,
+			"the "+d.Name()+" debug adapter can't run the program in a terminal", `use "console": "internalConsole"`)
+	}
+
 	opts, err := d.options(spec.Options)
 	if err != nil {
 		return session.Launch{}, err
@@ -110,6 +124,10 @@ func (d *Driver) Prepare(ctx context.Context, spec session.LaunchSpec) (session.
 	vars[adapters.VarStopOnEntry] = spec.StopOnEntry
 
 	launch.Arguments = adapters.Render(d.m.Launch.Arguments, vars)
+	if o.Terminal {
+		maps.Copy(launch.Arguments, adapters.Render(d.m.Launch.Terminal, vars))
+	}
+
 	launch.Program = program
 	launch.Request = session.RequestLaunch
 

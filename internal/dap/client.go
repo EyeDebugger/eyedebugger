@@ -30,14 +30,22 @@ func (e *RequestError) Error() string {
 	return fmt.Sprintf("debug adapter rejected %s: %s", e.Command, e.Message)
 }
 
-// Handlers receive what the adapter sends on its own initiative. Both are
+// Handlers receive what the adapter sends on its own initiative. They are
 // called from the client's read goroutine, one message at a time, so they
 // must not block on the client.
 type Handlers struct {
 	// Event receives every event.
 	Event func(godap.EventMessage)
-	// Request answers a reverse request (e.g. runInTerminal); nil, or a nil
-	// result, makes the client reply with a "not supported" error.
+	// Reverse, when set, is offered every reverse request first. It
+	// returns true to take req and answer it later, by calling reply once
+	// from any goroutine (the response's seq, type, request_seq and
+	// command are set there; a second call does nothing, and a call once
+	// the adapter's stream has ended returns quietly). It returns false to
+	// leave req to Request.
+	Reverse func(req godap.RequestMessage, reply func(godap.ResponseMessage)) bool
+	// Request answers a reverse request (e.g. runInTerminal) Reverse left;
+	// nil, or a nil result, makes the client reply with a "not supported"
+	// error.
 	Request func(godap.RequestMessage) godap.ResponseMessage
 	// Codec decodes what the peer sends; nil is go-dap's standard messages
 	// only (an unknown event is dropped, an unknown response reaches its
@@ -253,18 +261,50 @@ func (c *Client) deliverUnknown(raw []byte) {
 }
 
 func (c *Client) answer(req godap.RequestMessage) {
+	if c.handlers.Reverse != nil {
+		var once sync.Once
+
+		reply := func(resp godap.ResponseMessage) {
+			once.Do(func() { c.respond(req, resp) })
+		}
+
+		if c.handlers.Reverse(req, reply) {
+			return
+		}
+	}
+
 	var resp godap.ResponseMessage
 	if c.handlers.Request != nil {
 		resp = c.handlers.Request(req)
 	}
 
-	r := req.GetRequest()
 	if resp == nil {
-		resp = &godap.ErrorResponse{
-			Response: godap.Response{Command: r.Command, Message: "not supported"},
-			Body:     godap.ErrorResponseBody{Error: &godap.ErrorMessage{Format: r.Command + " is not supported by eyedbg"}},
-		}
+		resp = notSupported(req)
 	}
+
+	c.respond(req, resp)
+}
+
+// notSupported is the error response to a reverse request nothing takes.
+func notSupported(req godap.RequestMessage) godap.ResponseMessage {
+	command := req.GetRequest().Command
+
+	return &godap.ErrorResponse{
+		Response: godap.Response{Command: command, Message: "not supported"},
+		Body:     godap.ErrorResponseBody{Error: &godap.ErrorMessage{Format: command + " is not supported by eyedbg"}},
+	}
+}
+
+// respond writes resp as the response to the adapter's request req, unless
+// the adapter's stream has ended.
+func (c *Client) respond(req godap.RequestMessage, resp godap.ResponseMessage) {
+	select {
+	case <-c.done:
+		return
+	default:
+	}
+
+	r := req.GetRequest()
 
 	c.wmu.Lock()
 	defer c.wmu.Unlock()

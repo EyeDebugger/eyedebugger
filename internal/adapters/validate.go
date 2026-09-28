@@ -507,6 +507,22 @@ func (m *Manifest) validateTemplate(field string, t *Template, attach bool) erro
 		return fieldError(field+".arguments", "%v", err)
 	}
 
+	if t.Terminal == nil {
+		return nil
+	}
+
+	if attach {
+		return fieldError(field+".terminal", "is only for launch")
+	}
+
+	if len(t.Terminal) == 0 {
+		return fieldError(field+".terminal", "must set at least one argument")
+	}
+
+	if err := checkTemplate(t.Terminal, kinds); err != nil {
+		return fieldError(field+".terminal", "%v", err)
+	}
+
 	return nil
 }
 

@@ -425,3 +425,98 @@ func TestVirtualEnvPassedThrough(t *testing.T) {
 		t.Fatalf("VirtualEnv = %q, %v; want %q", in.VirtualEnv, err, venv)
 	}
 }
+
+// toyTerminal is the driver of a native manifest whose launch.terminal is
+// terminal.
+func toyTerminal(terminal map[string]any) *Driver {
+	d := New(&adapters.Manifest{
+		Name: "toydbg", Version: "1", Adapter: adapters.Adapter{ID: "toy", Entry: "toydbg", Env: "TOYDBG", Path: true},
+		Language: &adapters.Language{Name: "toy"},
+		Launch: &adapters.Template{
+			Require:   []string{"program"},
+			Arguments: map[string]any{"program": "${program}", "console": "internal", "nested": map[string]any{"a": 1}},
+			Terminal:  terminal,
+		},
+	})
+	d.find = func(*adapters.Manifest) (adapters.Location, error) {
+		return adapters.Location{Path: "/bin/toydbg"}, nil
+	}
+
+	return d
+}
+
+// TestPrepareTerminal: a launch in a terminal merges the manifest's
+// launch.terminal, rendered, over its launch arguments (top-level keys
+// replace); without Terminal the launch arguments are as the template has
+// them.
+func TestPrepareTerminal(t *testing.T) {
+	t.Parallel()
+
+	d := toyTerminal(map[string]any{"console": "terminal", "nested": map[string]any{"b": "${program}"}, "runInTerminal": true})
+	app := appFile(t)
+
+	launch, err := d.PrepareWith(t.Context(), session.LaunchSpec{Program: app}, session.PrepareOptions{Terminal: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]any{"program": app, "console": "terminal", "nested": map[string]any{"b": app}, "runInTerminal": true}
+	if got, w := jsonOf(t, launch.Arguments), jsonOf(t, want); got != w {
+		t.Fatalf("arguments = %s\nwant        %s", got, w)
+	}
+
+	plain, err := d.Prepare(t.Context(), session.LaunchSpec{Program: app})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want = map[string]any{"program": app, "console": "internal", "nested": map[string]any{"a": 1}}
+	if got, w := jsonOf(t, plain.Arguments), jsonOf(t, want); got != w {
+		t.Fatalf("arguments without a terminal = %s\nwant        %s", got, w)
+	}
+}
+
+// TestPrepareTerminalUnsupported: a manifest without launch.terminal
+// refuses a launch in a terminal.
+func TestPrepareTerminalUnsupported(t *testing.T) {
+	t.Parallel()
+
+	_, err := toyTerminal(nil).PrepareWith(t.Context(), session.LaunchSpec{Program: appFile(t)}, session.PrepareOptions{Terminal: true})
+	if api.CodeOf(err) != api.CodeUnsupported || !strings.Contains(err.Error(), "the toy debug adapter can't run the program in a terminal") {
+		t.Fatalf("PrepareWith = %v, want UNSUPPORTED_BY_ADAPTER", err)
+	}
+
+	if e, ok := err.(*api.Error); !ok || e.Hint != `use "console": "internalConsole"` { //nolint:errorlint // The *api.Error itself.
+		t.Fatalf("hint = %#v", err)
+	}
+}
+
+// TestPrepareDebugpyTerminal: debugpy's launch in a terminal asks for the
+// integrated terminal; every other argument is as without.
+func TestPrepareDebugpyTerminal(t *testing.T) {
+	t.Parallel()
+
+	var in adapters.PythonInput
+
+	d := pythonDriver(t, &in)
+	app := appFile(t)
+
+	plain, err := d.Prepare(t.Context(), session.LaunchSpec{Program: app})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	term, err := d.PrepareWith(t.Context(), session.LaunchSpec{Program: app}, session.PrepareOptions{Terminal: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if term.Arguments["console"] != "integratedTerminal" {
+		t.Fatalf("console = %v, want integratedTerminal", term.Arguments["console"])
+	}
+
+	plain.Arguments["console"] = "integratedTerminal"
+	if got, w := jsonOf(t, term.Arguments), jsonOf(t, plain.Arguments); got != w {
+		t.Fatalf("arguments = %s\nwant        %s", got, w)
+	}
+}

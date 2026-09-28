@@ -100,7 +100,7 @@ func (s *Session) startSocketAdapter(ctx context.Context, launch Launch, stderr 
 	// Under mu: a test run's session is shared before its adapter starts.
 	s.mu.Lock()
 	s.cmd, s.conn, s.exited = cmd, conn, exited
-	s.client = dap.NewClient(conn, conn, dap.Handlers{Event: s.onEvent})
+	s.client = dap.NewClient(conn, conn, dap.Handlers{Event: s.onEvent, Reverse: s.onReverse})
 	s.mu.Unlock()
 
 	go s.watchAdapter()
