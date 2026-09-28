@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -129,6 +130,45 @@ func TestFormatError(t *testing.T) {
 
 			if got := formatError("eyedbg", tt.err); got != tt.want {
 				t.Errorf("formatError = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWriteJSONEscapesC1(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string // exact output; "" skips this check (round trip is still checked)
+	}{
+		{"plain", "hello", `{"v":"hello"}` + "\n"},
+		{"NEL (C1)", "a\u0085b", `{"v":"a\u0085b"}` + "\n"},
+		{"CSI (C1)", "a\u009bb", `{"v":"a\u009bb"}` + "\n"},
+		{"DEL, just below C1", "a\u007fb", ""},
+		{"NBSP, just above C1", "a\u00a0b", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var out bytes.Buffer
+			if err := writeJSON(&out, map[string]string{"v": tt.in}); err != nil {
+				t.Fatal(err)
+			}
+
+			if tt.want != "" && out.String() != tt.want {
+				t.Errorf("writeJSON(%q) = %q, want %q", tt.in, out.String(), tt.want)
+			}
+
+			var decoded map[string]string
+			if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+				t.Fatalf("output isn't valid JSON: %v (%q)", err, out.String())
+			}
+			if decoded["v"] != tt.in {
+				t.Errorf("round trip = %q, want %q", decoded["v"], tt.in)
 			}
 		})
 	}

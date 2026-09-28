@@ -4,12 +4,14 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -371,14 +373,43 @@ func writeLogs(w io.Writer, path string, lines []string, asJSON bool) error {
 }
 
 func writeJSON(w io.Writer, v any) error {
-	enc := json.NewEncoder(w)
+	var buf bytes.Buffer
+
+	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false) // output is read, not embedded in HTML
 
 	if err := enc.Encode(v); err != nil {
 		return fmt.Errorf("write output: %w", err)
 	}
 
+	if _, err := w.Write(escapeC1(buf.Bytes())); err != nil {
+		return fmt.Errorf("write output: %w", err)
+	}
+
 	return nil
+}
+
+// escapeC1 rewrites C1 control characters (U+0080-U+009F) as \u00xx escapes.
+// encoding/json only escapes C0 controls; C1 codes are valid UTF-8 and pass
+// through untouched, so a debuggee-controlled string (a variable value,
+// program output, an exception message) could otherwise plant one in --json
+// output, which some terminals interpret as the 8-bit form of an ESC-prefixed
+// escape sequence.
+func escapeC1(b []byte) []byte {
+	out := make([]byte, 0, len(b))
+
+	for i := 0; i < len(b); {
+		r, size := utf8.DecodeRune(b[i:])
+		if r >= 0x80 && r <= 0x9F {
+			out = fmt.Appendf(out, `\u%04x`, r)
+		} else {
+			out = append(out, b[i:i+size]...)
+		}
+
+		i += size
+	}
+
+	return out
 }
 
 func writeText(w io.Writer, s string) error {
