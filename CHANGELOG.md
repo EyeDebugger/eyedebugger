@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already escapes C0: `encoding/json` only escapes the latter, so a debuggee-controlled string
   (a variable value, program output, an exception message) could plant a raw C1 code in `--json`
   output, which some terminals read as the 8-bit form of an ESC-prefixed escape sequence.
+- `eyedbg pause` with no thread given, before the program's first stop, no longer always fails
+  with `ADAPTER_ERROR`: it now asks the adapter which threads exist and pauses one of them (the
+  last stop's, if it's still listed, else the first), falling back to today's choice when the
+  answer is empty or the request fails. netcoredbg lists its threads while the program runs (the
+  design doc previously said otherwise).
 
 ## [0.2.0-beta.1] - 2026-09-28
 

@@ -509,8 +509,10 @@ follow-ups F1–F5.
   compiles and loads code into the debuggee (the C# side-effect guard stays), and it bundles a
   Microsoft-licensed (non-OSS) DAP library with a data-collection clause (no network check made).
   Pinned; opt-in; a failing platform is withheld from the default (`SharpDbgWithheld`).
-- `eyedbg pause` under netcoredbg before the program's first stop fails (`ADAPTER_ERROR`): pause
-  needs a thread id and netcoredbg lists no threads until a first stop (found in P2-M10; open).
+- `eyedbg pause` before the program's first stop: netcoredbg lists its threads while running
+  (found in P2-M10), so a pause with no thread given asks for them first and pauses one it lists,
+  falling back to today's choice (and today's `ADAPTER_ERROR` if that's refused) when the answer is
+  empty or the request fails.
 - netcoredbg release cadence (~2/yr, single corporate maintainer) → pin versions, keep our own builds.
 - Test debugging flow (`VSTEST_HOST_DEBUG`) and `attach`: validated on Linux, macOS (arm64) and
   Windows (x64) by CI e2e's weekly/dispatch full matrix (milestone 6); on Intel Macs and Windows on

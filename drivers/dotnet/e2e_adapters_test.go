@@ -14,12 +14,14 @@ import (
 
 // TestPause pauses a running program: netcoredbg stops it (reason pause);
 // SharpDbg's pause is refused (UNSUPPORTED_BY_ADAPTER, before the lease or
-// an exec event) and the session is still running, and still ends. The
-// program first stops at its entry and resumes, so the pause names a
-// thread: netcoredbg lists no threads before a first stop, and refuses a
-// pause without one (a known gap, not SharpDbg's).
+// an exec event) and the session is still running, and still ends. It also
+// pauses a program that never stopped before (pauseBeforeFirstStop, D2,
+// F3): netcoredbg lists its threads while running, and a pause with no
+// thread given asks for them and picks one, rather than failing for want
+// of a thread id.
 func TestPause(t *testing.T) {
 	forEachAdapter(t, pause)
+	forEachAdapter(t, pauseBeforeFirstStop)
 }
 
 func pause(t *testing.T, adapter string) {
@@ -73,6 +75,54 @@ func pause(t *testing.T, adapter string) {
 	}
 
 	t.Logf("paused at %+v (tick line %d)", snap.Frame, lineOf(t, src, "wait-tick"))
+
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if snap := e2eResume(t, sess, session.ExecContinue); snap.Session.State != api.StateExited {
+		t.Errorf("after continue: %+v, want exited", snap.Session)
+	}
+}
+
+// pauseBeforeFirstStop pauses a "wait" run before it ever stopped, once
+// its first output line ("ready <pid>", Program.cs's first thing in that
+// mode) proves it is actually running.
+func pauseBeforeFirstStop(t *testing.T, adapter string) {
+	t.Helper()
+
+	dir := copyApp(t, "breadth")
+	marker := filepath.Join(t.TempDir(), "go")
+	m := newManager(t)
+
+	sess, err := m.Start(t.Context(), agent, api.StartParams{
+		Lang: "dotnet", Adapter: adapter, LaunchSpec: api.LaunchSpec{Project: dir, Args: []string{"wait", marker}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := sess.Events(t.Context(), api.EventsParams{Kinds: []api.EventKind{api.EventOutput}}, e2eWait)
+	if err != nil || len(res.Events) == 0 {
+		t.Fatalf("waiting for the program's first output: %+v, %v", res, err)
+	}
+
+	if !adapterTraits(adapter).pause {
+		if _, err := sess.Exec(t.Context(), agent, session.ExecPause, 0); api.CodeOf(err) != api.CodeUnsupported {
+			t.Fatalf("pause under %s (never stopped) = %v, want UNSUPPORTED_BY_ADAPTER", adapter, err)
+		}
+
+		if _, err := m.Stop(t.Context(), agent, sess.ID); err != nil {
+			t.Fatalf("stop after the refused pause: %v", err)
+		}
+
+		return
+	}
+
+	snap := e2eResume(t, sess, session.ExecPause)
+	if snap.Session.State != api.StateStopped || snap.Session.Stop == nil || snap.Session.Stop.Reason != "pause" {
+		t.Fatalf("pause before any stop = %+v, want stopped (pause)", snap.Session)
+	}
 
 	if err := os.WriteFile(marker, nil, 0o600); err != nil {
 		t.Fatal(err)
