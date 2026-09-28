@@ -53,7 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Ctrl-C — off by default, since a caller whose own stdin is already at EOF would otherwise cancel
   every command at once. The VS Code extension sets it and closes stdin to cancel on every OS (off
   Windows it also still sends SIGINT, faster than the stdin round trip); Windows has no graceful
-  way to end a child process with a signal, which was the cause.
+  way to end a child process with a signal, which was the cause. The var never applies to `eyedbg
+  dap`, which already ends on its own stdin's EOF (the DAP stream, not a side control channel), and
+  is cleared before an autostarted daemon, its adapters or the debuggee could ever inherit it.
 
 ## [0.2.0-beta.1] - 2026-09-28
 

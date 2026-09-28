@@ -70,7 +70,9 @@ does shows in 'eyedbg events' and 'eyedbg sessions' shows it connected. Custom e
 and events carry the lease, clients and breakpoints for editor extensions (docs/adr/0014).
 
 Blocks until the DAP client disconnects or closes stdin, or the daemon goes away. stdout carries
-DAP only: every error, also with --json, goes to stderr.
+DAP only: every error, also with --json, goes to stderr. EYEDBG_CANCEL_ON_STDIN_EOF (see 'eyedbg
+help dotnet') never applies here: dap already ends on its own stdin's EOF, which is the DAP stream
+itself, not a side control channel.
 
 Exit codes: 0 the DAP client ended the connection; 1 the connection to eyedbgd was lost, or a usage
 error (--launch with -s); 2 no such session, or it has exited (NO_SESSION, SESSION_EXITED); 3 the
@@ -98,11 +100,15 @@ const launchFacadeVersion = 3
 // dapOpenTimeout bounds connecting to the daemon and switching to DAP.
 const dapOpenTimeout = 30 * time.Second
 
+// dapCommandName is the Use of 'eyedbg dap' (also the version handshake's
+// "dap" feature, and what WrapCancelOnEOF looks for to exempt it).
+const dapCommandName = "dap"
+
 func newDapCommand(info version.Info, g *globals) *cobra.Command {
 	var launch bool
 
 	cmd := &cobra.Command{
-		Use:     "dap",
+		Use:     dapCommandName,
 		Short:   "Speak DAP to a debug session over stdio (for editors)",
 		Long:    dapLong,
 		Example: dapExample,

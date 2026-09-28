@@ -16,12 +16,12 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 
-	cancelStdin := func() {}
-	if os.Getenv(cli.EnvCancelOnStdinEOF) == "1" {
-		ctx, cancelStdin = cli.CancelOnEOF(ctx, os.Stdin)
-	}
+	root := cli.NewEyedbgCommand(version.Get())
+	args := os.Args[1:]
 
-	code := cli.Run(ctx, cli.NewEyedbgCommand(version.Get()), os.Args[1:])
+	ctx, cancelStdin := cli.WrapCancelOnEOF(ctx, root, args)
+
+	code := cli.Run(ctx, root, args)
 
 	cancelStdin()
 	stop()

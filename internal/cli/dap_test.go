@@ -137,6 +137,71 @@ func TestDapBridge(t *testing.T) {
 	expectOutput(t, out, "human:t")
 }
 
+// TestDapIgnoresCancelOnStdinEOF: with EYEDBG_CANCEL_ON_STDIN_EOF=1 set,
+// 'eyedbg dap' still answers a request on stdin — WrapCancelOnEOF (main.go's
+// wiring) must not wrap dap's own stdin read a second time (F5): the DAP
+// stream is dap's only stdin, not a side control channel, and a second
+// reader would steal bytes the DAP framing needs. Not t.Parallel(): sets an
+// env var.
+func TestDapIgnoresCancelOnStdinEOF(t *testing.T) {
+	t.Setenv(EnvCancelOnStdinEOF, "1")
+
+	serveInProcess(t, isolate(t))
+
+	prog := filepath.Join(t.TempDir(), "prog.txt")
+	if err := os.WriteFile(prog, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	run(t, 0, "start", "fake", "--program", prog, "--stop-on-entry")
+
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+
+	var stderr syncBuffer
+
+	root := NewEyedbgCommand(testInfo)
+	root.SetIn(inR)
+	root.SetOut(outW)
+	root.SetErr(&stderr)
+
+	args := []string{"dap", "--as", "human:t"}
+
+	ctx, cancel := WrapCancelOnEOF(t.Context(), root, args)
+	t.Cleanup(cancel)
+
+	done := make(chan int, 1)
+
+	go func() {
+		code := Run(ctx, root, args)
+		_ = outW.Close()
+		done <- code
+	}()
+
+	req := `{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"x"}}`
+	if _, err := io.WriteString(inW, "Content-Length: "+strconv.Itoa(len(req))+"\r\n\r\n"+req); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := dap.ReadMessage(bufio.NewReader(outR), 1<<20)
+	if err != nil || !bytes.Contains(raw, []byte(`"command":"initialize"`)) || !bytes.Contains(raw, []byte(`"success":true`)) {
+		t.Fatalf("stdout = %s, %v; stderr %s", raw, err, stderr.String())
+	}
+
+	_ = inW.Close()
+
+	go func() { _, _ = io.Copy(io.Discard, outR) }()
+
+	select {
+	case code := <-done:
+		if code != 0 || stderr.String() != "" {
+			t.Errorf("dap after stdin closed: exit %d, stderr %q", code, stderr.String())
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("eyedbg dap did not end after stdin closed")
+	}
+}
+
 // syncBuffer is a bytes.Buffer safe for concurrent use.
 type syncBuffer struct {
 	mu  sync.Mutex

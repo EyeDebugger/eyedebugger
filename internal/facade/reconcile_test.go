@@ -73,6 +73,89 @@ func TestReconcileOnceOutput(t *testing.T) {
 	}
 }
 
+// TestFollowBatchOrdersBreakpointsBeforeStopped: within one batch, a
+// breakpoint event that precedes a stopped event naming it in the session's
+// log is still relayed before that stopped event, and the batch's single
+// reconcile (already covering every breakpoint the batch's later events
+// announce) doesn't announce any of them twice (D5, F6). Calls
+// [connection.translate] directly, as [connection.follow]'s inner loop
+// does for one event at a time, so the batch's contents and order are
+// exactly what this test picked, not whatever timing happened to deliver.
+func TestFollowBatchOrdersBreakpointsBeforeStopped(t *testing.T) {
+	t.Parallel()
+
+	s := startSession(t, fakeDriver{}, startParams(stopOnEntry, "", "lines=3"))
+
+	placed, err := s.ReplaceBreakpoints(t.Context(), agentC, s.Program, []api.BreakpointSpec{{Line: 1}, {Line: 2}}, nil)
+	if err != nil {
+		t.Fatalf("ReplaceBreakpoints: %v", err)
+	}
+
+	if len(placed) != 2 {
+		t.Fatalf("placed = %d, want 2", len(placed))
+	}
+
+	id1, id2 := placed[0].ID, placed[1].ID
+
+	c := &connection{client: humanC, view: newView()}
+	c.sess.Store(s)
+	c.view.configured = true
+
+	st := &followState{self: humanC.ID}
+
+	// A batch as the log could plausibly deliver it: a breakpoint added,
+	// then a stop the adapter reported at it, then another breakpoint
+	// added — all before the follower's next poll.
+	batch := []api.Event{
+		{Kind: api.EventBreakpoint, Action: actionNew, Breakpoint: &api.Breakpoint{ID: id1}},
+		{Kind: api.EventStopped, Stop: &api.StopInfo{Reason: "breakpoint", ThreadID: 1, Breakpoints: []api.StopBreakpoint{{ID: id1}}}},
+		{Kind: api.EventBreakpoint, Action: actionNew, Breakpoint: &api.Breakpoint{ID: id2}},
+	}
+
+	var (
+		reconciled bool
+		out        []godap.EventMessage
+	)
+
+	for i := range batch {
+		out = append(out, c.translate(&batch[i], st, &reconciled)...)
+	}
+
+	if reconciles := c.reconciles.Load(); reconciles != 1 {
+		t.Fatalf("reconciles for the batch = %d, want 1 (out = %v)", reconciles, out)
+	}
+
+	stoppedAt := -1
+	newIDs := map[int]int{}
+
+	for i, ev := range out {
+		switch e := ev.(type) {
+		case *godap.StoppedEvent:
+			stoppedAt = i
+		case *godap.BreakpointEvent:
+			if e.Body.Reason == actionNew {
+				newIDs[e.Body.Breakpoint.Id]++
+			}
+		}
+	}
+
+	if stoppedAt == -1 {
+		t.Fatalf("no stopped event in %v", out)
+	}
+
+	for i, ev := range out {
+		if _, ok := ev.(*godap.BreakpointEvent); ok && i > stoppedAt {
+			t.Errorf("breakpoint event at %d came after stopped at %d: %v", i, stoppedAt, out)
+		}
+	}
+
+	for _, id := range []int{id1, id2} {
+		if newIDs[id] != 1 {
+			t.Errorf("breakpoint %d announced new %d times, want 1 (out = %v)", id, newIDs[id], out)
+		}
+	}
+}
+
 // TestReconcileOncePerFollowBatch: many breakpoint events logged in one
 // setBreakpoints-sized batch reconcile the mirroring connection's view once,
 // not once per event, and every one of them still arrives correctly (ledger
