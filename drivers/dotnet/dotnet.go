@@ -173,7 +173,7 @@ func (d *Driver) PrepareWith(ctx context.Context, spec session.LaunchSpec, opts 
 		// SharpDbg's runInTerminal is unverified (docs/adr/0019).
 		return session.Launch{}, api.NewError(api.CodeUnsupported,
 			"the dotnet debug adapter runs the program without a terminal (netcoredbg has no runInTerminal)",
-			`use "console": "internalConsole"`)
+			session.TerminalHint)
 	}
 
 	if len(spec.Options) > 0 {

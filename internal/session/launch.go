@@ -17,9 +17,13 @@ import (
 // terminalTimeout bounds a Terminal hook's run.
 const terminalTimeout = 30 * time.Second
 
-// terminalHint is the hint of a start that can't run its program in a
+// TerminalHint is the hint of a start that can't run its program in a
 // terminal.
-const terminalHint = `use "console": "internalConsole"`
+const TerminalHint = `use "console": "internalConsole"`
+
+// ErrTerminalTimeout is the cause of a Terminal hook's ctx that ended
+// because the hook ran for 30 s ([LaunchHooks.Terminal]).
+var ErrTerminalTimeout = errors.New("no answer within " + terminalTimeout.String())
 
 // LaunchHooks let the caller of [Manager.Launch] take part in the start.
 type LaunchHooks struct {
@@ -41,7 +45,8 @@ type LaunchHooks struct {
 	// ([PrepareOptions.Terminal]), the adapter is told it may ask
 	// (supportsRunInTerminalRequest), and the first runInTerminal request
 	// the adapter sends while the start runs is handed to Terminal, on its
-	// own goroutine, with a ctx that ends with the start or after 30 s.
+	// own goroutine, with a ctx that ends with the start or after 30 s
+	// (its cause then [ErrTerminalTimeout]).
 	// Terminal returns the process id it started (≥ 1), which is the
 	// adapter's answer, or an error, which fails the start at once: Launch
 	// returns it (an *api.Error unchanged, any other as ADAPTER_ERROR).
@@ -76,7 +81,7 @@ func (m *Manager) Launch(ctx context.Context, c api.Client, p api.StartParams, h
 	case ok:
 		launch, err = op.PrepareWith(ctx, p.LaunchSpec, opts)
 	case opts.Terminal:
-		err = api.NewError(api.CodeUnsupported, "the "+p.Lang+" debug adapter can't run the program in a terminal", terminalHint)
+		err = api.NewError(api.CodeUnsupported, "the "+p.Lang+" debug adapter can't run the program in a terminal", TerminalHint)
 	default:
 		launch, err = drv.Prepare(ctx, p.LaunchSpec)
 	}
@@ -206,14 +211,14 @@ func serveTerminal(ctx context.Context, reqs <-chan terminalRequest,
 		return
 	}
 
-	hctx, cancel := context.WithTimeout(ctx, terminalTimeout)
+	hctx, cancel := context.WithTimeoutCause(ctx, terminalTimeout, ErrTerminalTimeout)
 	pid, err := run(hctx, tr.args)
-	timedOut := errors.Is(hctx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+	timedOut := errors.Is(context.Cause(hctx), ErrTerminalTimeout)
 
 	cancel()
 
 	if err == nil && pid < 1 {
-		err = api.NewError(api.CodeAdapterFailed, "the terminal reported no process id", terminalHint)
+		err = api.NewError(api.CodeAdapterFailed, "the terminal reported no process id", TerminalHint)
 	}
 
 	if err == nil {
@@ -230,9 +235,9 @@ func serveTerminal(ctx context.Context, reqs <-chan terminalRequest,
 	switch {
 	case ok:
 	case timedOut:
-		apiErr = api.NewError(api.CodeAdapterFailed, "the terminal didn't start the program within "+terminalTimeout.String(), terminalHint)
+		apiErr = api.NewError(api.CodeAdapterFailed, "the terminal didn't start the program within "+terminalTimeout.String(), TerminalHint)
 	default:
-		apiErr = api.NewError(api.CodeAdapterFailed, err.Error(), terminalHint)
+		apiErr = api.NewError(api.CodeAdapterFailed, err.Error(), TerminalHint)
 	}
 
 	tr.reply(terminalRefusal(apiErr))
