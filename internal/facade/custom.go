@@ -15,7 +15,8 @@ import (
 
 // The facade's custom DAP messages (docs/adr/0014), for an editor extension:
 // requests it answers itself (never forwarded to the adapter) and events it
-// sends after configurationDone (eyedbg/session: before initialized).
+// sends after configurationDone (eyedbg/session: before initialized;
+// eyedbg/runInTerminal, in terminal.go: whenever the launch asks).
 const (
 	// CommandLease is both a request (arguments [LeaseArguments], body
 	// [LeaseBody]) and an event (body [LeaseBody], on every lease change).
@@ -195,6 +196,7 @@ func RegisterMessages(codec *godap.Codec) error {
 		{CommandLease, func() godap.Message { return &LeaseRequest{} }, func() godap.Message { return &LeaseResponse{} }},
 		{CommandClients, func() godap.Message { return &ClientsRequest{} }, func() godap.Message { return &ClientsResponse{} }},
 		{CommandBreakpoints, func() godap.Message { return &BreakpointsRequest{} }, func() godap.Message { return &BreakpointsResponse{} }},
+		{CommandRunInTerminal, func() godap.Message { return &TerminalRequest{} }, func() godap.Message { return &TerminalResponse{} }},
 	}
 
 	for _, r := range requests {
@@ -212,6 +214,7 @@ func RegisterMessages(codec *godap.Codec) error {
 		{CommandBreakpoints, func() godap.Message { return &BreakpointsEvent{} }},
 		{EventActivity, func() godap.Message { return &ActivityEvent{} }},
 		{EventSession, func() godap.Message { return &SessionEvent{} }},
+		{CommandRunInTerminal, func() godap.Message { return &TerminalEvent{} }},
 	}
 
 	for _, e := range events {

@@ -4,16 +4,22 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	godap "github.com/google/go-dap"
 
 	"github.com/eyedebugger/eyedebugger/drivers/dotnet"
 	"github.com/eyedebugger/eyedebugger/internal/api"
+	"github.com/eyedebugger/eyedebugger/internal/dap/daptest"
 	"github.com/eyedebugger/eyedebugger/internal/facade"
 )
 
@@ -205,6 +211,15 @@ func projectFile(t *testing.T, lc langCase) string {
 func launchConfigured(t *testing.T, p *dapProc, args map[string]any, file string, lines ...int) string {
 	t.Helper()
 
+	return launchConfiguredWith(t, p, args, nil, file, lines...)
+}
+
+// launchConfiguredWith is launchConfigured, calling beforeBind (unless
+// nil) once the launch is sent, before waiting for eyedbg/session: a
+// terminal launch's eyedbg/runInTerminal comes first.
+func launchConfiguredWith(t *testing.T, p *dapProc, args map[string]any, beforeBind func(), file string, lines ...int) string {
+	t.Helper()
+
 	caps, ok := p.ok(initializeReq()).(*godap.InitializeResponse)
 	if !ok || !caps.Body.SupportsConfigurationDoneRequest || !caps.Body.SupportsTerminateRequest || len(caps.Body.ExceptionBreakpointFilters) != 2 {
 		t.Fatalf("initialize = %+v, want configurationDone, terminate and both exception filters", caps)
@@ -216,6 +231,10 @@ func launchConfigured(t *testing.T, p *dapProc, args map[string]any, file string
 	}
 
 	launched := p.send(&godap.LaunchRequest{Request: request("launch"), Arguments: raw})
+
+	if beforeBind != nil {
+		beforeBind()
+	}
 
 	sess, ok := p.waitEvent(facade.EventSession).(*facade.SessionEvent)
 	if !ok || sess.Body.SessionID == "" {
@@ -277,4 +296,306 @@ func listedSession(t *testing.T, h *harness, id string) (api.SessionInfo, bool) 
 	}
 
 	return sessions.Sessions[i], true
+}
+
+// answerTerminal answers the eyedbg/runInTerminal event with processId pid
+// and returns the event.
+func answerTerminal(t *testing.T, p *dapProc, pid func(ev *facade.TerminalEvent) int) *facade.TerminalEvent {
+	t.Helper()
+
+	ev, ok := p.waitEvent(facade.CommandRunInTerminal).(*facade.TerminalEvent)
+	if !ok || ev.Body.ID < 1 {
+		t.Fatalf("eyedbg/runInTerminal = %+v", ev)
+	}
+
+	n := int64(pid(ev))
+	p.ok(&facade.TerminalRequest{Request: request(facade.CommandRunInTerminal), Arguments: facade.TerminalArguments{ID: ev.Body.ID, ProcessID: &n}})
+
+	return ev
+}
+
+// countEvents is how many of events are named name.
+func countEvents(events []godap.EventMessage, name string) int {
+	n := 0
+
+	for _, ev := range events {
+		if ev.GetEvent().Event == name {
+			n++
+		}
+	}
+
+	return n
+}
+
+// outputHas reports whether an output event among events holds text.
+func outputHas(events []godap.EventMessage, text string) bool {
+	return slices.ContainsFunc(events, func(ev godap.EventMessage) bool {
+		o, ok := ev.(*godap.OutputEvent)
+
+		return ok && strings.Contains(o.Body.Output, text)
+	})
+}
+
+// TestFacadeLaunchTerminalFake: a fakelang launch with console
+// integratedTerminal sends the adapter's runInTerminal to the launching
+// editor, once, and the editor's process id to the adapter; a joined
+// connection never gets it, and a runInTerminal after the start (asked
+// through the joined connection's watch) is refused.
+func TestFacadeLaunchTerminalFake(t *testing.T) {
+	t.Parallel()
+
+	lc := fakeCase(t)
+	h := newHarness(t)
+	fakeManifestFiles(t, h.configDir)
+
+	args := launchArguments(lc)
+	args["stopOnEntry"] = true
+	args["console"] = "integratedTerminal"
+
+	p := h.dapLaunch(humanE2E)
+
+	var ev *facade.TerminalEvent
+
+	id := launchConfiguredWith(t, p, args, func() {
+		ev = answerTerminal(t, p, func(*facade.TerminalEvent) int { return 4242 })
+	}, lc.file, lc.target)
+
+	// The session resolves symlinks in the program's path (macOS /var).
+	file, err := filepath.EvalSymlinks(lc.file)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if b := ev.Body; len(b.Args) != 2 || b.Args[1] != file || b.Cwd != filepath.Dir(file) || b.Title != "Fake Debug Console" {
+		t.Errorf("eyedbg/runInTerminal body = %+v, want the fake's request for %s", b, file)
+	}
+
+	if _, ok := p.waitEvent("stopped").(*godap.StoppedEvent); !ok {
+		t.Fatal("no stop on entry")
+	}
+
+	if !outputHas(p.all(), "fake: runInTerminal processId=4242") {
+		t.Error("the adapter didn't get the process id")
+	}
+
+	joined := h.dap("agent", "-s", id)
+	joined.ok(initializeReq())
+	joined.ok(&godap.AttachRequest{Request: request("attach"), Arguments: json.RawMessage(`{}`)})
+	joined.waitEvent("initialized")
+	joined.ok(&godap.ConfigurationDoneRequest{Request: request("configurationDone")})
+
+	stop, ok := joined.waitEvent("stopped").(*godap.StoppedEvent)
+	if !ok {
+		t.Fatal("the joined connection got no stop")
+	}
+
+	frame := topFrame(t, joined, stop.Body.ThreadId).Id
+
+	if r, ok := joined.ok(evaluateReq("$runInTerminal", "watch", frame)).(*godap.EvaluateResponse); !ok || r.Body.Result != "failed" {
+		t.Errorf("runInTerminal after the start = %+v, want refused", r)
+	}
+
+	if n := countEvents(joined.all(), facade.CommandRunInTerminal); n != 0 {
+		t.Errorf("the joined connection got %d eyedbg/runInTerminal", n)
+	}
+
+	if n := countEvents(p.all(), facade.CommandRunInTerminal); n != 1 {
+		t.Errorf("the launcher got %d eyedbg/runInTerminal, want 1", n)
+	}
+
+	launchLeave(t, joined)
+	p.ok(&godap.TerminateRequest{Request: request("terminate")})
+	p.waitEvent("terminated")
+	launchLeave(t, p)
+}
+
+// TestFacadeLaunchTerminalRefused: an adapter's runInTerminal the table
+// refuses (an argument with a newline) fails the launch with ADAPTER_ERROR
+// and never reaches the editor.
+func TestFacadeLaunchTerminalRefused(t *testing.T) {
+	t.Parallel()
+
+	lc := fakeCase(t)
+	h := newHarness(t)
+	fakeManifestFiles(t, h.configDir)
+
+	// The fake's request, from its options in its manifest's environment.
+	opts, err := json.Marshal(daptest.Options{Terminal: &godap.RunInTerminalRequestArguments{
+		Cwd: filepath.Dir(lc.file), Args: []string{lc.file, "a\nrm -rf x"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := daptest.UserManifest(exe, "")
+	env, _ := m["adapter"].(map[string]any)["environment"].(map[string]any)
+	env[daptest.EnvFakeOptions] = string(opts)
+
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(h.configDir, "adapters", "fakelang.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	args := launchArguments(lc)
+	args["console"] = "integratedTerminal"
+
+	body, err := json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p := h.dapLaunch("human:ana")
+	p.ok(initializeReq())
+
+	resp := p.do(&godap.LaunchRequest{Request: request("launch"), Arguments: body})
+	if code := errorCode(resp); !strings.HasPrefix(code, string(api.CodeAdapterFailed)+": ") || !strings.Contains(code, "rule 4") {
+		t.Fatalf("launch = %s, want ADAPTER_ERROR for rule 4", code)
+	}
+
+	if n := countEvents(p.all(), facade.CommandRunInTerminal); n != 0 {
+		t.Errorf("the editor got %d eyedbg/runInTerminal", n)
+	}
+
+	launchLeave(t, p)
+}
+
+// TestFacadeLaunchTerminalPython: a Python launch with console
+// integratedTerminal runs the program as the editor starts it — here
+// exec'd without a shell, stdin a pipe — with its arguments exactly as
+// given, reading what the "terminal" types; it is forgotten once its
+// launcher leaves.
+func TestFacadeLaunchTerminalPython(t *testing.T) {
+	t.Parallel()
+
+	lc := pythonCase(t)
+	lc.require(t)
+
+	h := newHarness(t)
+	progArgs := []string{"a b", "$HOME;echo x", `"q"`}
+	args := map[string]any{
+		"lang": "python", "program": lc.file, "args": append([]string{"input"}, progArgs...),
+		"stopOnEntry": true, "console": "integratedTerminal",
+	}
+
+	p := h.dapLaunch(humanE2E)
+
+	var stdin io.WriteCloser
+
+	id := launchConfiguredWith(t, p, args, func() {
+		answerTerminal(t, p, func(ev *facade.TerminalEvent) int {
+			cmd, in := startTerminal(t, ev.Body)
+			stdin = in
+
+			return cmd.Process.Pid
+		})
+	}, lc.file)
+
+	stop, ok := p.waitEvent("stopped").(*godap.StoppedEvent)
+	if !ok || stop.Body.Reason != "entry" {
+		t.Fatalf("stop = %+v, want the entry", stop)
+	}
+
+	p.ok(threadReq("continue", stop.Body.ThreadId))
+
+	if _, err := io.WriteString(stdin, "hello\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	p.waitEvent("exited")
+	p.waitEvent("terminated")
+
+	events := p.all()
+	if want := `args ['a b', '$HOME;echo x', '"q"']`; !outputHas(events, "got hello") || !outputHas(events, want) {
+		t.Errorf("output holds no %q and %q: %s", "got hello", want, outputs(events))
+	}
+
+	launchLeave(t, p)
+
+	if _, listed := listedSession(t, h, id); listed {
+		t.Errorf("session %s is still listed after its launcher left", id)
+	}
+}
+
+// startTerminal runs body as the editor's terminal would, without a
+// shell: args[0] with the rest as its arguments, in cwd, with env added
+// (null unsets), its stdin a pipe the test writes. It is waited for (and
+// killed if still running) at cleanup.
+func startTerminal(t *testing.T, body facade.TerminalEventBody) (*exec.Cmd, io.WriteCloser) {
+	t.Helper()
+
+	env := map[string]string{}
+
+	for _, e := range os.Environ() {
+		k, v, _ := strings.Cut(e, "=")
+		env[k] = v
+	}
+
+	for k, v := range body.Env {
+		if v == nil {
+			delete(env, k)
+		} else {
+			env[k] = *v
+		}
+	}
+
+	cmd := exec.CommandContext(context.Background(), body.Args[0], body.Args[1:]...) //nolint:gosec // The facade's checked request, as the editor runs it.
+	cmd.Dir = body.Cwd
+
+	for k, v := range env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start the terminal's program: %v", err)
+	}
+
+	exited := make(chan struct{})
+
+	go func() {
+		_ = cmd.Wait()
+
+		close(exited)
+	}()
+
+	t.Cleanup(func() {
+		_ = stdin.Close()
+
+		select {
+		case <-exited:
+		case <-time.After(dapTimeout):
+			_ = cmd.Process.Kill()
+			<-exited
+
+			t.Error("the terminal's program was still running")
+		}
+	})
+
+	return cmd, stdin
+}
+
+// outputs are the output events' texts, for a failure message.
+func outputs(events []godap.EventMessage) string {
+	var b strings.Builder
+
+	for _, ev := range events {
+		if o, ok := ev.(*godap.OutputEvent); ok {
+			b.WriteString(o.Body.Output)
+		}
+	}
+
+	return b.String()
 }

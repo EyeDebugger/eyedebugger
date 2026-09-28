@@ -4,7 +4,7 @@ date: 2026-09-26
 decision-makers: Ijat (@ijat)
 ---
 
-# Launch sessions through the DAP facade
+# Launch sessions and their terminals through the DAP facade
 
 ## Context and Problem Statement
 
@@ -18,7 +18,8 @@ reverse request is refused today (DESIGN §3), so a Python program launched from
 from a terminal.
 
 How does a DAP client's `launch` start a session under the CLI's rules (ADR 0009, 0012), without a
-second session model in the facade?
+second session model in the facade — and how does an adapter's `runInTerminal` reach a terminal
+without letting any adapter or client make an editor run a command it never asked for?
 
 ## Decision Drivers
 
@@ -33,6 +34,8 @@ second session model in the facade?
 * The documented contract of plain `eyedbg dap` (joins; never starts the daemon; its exit codes) is
   unchanged.
 * No change to the native protocol version, `session.start` or the auth path.
+* A command reaches a human's terminal only as that human's own launch asked, exactly as it was
+  checked, and never through a shell.
 
 ## Considered Options
 
@@ -103,13 +106,71 @@ it, the build streams as DAP `output`) and leaves the joining contract as it is.
   resolve against the `eyedbg dap` process's directory (`eyedbg start`'s rule); on Windows a path
   relative to a drive or to the current drive's root is refused. Neither `program` nor `project`:
   the project is that directory.
-- **D13 Feature flag.** `eyedbg version --json` lists `dap.launch`; an extension launches through
-  the facade only when it is there (no fallback to `eyedbg start` + attach).
-- **D14 Cut.** Launch (this record's S3a) ships before terminals (S3b). Terminal routing is not
-  built yet: the adapter's `runInTerminal` stays refused, as every reverse request is (DESIGN §3).
-  The intended design — route it only to the connection whose launch started the session, only
-  while that launch runs, only when it asked for an integrated terminal, and have the extension run
-  the program without a shell — will be recorded here when it is built.
+- **D13 Feature flags.** `eyedbg version --json` lists `dap.launch` and `dap.terminal`; an
+  extension launches through the facade only with `dap.launch` (no fallback to `eyedbg start` +
+  attach), and offers `console: integratedTerminal` only with `dap.terminal`.
+- **D14 Cut.** Launch (S3a) shipped before terminals (S3b, D7–D11, D15, D16).
+- **D7 Terminal executor.** The facade never sends the standard DAP `runInTerminal` to an editor. It
+  sends the custom event `eyedbg/runInTerminal {id, title, cwd, args, env}` to the launching
+  connection, and the editor extension runs `args[0]` itself as the terminal's process, the rest
+  as its arguments — no shell — and answers with the request `eyedbg/runInTerminal {id,
+  processId}` or `{id, error}`. VS Code's own `runInTerminal` types a command line built by
+  `prepareCommand` into the user's shell (newlines unescaped for bash, `<`/`>` passed raw, `%VAR%`
+  left to cmd, env names unquoted for PowerShell and cmd, a Ctrl+C first into a reused terminal):
+  a parser differential no check in eyedbg can close across shells. Other DAP clients get no
+  terminal (they launch with `internalConsole`).
+- **D8 Routing.** An adapter's `runInTerminal` reaches only the connection whose `launch` created
+  the session, only while that start runs (until `session.Manager.Launch` returns; the route is
+  closed under the session's lock before it does), only when that launch asked for `console:
+  integratedTerminal` and the adapter's manifest supports it, and at most once per start. Every
+  other one — a CLI start's, one after the start, a second one, one on a joined connection — is
+  refused as before ("not supported"). The lease is not consulted (DESIGN §3 amended): the command
+  comes from the editor's own launch and goes back to it; a lease check could only fail the
+  human's own launch when an agent took control in the start-up window, and routing to whichever
+  human holds the lease would let an agent-started session make a human's editor run a command it
+  never asked for. The adapter is told `supportsRunInTerminalRequest: true` only for a start with
+  that route (D16: debugpy refuses a terminal console without it).
+- **D9 Validation.** The facade checks the adapter's request against one table, sends the editor
+  only values it checked (re-encoded, never the adapter's bytes), and the extension checks the
+  event again against the same table; `internal/facade/testdata/terminal_requests.json` drives the
+  Go and TypeScript tests. A failing rule refuses the whole request — nothing is cut or rewritten —
+  and fails the launch with `ADAPTER_ERROR` "the debug adapter asked to run a command eyedbg won't
+  run in a terminal: rule N: …" (hint `use "console": "internalConsole"`), nothing sent to the
+  editor:
+  1. `kind` is absent or `integrated`;
+  2. `argsCanBeInterpretedByShell` is false;
+  3. `args` has 1–1000 entries;
+  4. no string in the title, cwd, args, env names or values holds U+0000–U+001F, U+007F–U+009F,
+     U+2028 or U+2029;
+  5. title, cwd, args and env together are at most 256 KiB of UTF-8;
+  6. `args[0]` and `cwd` are local absolute paths — never two leading separators (`\\`, `//`:
+     UNC, `\\?\`, `\\.\`); on Windows a drive root (`C:\` or `C:/`), elsewhere a leading `/`;
+  7. on Windows `args[0]` ends in `.exe` (any case), and no argument longer than one character both
+     starts and ends with `"` while holding a space (node-pty emits such an argument unquoted, and
+     the program's own parser would split it);
+  8. `env` has at most 1000 entries, names `^[A-Za-z_][A-Za-z0-9_]{0,127}$`, values strings or
+     `null` (unset), nothing else;
+  9. the title is at most 200 characters (empty: "eyedbg").
+
+  An adapter's request go-dap can't decode (an `args` string, a non-string argument) never reaches
+  the facade: it stays unanswered, and the adapter's own timeout fails the launch.
+- **D10 Which adapters.** A manifest says how its adapter runs in a terminal with `launch.terminal`,
+  arguments merged over `launch.arguments` (docs/adapter-manifests.md): debugpy's is `{"console":
+  "integratedTerminal"}`. A launch asking for a terminal with an adapter without it is
+  `UNSUPPORTED_BY_ADAPTER`; the .NET driver always refuses (netcoredbg has no `runInTerminal`;
+  SharpDbg's is unverified). lldb-dap and Delve are untouched (follow-ups).
+- **D11 Terminal failure.** The editor's error (control characters as spaces, at most 1000
+  characters), an invalid answer (neither or both of a `processId` in 1..2147483647 and an
+  `error`), or no answer within 30 s fails the start at once with `ADAPTER_ERROR` "the editor
+  didn't start the program's terminal: …" (not debugpy's 60 s launcher timeout); the adapter gets
+  the failure as its `runInTerminal` error. The event's `id` counts from 1 per connection and one
+  waits at a time; an answer with another id, a second answer, one on a joined connection or before
+  a launch is `INVALID_REQUEST` and changes nothing. Nothing of the request (args, env, cwd, title)
+  is logged.
+- **D15 `console`.** The launch argument `console` is `internalConsole` (the default) or
+  `integratedTerminal`; anything else, `externalTerminal` included, is `INVALID_REQUEST` (there is
+  no shell-free way to start an external terminal).
+- **D16** See D8: `supportsRunInTerminalRequest` only with the route.
 
 ### Consequences
 
@@ -126,17 +187,36 @@ it, the build streams as DAP `output`) and leaves the joining contract as it is.
 * Bad, because a streamed .NET launch runs `dotnet` twice (the build, then the property query).
 * Bad, because two facade modes now share one connection type: a launch connection has a phase
   before its session exists, a launch goroutine and a late session binding.
+* Good, because a Python program launched from VS Code can read its input in a terminal, started
+  without a shell from values eyedbg checked.
+* Bad, because only the EyeDebugger extension answers `eyedbg/runInTerminal`: nvim-dap and other
+  clients have no terminal (follow-up: the standard request for clients that opt in), and only
+  debugpy asks (D10).
+* Bad, because the table refuses some legitimate commands (a relative program, a UNC path, a
+  quote-enclosed spaced argument on Windows): such a launch uses `internalConsole`.
 * Neutral: a session launched by an editor that stays connected behaves as one joined by it; the
   agent sees who started it (`eyedbg events --kind started`).
 
 ### Confirmation
 
-`internal/session/launch_test.go` (the hook's place, its errors), `internal/facade/launch_test.go`
-(the handshake, the configuration barrier with VS Code's pipelined requests, terminate while
-launching and after, build output bounds, the argument rules) and `internal/e2e/
-facade_launch_test.go`, which drives `eyedbg dap --launch` through the real binaries: the fake
-adapter always; Python and .NET (netcoredbg and SharpDbg: the build's output before `initialized`)
-with `EYEDBG_E2E=1`.
+`internal/session/launch_test.go` (the hook's place, its errors; the terminal route: once, only
+while the start runs, only with the hook, the capability, a failing or canceled terminal),
+`internal/dap/client_test.go` (reverse requests answered later, once), `internal/facade/
+launch_test.go` (the handshake, the configuration barrier with VS Code's pipelined requests,
+terminate while launching and after, build output bounds, the argument rules),
+`internal/facade/terminal_test.go` (the shared vectors on each platform, parsing like the enforcer,
+the exchange and its refusals) and `internal/e2e/facade_launch_test.go`, which drives `eyedbg dap
+--launch` through the real binaries: the fake adapter always (a terminal answered, one refused by
+the table, none on a joined connection); Python (a program started without a shell reading its
+input, its arguments exact) and .NET (netcoredbg and SharpDbg: the build's output before
+`initialized`) with `EYEDBG_E2E=1`.
+
+Security-relevant surfaces, for review: `facade.open {launch}` (a new way to create a session over
+an authenticated connection, the power of `session.start`); launch arguments (key and type checks,
+case variants, path resolution, NUL); build output (the launching editor only, bounded, not
+logged); the launcher's terminate forgetting its session; the terminal route (D8); the table (D9);
+the `eyedbg/runInTerminal` exchange (D11); the extension's runner (no shell, no `sendText`, its
+own acceptance checks); `eyedbg dap --launch` starting the daemon; `launch.terminal` in manifests.
 
 ## Pros and Cons of the Options
 
@@ -161,5 +241,5 @@ with `EYEDBG_E2E=1`.
 
 Amends ADR 0012 (a launch connection besides joining ones; the launcher's terminate forgets its
 session) and ADR 0015 (F5 launches through the facade, so Restart restarts the program), and
-DESIGN §2, §4, §6, §9. Planned in `p2-ext-launch` (plan decisions D1–D6, D12–D14); the terminal
-decisions (D7–D11, D15, D16) follow with S3b.
+DESIGN §2, §3 (reverse requests), §4, §6, §9, §11. Planned in `p2-ext-launch` (plan decisions
+D1–D16).

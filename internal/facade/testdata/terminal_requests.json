@@ -1,0 +1,1428 @@
+{
+ "comment": "The terminal validation table's test vectors (docs/adr/0019 D9), shared by internal/facade (Go) and extensions/vscode (TypeScript). Each vector is a runInTerminal request's arguments as a debug adapter sends them; platform is posix (Linux, macOS), windows, or all; valid is whether eyedbg forwards it, else rule is the first rule it breaks (0: go-dap can't decode it, so it never reaches the facade). repeat, when set, fills a field before the check: title gets item repeated count times, args count copies of item appended, env count variables V1..VN set to item; itemRepeat (default 1) repeats item itself first. Keys are exact: case variants and duplicates are tested in Go only (the facade re-encodes what it checked).",
+ "vectors": [
+  {
+   "name": "debugpy's request",
+   "platform": "posix",
+   "valid": true,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py",
+     "a b",
+     "$HOME;echo x",
+     "\"q\"",
+     "`id`",
+     "*",
+     ""
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "no kind, title or env",
+   "platform": "posix",
+   "valid": true,
+   "arguments": {
+    "cwd": "/",
+    "args": [
+     "/bin/prog"
+    ]
+   }
+  },
+  {
+   "name": "env values string and null, a 128-character name",
+   "platform": "posix",
+   "valid": true,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "A_1": "v",
+     "_x": "",
+     "UNSET": null,
+     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": "\u00e9 \u00fc"
+    }
+   }
+  },
+  {
+   "name": "a 200-character title",
+   "platform": "posix",
+   "valid": true,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   },
+   "repeat": {
+    "field": "title",
+    "count": 200,
+    "item": "\u00e9"
+   }
+  },
+  {
+   "name": "1000 arguments",
+   "platform": "posix",
+   "valid": true,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/bin/prog"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   },
+   "repeat": {
+    "field": "args",
+    "count": 999,
+    "item": "a"
+   }
+  },
+  {
+   "name": "1000 environment variables",
+   "platform": "posix",
+   "valid": true,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {}
+   },
+   "repeat": {
+    "field": "env",
+    "count": 1000,
+    "item": "v"
+   }
+  },
+  {
+   "name": "debugpy's request",
+   "platform": "windows",
+   "valid": true,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "C:\\Python313\\python.exe",
+     "C:\\debugpy\\launcher",
+     "5678",
+     "--",
+     "C:\\Users\\u\\proj\\app.py",
+     "a b",
+     "$HOME;echo x",
+     "\"q\"",
+     "%PATH%",
+     "\"",
+     "a \"b c\""
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "forward slashes, upper-case .EXE",
+   "platform": "windows",
+   "valid": true,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "c:/Users/u",
+    "args": [
+     "c:/Python313/PYTHON.EXE",
+     "x"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "a number in args",
+   "platform": "all",
+   "valid": false,
+   "rule": 0,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     1
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "args as a string",
+   "platform": "all",
+   "valid": false,
+   "rule": 0,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": "/usr/bin/python3 app.py",
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "kind external",
+   "platform": "all",
+   "valid": false,
+   "rule": 1,
+   "arguments": {
+    "kind": "external",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "kind Integrated (case)",
+   "platform": "all",
+   "valid": false,
+   "rule": 1,
+   "arguments": {
+    "kind": "Integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "argsCanBeInterpretedByShell",
+   "platform": "all",
+   "valid": false,
+   "rule": 2,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    },
+    "argsCanBeInterpretedByShell": true
+   }
+  },
+  {
+   "name": "no args",
+   "platform": "all",
+   "valid": false,
+   "rule": 3,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "args missing",
+   "platform": "all",
+   "valid": false,
+   "rule": 3,
+   "arguments": {
+    "kind": "integrated",
+    "cwd": "/"
+   }
+  },
+  {
+   "name": "1001 arguments",
+   "platform": "posix",
+   "valid": false,
+   "rule": 3,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/bin/prog"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   },
+   "repeat": {
+    "field": "args",
+    "count": 1000,
+    "item": "a"
+   }
+  },
+  {
+   "name": "NUL in an argument",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py",
+     "a\u0000b"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "tab in an argument",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py",
+     "a\tb"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "newline in an argument",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py",
+     "a\nb"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "carriage return in an argument",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py",
+     "a\rb"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "escape in an argument",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py",
+     "a\u001bb"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "unit separator in an argument",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py",
+     "a\u001fb"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "DEL in an argument",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py",
+     "a\u007fb"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "U+0085 (next line) in an argument",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py",
+     "a\u0085b"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "U+009F in an argument",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py",
+     "a\u009fb"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "U+2028 in an argument",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py",
+     "a\u2028b"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "U+2029 in an argument",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py",
+     "a\u2029b"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "newline in the title",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "a\nb",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "newline in cwd",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u\n/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "newline in the program",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3\n"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "control character in an env name",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "A\u0001": "v"
+    }
+   }
+  },
+  {
+   "name": "newline in an env value",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "A": "x\ny"
+    }
+   }
+  },
+  {
+   "name": "C1 in an env value",
+   "platform": "posix",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "A": "x\u0085y"
+    }
+   }
+  },
+  {
+   "name": "newline in an argument",
+   "platform": "windows",
+   "valid": false,
+   "rule": 4,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "C:\\Python313\\python.exe",
+     "C:\\debugpy\\launcher",
+     "5678",
+     "--",
+     "C:\\Users\\u\\proj\\app.py",
+     "a\nb"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "more than 256 KiB",
+   "platform": "posix",
+   "valid": false,
+   "rule": 5,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/bin/prog"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   },
+   "repeat": {
+    "field": "args",
+    "count": 999,
+    "item": "a",
+    "itemRepeat": 263
+   }
+  },
+  {
+   "name": "relative program",
+   "platform": "all",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "python3",
+     "app.py"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "relative cwd",
+   "platform": "all",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "no cwd",
+   "platform": "all",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "dot program",
+   "platform": "all",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "./python3"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "// program",
+   "platform": "posix",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "//server/share/python3"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "// cwd",
+   "platform": "posix",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "//server/share",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "/\\ program",
+   "platform": "posix",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/\\server"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "backslash program",
+   "platform": "posix",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "\\usr\\bin\\python3"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "drive path on POSIX",
+   "platform": "posix",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "C:\\Python313\\python.exe"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "UNC program",
+   "platform": "windows",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "\\\\server\\share\\python.exe"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "UNC cwd",
+   "platform": "windows",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "\\\\server\\share",
+    "args": [
+     "C:\\Python313\\python.exe",
+     "C:\\debugpy\\launcher",
+     "5678",
+     "--",
+     "C:\\Users\\u\\proj\\app.py"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "//server program",
+   "platform": "windows",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "//server/share/python.exe"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "\\\\?\\ program",
+   "platform": "windows",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "\\\\?\\C:\\Python313\\python.exe"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "\\\\.\\ program",
+   "platform": "windows",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "\\\\.\\C:\\Python313\\python.exe"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "root-relative program",
+   "platform": "windows",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "\\Python313\\python.exe"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "slash-rooted program",
+   "platform": "windows",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "/Python313/python.exe"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "drive-relative program",
+   "platform": "windows",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "C:python.exe"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "drive-relative cwd",
+   "platform": "windows",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:proj",
+    "args": [
+     "C:\\Python313\\python.exe",
+     "C:\\debugpy\\launcher",
+     "5678",
+     "--",
+     "C:\\Users\\u\\proj\\app.py"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "no drive letter",
+   "platform": "windows",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "1:\\python.exe"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "no .exe",
+   "platform": "windows",
+   "valid": false,
+   "rule": 7,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "C:\\Python313\\python"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": ".cmd program",
+   "platform": "windows",
+   "valid": false,
+   "rule": 7,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "C:\\tools\\run.cmd"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": ".exe not at the end",
+   "platform": "windows",
+   "valid": false,
+   "rule": 7,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "C:\\tools\\python.exe.bat"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "quote-enclosed argument with a space",
+   "platform": "windows",
+   "valid": false,
+   "rule": 7,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "C:\\Python313\\python.exe",
+     "C:\\debugpy\\launcher",
+     "5678",
+     "--",
+     "C:\\Users\\u\\proj\\app.py",
+     "\"a b\""
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "quote-enclosed program",
+   "platform": "windows",
+   "valid": false,
+   "rule": 6,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "C:\\Users\\u\\proj",
+    "args": [
+     "\"C:\\Program Files\\python.exe\""
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   }
+  },
+  {
+   "name": "1001 environment variables",
+   "platform": "posix",
+   "valid": false,
+   "rule": 8,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {}
+   },
+   "repeat": {
+    "field": "env",
+    "count": 1001,
+    "item": "v"
+   }
+  },
+  {
+   "name": "env name starting with a digit",
+   "platform": "posix",
+   "valid": false,
+   "rule": 8,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "1A": "v"
+    }
+   }
+  },
+  {
+   "name": "env name with a dash",
+   "platform": "posix",
+   "valid": false,
+   "rule": 8,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "A-B": "v"
+    }
+   }
+  },
+  {
+   "name": "env name with =",
+   "platform": "posix",
+   "valid": false,
+   "rule": 8,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "A=B": "v"
+    }
+   }
+  },
+  {
+   "name": "empty env name",
+   "platform": "posix",
+   "valid": false,
+   "rule": 8,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "": "v"
+    }
+   }
+  },
+  {
+   "name": "non-ASCII env name",
+   "platform": "posix",
+   "valid": false,
+   "rule": 8,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "\u00c9": "v"
+    }
+   }
+  },
+  {
+   "name": "129-character env name",
+   "platform": "posix",
+   "valid": false,
+   "rule": 8,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": "v"
+    }
+   }
+  },
+  {
+   "name": "number env value",
+   "platform": "posix",
+   "valid": false,
+   "rule": 8,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "A": 1
+    }
+   }
+  },
+  {
+   "name": "bool env value",
+   "platform": "posix",
+   "valid": false,
+   "rule": 8,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "A": true
+    }
+   }
+  },
+  {
+   "name": "object env value",
+   "platform": "posix",
+   "valid": false,
+   "rule": 8,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "A": {
+      "x": "y"
+     }
+    }
+   }
+  },
+  {
+   "name": "list env value",
+   "platform": "posix",
+   "valid": false,
+   "rule": 8,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "A": [
+      "x"
+     ]
+    }
+   }
+  },
+  {
+   "name": "a 201-character title",
+   "platform": "posix",
+   "valid": false,
+   "rule": 9,
+   "arguments": {
+    "kind": "integrated",
+    "title": "Python Debug Console",
+    "cwd": "/home/u/proj",
+    "args": [
+     "/usr/bin/python3",
+     "/opt/debugpy/launcher",
+     "5678",
+     "--",
+     "/home/u/proj/app.py"
+    ],
+    "env": {
+     "DEBUGPY_LOG_DIR": null
+    }
+   },
+   "repeat": {
+    "field": "title",
+    "count": 201,
+    "item": "\u00e9"
+   }
+  }
+ ]
+}

@@ -77,6 +77,11 @@ type launchState struct {
 	// unservable is the ordered worker's: the exception mode the last
 	// setExceptionBreakpoints named that the adapter can't serve.
 	unservable api.ExceptionMode
+	// terminal is the reader's, set with started: the launch asked for
+	// console integratedTerminal. term is its terminal exchange
+	// (terminal.go).
+	terminal bool
+	term     terminalState
 }
 
 func newLaunchState(l *Launcher) *launchState {
@@ -115,7 +120,7 @@ func (c *connection) startLaunch(ctx context.Context, r *godap.LaunchRequest) {
 		return
 	}
 
-	params, err := launchParams(r.Arguments, l.defaults)
+	params, terminal, err := launchParams(r.Arguments, l.defaults)
 	if err != nil {
 		c.fail(ctx, r, err, false)
 
@@ -123,11 +128,11 @@ func (c *connection) startLaunch(ctx context.Context, r *godap.LaunchRequest) {
 	}
 
 	lctx, cancel := context.WithCancel(ctx)
-	l.started, l.cancel = true, cancel
+	l.started, l.cancel, l.terminal = true, cancel, terminal
 	l.out = &buildOutput{c: c}
 	c.phase.store(phaseLaunching)
 
-	c.logger.InfoContext(ctx, "facade launch", slog.String("lang", params.Lang))
+	c.logger.InfoContext(ctx, "facade launch", slog.String("lang", params.Lang), slog.Bool("terminal", terminal))
 
 	c.wg.Go(func() {
 		defer close(l.done)
@@ -144,7 +149,12 @@ func (c *connection) startLaunch(ctx context.Context, r *godap.LaunchRequest) {
 func (c *connection) runLaunch(ctx, lctx context.Context, r *godap.LaunchRequest, params api.StartParams) {
 	l := c.launch
 
-	s, err := l.mgr.Launch(lctx, c.client, params, session.LaunchHooks{Output: l.out, Configure: c.bind})
+	hooks := session.LaunchHooks{Output: l.out, Configure: c.bind}
+	if l.terminal {
+		hooks.Terminal = c.runInTerminal
+	}
+
+	s, err := l.mgr.Launch(lctx, c.client, params, hooks)
 	l.out.finish()
 
 	if err == nil && lctx.Err() != nil {
@@ -393,13 +403,14 @@ const (
 	argLeasePolicy = "leasePolicy"
 	argExceptions  = "exceptions"
 	argAdapter     = "adapter"
+	argConsole     = "console"
 )
 
 // launchKey returns the launch argument key names case-insensitively.
 func launchKey(k string) (string, bool) {
 	for _, name := range []string{
 		argLang, argProgram, argProject, argCwd, argArgs, argEnv, argOpts, argStopOnEntry, argNoBuild,
-		argLeasePolicy, argExceptions, argAdapter,
+		argLeasePolicy, argExceptions, argAdapter, argConsole,
 	} {
 		if strings.EqualFold(k, name) {
 			return name, true
@@ -411,22 +422,23 @@ func launchKey(k string) (string, bool) {
 
 // launchArgs are a launch request's arguments as eyedbg reads them.
 type launchArgs struct {
-	lang, program, project, cwd, leasePolicy, exceptions, adapter string
-	args                                                          []string
-	env, opts                                                     map[string]string
-	stopOnEntry, noBuild                                          bool
+	lang, program, project, cwd, leasePolicy, exceptions, adapter, console string
+	args                                                                   []string
+	env, opts                                                              map[string]string
+	stopOnEntry, noBuild                                                   bool
 }
 
 // launchParams turns a launch request's arguments into start params with
-// d (docs/adr/0019): only known keys are read, each with its type, and a
-// key naming one of them in another case is refused (Go would match it,
-// the editor didn't mean it); other keys are ignored (editors add their
-// own). No value may hold NUL. Relative paths resolve against the caller's
+// d (docs/adr/0019), and whether the program runs in the editor's terminal
+// (console): only known keys are read, each with its type, and a key
+// naming one of them in another case is refused (Go would match it, the
+// editor didn't mean it); other keys are ignored (editors add their own).
+// No value may hold NUL. Relative paths resolve against the caller's
 // directory; without a program or project, the project is that directory.
-func launchParams(raw json.RawMessage, d api.FacadeLaunch) (api.StartParams, error) {
+func launchParams(raw json.RawMessage, d api.FacadeLaunch) (api.StartParams, bool, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
-		return api.StartParams{}, invalidLaunch("launch needs its arguments as an object, with lang at least")
+		return api.StartParams{}, false, invalidLaunch("launch needs its arguments as an object, with lang at least")
 	}
 
 	var a launchArgs
@@ -438,19 +450,21 @@ func launchParams(raw json.RawMessage, d api.FacadeLaunch) (api.StartParams, err
 		}
 
 		if name != k {
-			return api.StartParams{}, invalidLaunch(fmt.Sprintf("launch argument %q: did you mean %q? (names are case-sensitive)", k, name))
+			return api.StartParams{}, false, invalidLaunch(fmt.Sprintf("launch argument %q: did you mean %q? (names are case-sensitive)", k, name))
 		}
 
 		if err := a.set(name, fields[k]); err != nil {
-			return api.StartParams{}, err
+			return api.StartParams{}, false, err
 		}
 	}
 
 	if err := a.check(); err != nil {
-		return api.StartParams{}, err
+		return api.StartParams{}, false, err
 	}
 
-	return a.params(d)
+	p, err := a.params(d)
+
+	return p, a.console == consoleTerminal, err
 }
 
 // set decodes the value of argument name.
@@ -477,6 +491,8 @@ func (a *launchArgs) set(name string, raw json.RawMessage) error {
 		a.exceptions, err = stringArg(name, v)
 	case argAdapter:
 		a.adapter, err = stringArg(name, v)
+	case argConsole:
+		a.console, err = stringArg(name, v)
 	case argArgs:
 		a.args, err = stringsArg(name, v)
 	case argEnv:
@@ -492,9 +508,11 @@ func (a *launchArgs) set(name string, raw json.RawMessage) error {
 	return err
 }
 
-// check checks the language and the adapter's names.
+// check checks the language and the adapter's names, and the console.
 func (a *launchArgs) check() error {
 	switch {
+	case a.console != "" && a.console != consoleInternal && a.console != consoleTerminal:
+		return invalidLaunch("launch argument console must be internalConsole or integratedTerminal")
 	case a.lang == "":
 		return invalidLaunch("launch needs lang (dotnet, python, ...: see 'eyedbg adapters ls')")
 	case !isName(a.lang, "_+-"):
@@ -567,7 +585,7 @@ func resolvePath(dir, p string) (string, error) {
 		return p, nil
 	}
 
-	if runtime.GOOS == "windows" && (filepath.VolumeName(p) != "" || strings.HasPrefix(p, `\`) || strings.HasPrefix(p, "/")) {
+	if runtime.GOOS == goosWindows && (filepath.VolumeName(p) != "" || strings.HasPrefix(p, `\`) || strings.HasPrefix(p, "/")) {
 		return "", invalidLaunch("launch path " + p + " is relative to a drive or its root: give it in full")
 	}
 
