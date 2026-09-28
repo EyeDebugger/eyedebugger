@@ -57,6 +57,11 @@ type Config struct {
 	// disconnect asking for a restart (see [DefaultRestartGrace]); 0 leaves
 	// at once.
 	RestartGrace time.Duration
+
+	// testHook, when set, runs on the connection right after it's built,
+	// before it does anything: unexported, so only this package's own
+	// tests can reach the connection Serve otherwise keeps private.
+	testHook func(*connection)
 }
 
 // phase is how far the connection's handshake got.
@@ -111,6 +116,12 @@ type connection struct {
 	// while taking it.
 	gate sync.Mutex
 	view *view
+
+	// reconciles counts the follower's actual [connection.reconcile] runs
+	// (the ones a batch's reconcileOnce didn't skip): test-only
+	// observability for the once-per-batch budget, harmless to keep in
+	// production (one atomic add per real reconcile).
+	reconciles atomic.Int64
 
 	// wg tracks the handlers and the follower.
 	wg sync.WaitGroup
@@ -167,6 +178,10 @@ func Serve(ctx context.Context, cfg Config, r *bufio.Reader, conn net.Conn) {
 		c.presence.Store(cfg.Session.Connect(cfg.Client))
 	} else {
 		c.launch = newLaunchState(cfg.Launcher)
+	}
+
+	if cfg.testHook != nil {
+		cfg.testHook(c)
 	}
 
 	c.logger.InfoContext(ctx, "facade opened")

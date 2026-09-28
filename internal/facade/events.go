@@ -229,8 +229,15 @@ func (c *connection) follow(ctx context.Context, since int, st *followState) {
 			return
 		}
 
+		// reconciled is this batch's reconcileOnce budget: the resync (if
+		// any) spends it first, so a breakpoint event after a resync in
+		// the same batch doesn't reconcile again.
+		var reconciled bool
+
 		if res.Dropped > 0 && !c.relay(func() []godap.EventMessage {
-			return append(resync(res.Dropped, c.session().Info(), st), c.reconcile()...)
+			out := resync(res.Dropped, c.session().Info(), st)
+
+			return append(out, reconcileOnce(&reconciled, c.view.configured, c.reconcile)...)
 		}) {
 			return
 		}
@@ -239,7 +246,7 @@ func (c *connection) follow(ctx context.Context, since int, st *followState) {
 
 		for i := range res.Events {
 			ev := &res.Events[i]
-			if !c.relay(func() []godap.EventMessage { return c.translate(ev, st) }) || ev.Kind == api.EventEnded {
+			if !c.relay(func() []godap.EventMessage { return c.translate(ev, st, &reconciled) }) || ev.Kind == api.EventEnded {
 				return
 			}
 
@@ -258,8 +265,9 @@ func (c *connection) follow(ctx context.Context, since int, st *followState) {
 // breakpoint change reconciles the editor's view (docs/adr/0014), a lease
 // or client change is also an eyedbg/lease or eyedbg/clients event, the end
 // retracts the mirrors first, and another client's action is also an
-// eyedbg/activity event.
-func (c *connection) translate(ev *api.Event, st *followState) []godap.EventMessage {
+// eyedbg/activity event. reconciled is the follow batch's reconcileOnce
+// budget (see [connection.follow]).
+func (c *connection) translate(ev *api.Event, st *followState, reconciled *bool) []godap.EventMessage {
 	var out []godap.EventMessage
 
 	if ev.Kind == api.EventEnded {
@@ -270,7 +278,7 @@ func (c *connection) translate(ev *api.Event, st *followState) []godap.EventMess
 
 	switch ev.Kind {
 	case api.EventBreakpoint:
-		out = append(out, c.breakpointChanged(ev)...)
+		out = append(out, c.breakpointChanged(ev, reconciled)...)
 	case api.EventLease:
 		if ev.Lease != nil {
 			out = append(out, leaseEvent(*ev.Lease))
@@ -288,12 +296,15 @@ func (c *connection) translate(ev *api.Event, st *followState) []godap.EventMess
 	return out
 }
 
-// breakpointChanged is what a breakpoint event of the log sends: the
-// reconcile, and, as M1 did, a changed event for an adapter's change to a
-// breakpoint the connection reported even when its response already told
-// the change (the adapter verified it while the request was in flight).
-func (c *connection) breakpointChanged(ev *api.Event) []godap.EventMessage {
-	out := c.reconcile()
+// breakpointChanged is what a breakpoint event of the log sends: a
+// reconcile — at most once per follow batch, via reconcileOnce, since the
+// first reconcile of a batch already covers every breakpoint event that
+// batch logged — and, as M1 did, a changed event for an adapter's change
+// to a breakpoint the connection reported even when its response already
+// told the change (the adapter verified it while the request was in
+// flight). reconciled is the batch's reconcileOnce budget.
+func (c *connection) breakpointChanged(ev *api.Event, reconciled *bool) []godap.EventMessage {
+	out := reconcileOnce(reconciled, c.view.configured, c.reconcile)
 
 	if ev.Action != actionChanged || ev.Client != "" || ev.Breakpoint == nil || !c.view.configured {
 		return out
@@ -320,7 +331,28 @@ func (c *connection) reconcile() []godap.EventMessage {
 		return nil
 	}
 
+	c.reconciles.Add(1)
+
 	return reconcile(c.view, c.client.ID, c.session().Breakpoints(""))
+}
+
+// reconcileOnce runs reconcile — one follow batch's [connection.reconcile]
+// — at most once: *ran remembers whether one already ran with the view
+// configured. A run skipped because *ran was already true returns nil
+// without touching the session's breakpoints (reconcile is O(every
+// breakpoint), so a batch of many breakpoint events pays for it once, not
+// once per event). A run that happened but found the view not yet
+// configured doesn't set *ran, so a later attempt in the same batch still
+// tries — configurationDone landing mid-batch keeps every event correct.
+func reconcileOnce(ran *bool, configured bool, reconcile func() []godap.EventMessage) []godap.EventMessage {
+	if *ran {
+		return nil
+	}
+
+	out := reconcile()
+	*ran = configured
+
+	return out
 }
 
 // breakpointsEvent is an eyedbg/breakpoints event listing every client's
