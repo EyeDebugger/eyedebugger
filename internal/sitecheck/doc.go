@@ -10,8 +10,10 @@
 // 1, docs/DESIGN.md's naming rule). It also keeps the agent install prompt
 // in sync: site/install-prompt.txt is canonical, and the copies fenced
 // between "<!-- install-prompt:start -->"/"<!-- install-prompt:end -->" in
-// README.md and site/llms.txt must match it byte for byte, and site/llms.txt
+// README.md and site/llms.txt, and the escaped copy in site/index.html's
+// <code id="install-prompt">, must all match it byte for byte; site/llms.txt
 // must name the real VS Code extension id, publisher and debug type read
 // from extensions/vscode/package.json (D6/D10 in the p2-discoverability
-// plan). Nothing here is imported outside its own tests.
+// plan; index.html joined the sync check in step 6). Nothing here is
+// imported outside its own tests.
 package sitecheck
