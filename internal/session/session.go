@@ -1157,7 +1157,16 @@ func (s *Session) execute(ctx context.Context, r execRequest) (execution, error)
 	s.execMu.Lock()
 	defer s.execMu.Unlock()
 
-	x, thread, err := s.admit(r)
+	var pauseThread int
+	if r.kind == ExecPause && r.thread == 0 && s.pauseReady() {
+		// D2: ask the adapter which threads exist before picking one to
+		// admit and send a pause for. Side-effect-free (a read-only
+		// request); admit's own refusal (capability/state/lease) still
+		// runs unchanged and needs no threads request.
+		pauseThread = s.pauseThread(ctx)
+	}
+
+	x, thread, err := s.admit(r, pauseThread)
 	if err != nil {
 		return execution{}, err
 	}
@@ -1192,8 +1201,10 @@ func (s *Session) execute(ctx context.Context, r execRequest) (execution, error)
 
 // admit checks that the adapter can do it, the state and the lease (taking
 // it when the policy allows) and logs the exec event. It returns the thread
-// to act on.
-func (s *Session) admit(r execRequest) (execution, int, error) {
+// to act on: r.thread if the caller named one, else pauseThread (D2, an
+// ExecPause whose threads request found a live thread), else the last
+// stop's thread as before.
+func (s *Session) admit(r execRequest, pauseThread int) (execution, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1217,13 +1228,57 @@ func (s *Session) admit(r execRequest) (execution, int, error) {
 	}
 
 	thread := r.thread
-	if thread == 0 {
+	switch {
+	case thread != 0:
+	case r.kind == ExecPause && pauseThread != 0:
+		thread = pauseThread
+	default:
 		thread = s.stop.ThreadID
 	}
 
 	s.log.append(api.Event{Kind: api.EventExec, Client: r.client.ID, Action: r.kind, ThreadID: r.thread, Text: r.text})
 
 	return execution{before: s.stops}, thread, nil
+}
+
+// pauseReady reports whether an ExecPause would reach admit's threads/state
+// check (capability and state only, no lease): whether it is worth a
+// threads request before picking a thread for it (D2). A refusal here has
+// no side effect, same as admit's.
+func (s *Session) pauseReady() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.pauseUnsupported == "" && s.state == api.StateRunning
+}
+
+// pauseThread resolves which thread a pause with no thread given should
+// target (D2): the last stop's thread if the adapter's threads response
+// still lists it, else the first one it lists. 0 means no threads request
+// succeeded with a non-empty answer; admit then falls back to its own
+// choice (the last stop's thread), unchanged from before this existed.
+func (s *Session) pauseThread(ctx context.Context) int {
+	resp, err := s.sendRequest(ctx, &godap.ThreadsRequest{Request: godap.Request{Command: "threads"}})
+	if err != nil {
+		return 0
+	}
+
+	tr, ok := resp.(*godap.ThreadsResponse)
+	if !ok || len(tr.Body.Threads) == 0 {
+		return 0
+	}
+
+	s.mu.Lock()
+	last := s.stop.ThreadID
+	s.mu.Unlock()
+
+	for _, th := range tr.Body.Threads {
+		if th.Id == last {
+			return last
+		}
+	}
+
+	return tr.Body.Threads[0].Id
 }
 
 // send sends the request to the adapter; a resume marks the program

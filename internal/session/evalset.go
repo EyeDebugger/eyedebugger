@@ -51,7 +51,7 @@ func (s *Session) Eval(ctx context.Context, c api.Client, p api.EvalParams) (api
 	s.execMu.Lock()
 	defer s.execMu.Unlock()
 
-	if _, _, err := s.admit(execRequest{client: c, kind: ExecEval, text: p.Expression}); err != nil {
+	if _, _, err := s.admit(execRequest{client: c, kind: ExecEval, text: p.Expression}, 0); err != nil {
 		return api.EvalResult{}, err
 	}
 
@@ -135,7 +135,7 @@ func (s *Session) Set(ctx context.Context, c api.Client, p api.SetParams) (api.S
 	s.execMu.Lock()
 	defer s.execMu.Unlock()
 
-	if _, _, err := s.admit(execRequest{client: c, kind: ExecSet, text: p.Variable}); err != nil {
+	if _, _, err := s.admit(execRequest{client: c, kind: ExecSet, text: p.Variable}, 0); err != nil {
 		return api.SetResult{}, err
 	}
 

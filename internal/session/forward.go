@@ -247,7 +247,7 @@ func (s *Session) forwardExecution(ctx context.Context, c api.Client, req godap.
 	s.execMu.Lock()
 	defer s.execMu.Unlock()
 
-	if _, _, err := s.admit(x); err != nil {
+	if _, _, err := s.admit(x, 0); err != nil {
 		return nil, err
 	}
 

@@ -179,6 +179,8 @@ type adapter struct {
 	terminalAgain bool
 	// program is the launched program.
 	program string
+	// threadsSeen counts threads requests received ($threadsRequests).
+	threadsSeen int
 }
 
 // inbound is one message from the client, or why reading ended.
@@ -425,6 +427,12 @@ func (a *adapter) handle(req godap.RequestMessage, raw []byte) {
 	case *godap.ContinueRequest, *godap.NextRequest, *godap.StepInRequest, *godap.StepOutRequest:
 		a.resume(req)
 	case *godap.PauseRequest:
+		if a.opts.StrictPause && !a.pauseThreadOK(r.Arguments.ThreadId) {
+			a.fail(req, "pause: invalid thread")
+
+			return
+		}
+
 		a.respond(req, nil)
 		a.prog.pause(a.opts.PauseAsSignal)
 	case *godap.DisconnectRequest:
@@ -432,6 +440,23 @@ func (a *adapter) handle(req godap.RequestMessage, raw []byte) {
 	default:
 		a.configure(req)
 	}
+}
+
+// pauseThreadOK reports whether id is a thread a threads request would
+// list right now ([Options.StrictPause]): never 0, and only one from
+// [Options.threadsList].
+func (a *adapter) pauseThreadOK(id int) bool {
+	if id == 0 {
+		return false
+	}
+
+	for _, th := range a.opts.threadsList() {
+		if th.Id == id {
+			return true
+		}
+	}
+
+	return false
 }
 
 // configure answers the requests that set breakpoints or change variables.
@@ -480,7 +505,8 @@ type resultBody struct {
 func (a *adapter) inspect(req godap.RequestMessage) {
 	switch r := req.(type) {
 	case *godap.ThreadsRequest:
-		a.respond(req, godap.ThreadsResponseBody{Threads: []godap.Thread{{Id: threadID, Name: "main"}}})
+		a.threadsSeen++
+		a.respond(req, godap.ThreadsResponseBody{Threads: a.opts.threadsList()})
 	case *godap.StackTraceRequest:
 		a.respond(req, godap.StackTraceResponseBody{StackFrames: []godap.StackFrame{a.prog.frame()}, TotalFrames: 1})
 	case *godap.ScopesRequest:
@@ -643,6 +669,12 @@ func (a *adapter) resume(req godap.RequestMessage) {
 func (a *adapter) evaluate(req *godap.EvaluateRequest) {
 	if req.Arguments.Expression == "$context" {
 		a.respond(req, godap.EvaluateResponseBody{Result: req.Arguments.Context, Type: typeString})
+
+		return
+	}
+
+	if req.Arguments.Expression == "$threadsRequests" {
+		a.respond(req, godap.EvaluateResponseBody{Result: strconv.Itoa(a.threadsSeen), Type: typeInt})
 
 		return
 	}

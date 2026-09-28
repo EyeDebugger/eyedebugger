@@ -79,6 +79,30 @@ type Options struct {
 	// FailConfigurationDone answers a launch's configurationDone with an
 	// error, as netcoredbg sometimes does ("0x80004005").
 	FailConfigurationDone bool `json:"failConfigurationDone,omitempty"`
+	// StrictPause makes pause refuse a threadId of 0 or one not among
+	// Threads (or the single default thread, without Threads), as
+	// netcoredbg does (its VSCode path only accepts a threadId GetThreads
+	// lists; 0 means E_INVALIDARG).
+	StrictPause bool `json:"strictPause,omitempty"`
+	// Threads overrides what a threads request answers (default: one
+	// thread, id [threadID]). EmptyThreads makes it answer with none,
+	// regardless of Threads.
+	Threads      []godap.Thread `json:"threads,omitempty"`
+	EmptyThreads bool           `json:"emptyThreads,omitempty"`
+}
+
+// threadsList is what a threads request answers, per [Options.Threads] and
+// [Options.EmptyThreads].
+func (o Options) threadsList() []godap.Thread {
+	if o.EmptyThreads {
+		return nil
+	}
+
+	if o.Threads != nil {
+		return o.Threads
+	}
+
+	return []godap.Thread{{Id: threadID, Name: "main"}}
 }
 
 // DefaultTerminal is the runInTerminal request a launch of program sends
