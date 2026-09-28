@@ -69,6 +69,16 @@ type Options struct {
 	// configurationDone, reporting its answer in an output event without
 	// failing.
 	TerminalAgain bool `json:"terminalAgain,omitempty"`
+	// Child, a loopback TCP address, makes a launch or attach first start
+	// a child process of the adapter (a stand-in for the program it
+	// launches, see [ServeChild]) that dials it, and leave it running
+	// when the adapter exits, as netcoredbg may after a failed start.
+	Child string `json:"child,omitempty"`
+	// FailLaunch answers a launch with an error, before initialized.
+	FailLaunch bool `json:"failLaunch,omitempty"`
+	// FailConfigurationDone answers a launch's configurationDone with an
+	// error, as netcoredbg sometimes does ("0x80004005").
+	FailConfigurationDone bool `json:"failConfigurationDone,omitempty"`
 }
 
 // DefaultTerminal is the runInTerminal request a launch of program sends
