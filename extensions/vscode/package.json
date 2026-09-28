@@ -2,7 +2,7 @@
   "name": "eyedbg",
   "displayName": "EyeDebugger",
   "description": "Join an AI agent's live eyedbg debug session from VS Code: see what the agent sees, its breakpoints included, and take or request control.",
-  "version": "0.0.0",
+  "version": "0.2.0-beta.1",
   "private": true,
   "publisher": "eyedebugger",
   "license": "Apache-2.0",
