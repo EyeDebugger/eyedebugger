@@ -216,6 +216,54 @@ func rejectUnknownFlag(target *cobra.Command, args []string) error {
 	return nil
 }
 
+// resolveHelpInvocation additionally checks a "help path..." invocation's
+// path against the real command tree (D4c): resolveInvocation alone can't
+// catch a bad one, because cobra's help command has no subcommands of its
+// own, so root.Find silently treats anything typed after "help" as a
+// leftover positional on the help command itself instead of rejecting it —
+// the same reason rejectUnknownSubcommand only fires when the target still
+// has subcommands. Not a "help" invocation: does nothing. A path containing
+// a "<placeholder>" (e.g. "eyedbg help <command>", a real span in SKILL.md)
+// names no real command by design and is left alone.
+func resolveHelpInvocation(root *cobra.Command, args []string) error {
+	if len(args) == 0 || args[0] != "help" {
+		return nil
+	}
+
+	var path []string
+
+	for _, a := range args[1:] {
+		if strings.HasPrefix(a, "-") {
+			continue // --all, --json
+		}
+
+		if strings.Contains(a, "<") {
+			return nil
+		}
+
+		path = append(path, a)
+	}
+
+	if len(path) == 0 {
+		return nil // "eyedbg help" alone: always valid
+	}
+
+	target, rest, err := root.Find(path)
+	if err != nil {
+		return err
+	}
+
+	if len(rest) > 0 {
+		return fmt.Errorf("eyedbg help %s: %q does not resolve", strings.Join(args[1:], " "), strings.Join(rest, " "))
+	}
+
+	if target == root {
+		return fmt.Errorf("eyedbg help %s: does not resolve to a specific command", strings.Join(args[1:], " "))
+	}
+
+	return nil
+}
+
 // flagOnlySpans returns md's code spans (invocationRegions) that name only
 // a flag in prose (e.g. "--budget N" or "-s ID"), not a full "eyedbg …"
 // invocation: skillInvocations only looks at spans containing "eyedbg", so
@@ -414,6 +462,41 @@ func TestSkillInvocationResolution(t *testing.T) {
 	}
 }
 
+// TestHelpInvocationResolution covers resolveHelpInvocation directly (D4c):
+// a "help path" invocation whose path doesn't resolve to a real, specific
+// command is an error, even though plain resolveInvocation lets it through
+// (help.HasSubCommands() is false, so rejectUnknownSubcommand never fires).
+func TestHelpInvocationResolution(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr bool
+	}{
+		{name: "not a help invocation", args: []string{"status"}},
+		{name: "help alone", args: []string{"help"}},
+		{name: "help --all", args: []string{"help", "--all"}},
+		{name: "help a real command", args: []string{"help", "version"}},
+		{name: "help a real nested command", args: []string{"help", "adapters", "install"}},
+		{name: "help placeholder", args: []string{"help", "<command>"}},
+		{name: "help unknown command", args: []string{"help", "bogus"}, wantErr: true},
+		{name: "help leftover after a leaf", args: []string{"help", "version", "extra"}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// cobra's Find merges flags into the tree: one root per subtest.
+			err := resolveHelpInvocation(rootFactories()["eyedbg"](), tt.args)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("resolveHelpInvocation(%v) err = %v, want error = %v", tt.args, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // TestFlagOnlySpanResolution covers flagOnlySpans and resolveFlag together:
 // a bare flag mention in prose (no "eyedbg" in the span) is checked against
 // the union of every flag in the command tree, not just one command's.
@@ -505,6 +588,10 @@ func TestSkillMatchesCommandTree(t *testing.T) {
 	for _, args := range skillInvocations(md) {
 		if err := resolveInvocation(root, args); err != nil {
 			t.Errorf("SKILL.md: %q does not resolve against the command tree: %v", "eyedbg "+strings.Join(args, " "), err)
+		}
+
+		if err := resolveHelpInvocation(root, args); err != nil {
+			t.Errorf("SKILL.md: %v", err)
 		}
 	}
 

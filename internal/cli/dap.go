@@ -22,7 +22,8 @@ import (
 const dapLong = `Speak the Debug Adapter Protocol (DAP) on stdin and stdout, joined to a running debug session
 or launching a new one, so an editor or any DAP client can debug it alongside you: VS Code (through
 the EyeDebugger extension), nvim-dap, or a script. Use it as a DAP client's debug adapter command;
-it is not for typing at a shell.
+it is not for typing at a shell. For VS Code specifically, see 'eyedbg help vscode' (join a
+session, start one from a launch config, the control lease from the editor's side).
 
 Without --launch it connects to the running daemon (it never starts one), authenticates like every
 command, and joins the session chosen by -s (else $EYEDBG_SESSION, else the only session) as the
@@ -33,8 +34,8 @@ threads, stack and variables, and gets every later stop.
 
 With --launch the client's DAP launch starts the session, as 'eyedbg start' would, as the client
 --as, who holds its lease; the daemon is started if needed (like 'eyedbg start'), and -s is refused
-($EYEDBG_SESSION is ignored). Launch arguments: lang (required: dotnet, python, or a language of
-your own manifest, see 'eyedbg adapters ls'), program, project, cwd (relative paths resolve against
+($EYEDBG_SESSION is ignored). Launch arguments: lang (required: dotnet, python, go, c, cpp, rust,
+or a language of your own manifest, see 'eyedbg help lang'), program, project, cwd (relative paths resolve against
 this command's directory; neither program nor project builds the project in it), args (list),
 env and opts (objects of strings: 'eyedbg start --env' and '--opt'), stopOnEntry, noBuild (true or
 false), leasePolicy (free, handoff or human-priority), exceptions (all, uncaught or none) and
