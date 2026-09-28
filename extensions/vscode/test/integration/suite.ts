@@ -14,6 +14,7 @@ import './stale.test';
 import './alias.test';
 import './lease.test';
 import './launch.test';
+import './terminal.test';
 import './pick.test';
 import './activity.test';
 import './follow.test';

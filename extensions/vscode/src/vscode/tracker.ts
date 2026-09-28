@@ -6,7 +6,8 @@
 // its copies of them from extensions), the eyedbg/* events and refusals.
 // The factory returns synchronously (VS Code drops trackers that take over
 // a second). A launch connection learns its eyedbg session's id from the
-// facade's eyedbg/session event (docs/adr/0019).
+// facade's eyedbg/session event, and runs its program in a terminal on the
+// facade's eyedbg/runInTerminal event (docs/adr/0019).
 
 import type * as vscode from 'vscode';
 import { dapExitMessage } from '../core/cli';
@@ -17,6 +18,7 @@ import {
   errorCode,
   errorHolder,
   errorText,
+  isRecord,
   num,
   parseBreakpoints,
   parseClients,
@@ -25,9 +27,11 @@ import {
   parseLease,
   type SourceLine,
 } from '../core/protocol';
+import { checkTerminal, TerminalGate, terminalId } from '../core/terminal';
 import { isSessionId } from '../core/validate';
 import { client } from './config';
 import type { State, Tracked } from './state';
+import { runInTerminal, type TerminalAnswer } from './terminal';
 
 /** What the tracker hands on. */
 export interface Handlers {
@@ -66,10 +70,13 @@ export class TrackerFactory implements vscode.DebugAdapterTrackerFactory {
     // Per connection: this connection asked for a restart, so VS Code's
     // own disconnect after its terminated event doesn't cancel it.
     const conn = { restart: false };
+    // Per connection: whether an eyedbg/runInTerminal event may run.
+    const gate = new TerminalGate(launch && session.configuration.console === 'integratedTerminal');
     return {
       onWillReceiveMessage: (raw: unknown) => {
         const m = parseDap(raw);
         if (m !== undefined) {
+          gate.fromEditor(m);
           this.fromEditor(t, m, conn);
         }
       },
@@ -77,6 +84,10 @@ export class TrackerFactory implements vscode.DebugAdapterTrackerFactory {
         talked = true;
         const m = parseDap(raw);
         if (m !== undefined) {
+          gate.fromAdapter(m);
+          if (m.type === 'event' && m.event === 'eyedbg/runInTerminal') {
+            this.terminal(session, gate, isRecord(raw) ? raw.body : undefined);
+          }
           this.fromAdapter(t, m);
         }
       },
@@ -104,6 +115,39 @@ export class TrackerFactory implements vscode.DebugAdapterTrackerFactory {
       } else if (!conn.restart) {
         this.state.restarting.delete(t.session.id);
       }
+    }
+  }
+
+  /**
+   * terminal runs an eyedbg/runInTerminal event's program if the gate
+   * admits it and its body passes the validation table, and answers the
+   * facade; a refusal is answered with an error when the event's id is a
+   * positive integer (else not at all). Nothing of the body is logged.
+   */
+  private terminal(session: vscode.DebugSession, gate: TerminalGate, body: unknown): void {
+    const why = gate.admit();
+    const checked = why === '' ? checkTerminal(body, process.platform) : undefined;
+    if (checked?.ok === true) {
+      const id = checked.value.id;
+      void runInTerminal(checked.value).then((answer) => this.answerTerminal(session, id, answer));
+      return;
+    }
+    const reason = checked?.ok === false ? checked.error : why;
+    this.state.log.warn(`eyedbg/runInTerminal refused: ${reason}`);
+    const id = terminalId(body);
+    if (id !== undefined) {
+      void this.answerTerminal(session, id, { error: `the extension refused it: ${reason}` });
+    }
+  }
+
+  private async answerTerminal(session: vscode.DebugSession, id: number, answer: TerminalAnswer): Promise<void> {
+    if ('error' in answer) {
+      this.state.log.warn(`eyedbg/runInTerminal: ${answer.error}`);
+    }
+    try {
+      await session.customRequest('eyedbg/runInTerminal', { id, ...answer });
+    } catch {
+      this.state.log.warn('eyedbg/runInTerminal: the facade refused the answer');
     }
   }
 

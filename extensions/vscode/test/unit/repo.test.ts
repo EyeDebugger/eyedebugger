@@ -239,7 +239,7 @@ function sample(x: unknown): unknown {
 
 test('manifest: every launch snippet is a valid launch configuration', () => {
   const snippets = manifest.contributes.debuggers[0]?.configurationSnippets ?? [];
-  assert.equal(snippets.length, 5);
+  assert.equal(snippets.length, 6);
   let launches = 0;
   for (const s of snippets) {
     const body = sample(s.body) as Record<string, unknown>;
@@ -253,7 +253,7 @@ test('manifest: every launch snippet is a valid launch configuration', () => {
     }
     assert.doesNotMatch(JSON.stringify(body), /\$\{|\^"/, s.label);
   }
-  assert.equal(launches, 4);
+  assert.equal(launches, 5);
   // biome-ignore lint/suspicious/noTemplateCurlyInString: a snippet's text, not a template.
   assert.equal(sample('^"\\${workspaceFolder}/${1:app.py}"'), '/ws/app.py');
 });

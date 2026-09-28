@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which it runs without a shell and answers (ADR 0019). `version --json` lists `dap.terminal`.
   Adapter manifests gain `launch.terminal` (debugpy's asks for the integrated terminal); the .NET
   adapters refuse a terminal.
+- The VS Code extension's launch configurations take `"console": "integratedTerminal"` (Python;
+  it needs an eyedbg with `dap.terminal`) and a "Python file in the terminal" snippet: the program
+  runs as a terminal's own process — no shell, nothing typed into a terminal — after the extension
+  re-checks the request against the same table, for its own pending launch only, once.
 - `THIRD-PARTY-NOTICES.txt` at the repo root, listing the Go modules statically linked into
   `eyedbg`/`eyedbgd` (go-dap, cobra, mousetrap: Apache-2.0; pflag: BSD-3-Clause) and their license
   texts; bundled in every release archive alongside LICENSE and NOTICE.

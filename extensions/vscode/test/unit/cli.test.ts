@@ -17,6 +17,8 @@ import {
   parseSessions,
   redact,
   sessionsArgs,
+  terminalFeature,
+  terminalUnsupported,
   versionArgs,
 } from '../../src/core/cli';
 import { EyedbgError } from '../../src/core/protocol';
@@ -54,6 +56,18 @@ test('launch: "adapter" needs the adapter.select feature', () => {
   assert.equal(
     adapterUnsupported(withAdapter, '1.0.0', ['dap']),
     'eyedbg 1.0.0 can\'t choose a debug adapter ("adapter": "sharpdbg"): it lacks adapter.select',
+  );
+});
+
+test('launch: "console": "integratedTerminal" needs the dap.terminal feature', () => {
+  assert.equal(terminalFeature, 'dap.terminal');
+  const term = spec({ lang: 'python', console: 'integratedTerminal' });
+  assert.equal(terminalUnsupported(term, '1.0.0', ['dap', 'dap.launch', 'dap.terminal']), '');
+  assert.equal(terminalUnsupported(spec({ lang: 'python' }), '1.0.0', ['dap.launch']), '');
+  assert.equal(terminalUnsupported(spec({ lang: 'python', console: 'internalConsole' }), '1.0.0', []), '');
+  assert.equal(
+    terminalUnsupported(term, '1.0.0', ['dap.launch']),
+    'eyedbg 1.0.0 can\'t run a launched program in a terminal ("console": "integratedTerminal"): it lacks dap.terminal',
   );
 });
 

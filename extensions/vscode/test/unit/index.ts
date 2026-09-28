@@ -16,3 +16,4 @@ import './autojoin.test';
 import './clients.test';
 import './dotnet.test';
 import './dotnetRender.test';
+import './terminal.test';

@@ -1,6 +1,6 @@
 # EyeDebugger (`eyedbg`) — AI-native debugger (design)
 
-Status: v0.3 · 2026-09-26 · phase 1 (MVP) complete; phase 2: DAP facade (P2-M1), collaboration (P2-M2), VS Code extension (P2-M3, P2-M5), .NET side helper (P2-M6), .NET dumps, heap and threads (P2-M7), .NET traces (P2-M8), the extension's .NET views (P2-M9), per-owner conditions at shared lines (P2-S1), launching through the DAP facade (P2-S3a), terminals for launched programs (P2-S3b, facade side)
+Status: v0.3 · 2026-09-26 · phase 1 (MVP) complete; phase 2: DAP facade (P2-M1), collaboration (P2-M2), VS Code extension (P2-M3, P2-M5), .NET side helper (P2-M6), .NET dumps, heap and threads (P2-M7), .NET traces (P2-M8), the extension's .NET views (P2-M9), per-owner conditions at shared lines (P2-S1), launching through the DAP facade (P2-S3a), terminals for launched programs (P2-S3b)
 
 ## 1. What and why
 
@@ -380,7 +380,7 @@ folder, else an absolute program's directory) and sends the validated configurat
 `eyedbg start`), learns the id from `eyedbg/session`, and no longer stops sessions itself: Stop is
 the facade's terminate, and Restart a new launch.
 
-Built (P2-S3b, ADR 0019, facade side): **terminals** — the launch argument `console` is
+Built (P2-S3b, ADR 0019): **terminals** — the launch argument `console` is
 `internalConsole` (default) or `integratedTerminal` (Python only: a manifest's `launch.terminal`,
 debugpy's, is merged over its launch arguments; the .NET driver and a manifest without it refuse:
 `UNSUPPORTED_BY_ADAPTER`). With `integratedTerminal`, the adapter's `runInTerminal` during that
@@ -390,9 +390,12 @@ the editor starts `args` itself, without a shell, and answers with the request
 `eyedbg/runInTerminal {id, processId}` or `{id, error}` within 30 s, which the adapter gets as its
 answer. A refused request, the editor's error or silence fails the launch at once
 (`ADAPTER_ERROR`). The standard `runInTerminal` is never sent to an editor (VS Code's types a
-command line into a shell). `version --json` lists `dap.terminal`. The VS Code extension's runner
-(`createTerminal` with the program as the terminal's process) is next; other DAP clients get no
-terminal.
+command line into a shell). `version --json` lists `dap.terminal`. The VS Code extension
+(`console` in launch configurations) accepts the event only for its own launch that asked for a
+terminal, while that launch is pending, once; re-checks it against the same table; and runs it with
+`createTerminal({shellPath: args[0], shellArgs: args[1..]})` — the program is the terminal's own
+process, no shell, no `sendText` — answering with the terminal's process id. Other DAP clients get
+no terminal.
 
 ## 10. Agent integration
 
@@ -482,10 +485,10 @@ Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; mor
   configure hooks, the .NET driver's streamed build, launch connections (`eyedbg dap --launch`,
   `facade.open {launch}`, `dap.launch`), real-binary e2e (ADR 0019), and the VS Code extension's F5
   through it (a Restart restarts the program).
-- **P2-S3b terminals** (in progress): asynchronous reverse replies in the DAP client, the session's
+- **P2-S3b terminals** (done): asynchronous reverse replies in the DAP client, the session's
   terminal route (D8), `launch.terminal` (debugpy), the facade's `console`, validation table and
-  `eyedbg/runInTerminal` exchange, `dap.terminal`, real-binary e2e (done); the VS Code extension's
-  shell-free runner is next.
+  `eyedbg/runInTerminal` exchange, `dap.terminal`, real-binary e2e, and the VS Code extension's
+  shell-free runner (`console` in launch configurations).
 
 **More languages** (ADR 0013, run independently of phase 2's own sequencing): C, C++, Rust
 (lldb-dap, manifest-only, no schema change) and Go (Delve, manifest-only through a new

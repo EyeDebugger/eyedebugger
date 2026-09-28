@@ -212,6 +212,19 @@
                 "type": "string",
                 "pattern": "^[a-z][a-z0-9-]{0,31}$",
                 "description": "dotnet only: the debug adapter, netcoredbg (the default) or sharpdbg (after 'eyedbg adapters install sharpdbg'; it can't pause). Default: EYEDBG_DOTNET_ADAPTER, else netcoredbg where it has a build."
+              },
+              "console": {
+                "type": "string",
+                "enum": [
+                  "internalConsole",
+                  "integratedTerminal"
+                ],
+                "enumDescriptions": [
+                  "The program's output goes to the Debug Console.",
+                  "The program runs in a VS Code terminal (python only for now): you type its input there. It is started directly, without a shell."
+                ],
+                "default": "internalConsole",
+                "description": "Where the program runs: internalConsole (the Debug Console) or integratedTerminal (a terminal, for input; python only for now). Needs an eyedbg with dap.terminal."
               }
             }
           }
@@ -250,6 +263,19 @@
               "name": "Python file (eyedbg)",
               "lang": "python",
               "program": "^\"\\${workspaceFolder}/${1:app.py}\"",
+              "stopOnEntry": true
+            }
+          },
+          {
+            "label": "EyeDebugger: Python file in the terminal",
+            "description": "Start a Python file under eyedbg in a terminal (for its input) and join it.",
+            "body": {
+              "type": "eyedbg",
+              "request": "launch",
+              "name": "Python file in the terminal (eyedbg)",
+              "lang": "python",
+              "program": "^\"\\${workspaceFolder}/${1:app.py}\"",
+              "console": "integratedTerminal",
               "stopOnEntry": true
             }
           },

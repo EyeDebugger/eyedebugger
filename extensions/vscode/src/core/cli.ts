@@ -27,6 +27,17 @@ export function launchUnsupported(version: string, features: readonly string[]):
   return `eyedbg ${version} can't start a session from a launch configuration: it lacks ${launchFeature}`;
 }
 
+/** The feature "console": "integratedTerminal" needs: the facade's eyedbg/runInTerminal (docs/adr/0019). */
+export const terminalFeature = 'dap.terminal';
+
+/** terminalUnsupported is the error text for a terminal launch on an eyedbg without terminalFeature, else ''. */
+export function terminalUnsupported(spec: LaunchSpec, version: string, features: readonly string[]): string {
+  if (spec.console !== 'integratedTerminal' || features.includes(terminalFeature)) {
+    return '';
+  }
+  return `eyedbg ${version} can't run a launched program in a terminal ("console": "integratedTerminal"): it lacks ${terminalFeature}`;
+}
+
 /** adapterUnsupported is the error text for a launch with "adapter" on an eyedbg without adapterFeature, else ''. */
 export function adapterUnsupported(spec: LaunchSpec, version: string, features: readonly string[]): string {
   if (spec.adapter === undefined || features.includes(adapterFeature)) {
