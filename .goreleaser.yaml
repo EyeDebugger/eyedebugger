@@ -47,6 +47,7 @@ archives:
     files:
       - LICENSE
       - NOTICE
+      - THIRD-PARTY-NOTICES.txt
       - README.md
       - CHANGELOG.md
       # The .NET side helper, built by release.yml's `helper` job. No glob

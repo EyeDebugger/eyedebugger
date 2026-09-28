@@ -18,7 +18,10 @@ Dependabot handles action SHAs, `go.mod`, the extension's npm dev dependencies
 helper's NuGet packages (`nuget`, `/helpers/dotnet`, weekly, grouped, 7-day cooldown; ADR 0016).
 Everything else is a manual bump.
 
-- Go: the `go.mod` minimum, `ci.yml` `GO_VERSION`, and the test matrix `go` values.
+- Go: the `go.mod` minimum, `ci.yml` `GO_VERSION`, and the test matrix `go` values. A new or dropped
+  `go.mod` dependency (direct or indirect; Dependabot bumps versions but not the dependency set)
+  needs a matching entry in `THIRD-PARTY-NOTICES.txt` at the repo root — no CI check enforces this
+  one, unlike the .NET helper's.
 - golangci-lint and govulncheck: `ci.yml` `env` + `Taskfile.yml` `vars` + CONTRIBUTING/AGENTS
   mentions.
 - goreleaser: `ci.yml` `env`.
