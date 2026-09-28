@@ -7,6 +7,11 @@
 // .github/workflows/pages.yml doesn't publish), and fails, word-bounded and
 // case-insensitive, on the name of a competing debugger or IDE eyedbg
 // doesn't ship, or on "Visual Studio" not followed by "Code" (AGENTS.md rule
-// 1, docs/DESIGN.md's naming rule). Nothing here is imported outside its own
-// tests.
+// 1, docs/DESIGN.md's naming rule). It also keeps the agent install prompt
+// in sync: site/install-prompt.txt is canonical, and the copies fenced
+// between "<!-- install-prompt:start -->"/"<!-- install-prompt:end -->" in
+// README.md and site/llms.txt must match it byte for byte, and site/llms.txt
+// must name the real VS Code extension id, publisher and debug type read
+// from extensions/vscode/package.json (D6/D10 in the p2-discoverability
+// plan). Nothing here is imported outside its own tests.
 package sitecheck
