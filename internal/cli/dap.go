@@ -34,18 +34,18 @@ threads, stack and variables, and gets every later stop.
 
 With --launch the client's DAP launch starts the session, as 'eyedbg start' would, as the client
 --as, who holds its lease; the daemon is started if needed (like 'eyedbg start'), and -s is refused
-($EYEDBG_SESSION is ignored). Launch arguments: lang (required: dotnet, python, go, c, cpp, rust,
-or a language of your own manifest, see 'eyedbg help lang'), program, project, cwd (relative paths resolve against
-this command's directory; neither program nor project builds the project in it), args (list),
-env and opts (objects of strings: 'eyedbg start --env' and '--opt'), stopOnEntry, noBuild (true or
-false), leasePolicy (free, handoff or human-priority), exceptions (all, uncaught or none) and
-adapter (dotnet: netcoredbg or sharpdbg, else $EYEDBG_DOTNET_ADAPTER); other keys are ignored, and a
-key that differs from one of these only in case is refused. The build's output streams to the
-client's debug console. Once the adapter is ready the client gets an eyedbg/session event with the
-session's id, a capabilities event, and initialized; its breakpoints and exception filters are in
-place before the program runs. Stop (terminate) ends the session and forgets it, as 'eyedbg stop'
-does; a Restart is a new launch, so the program really restarts. When this connection ends, the
-session it launched is forgotten if its program has exited, and keeps running otherwise.
+($EYEDBG_SESSION is ignored). Launch arguments: lang (required: dotnet, python, go, c, cpp, rust, or
+a language of your own manifest, see 'eyedbg help lang'), program, project, cwd (relative paths
+resolve against this command's directory; neither program nor project builds the project in it),
+args (list), env and opts (objects of strings: 'eyedbg start --env' and '--opt'), stopOnEntry,
+noBuild (true or false), leasePolicy (free, handoff or human-priority), exceptions (all, uncaught or
+none) and adapter (dotnet: netcoredbg or sharpdbg, else $EYEDBG_DOTNET_ADAPTER); other keys are
+ignored, and a key that differs from one of these only in case is refused. The build's output
+streams to the client's debug console. Once the adapter is ready the client gets an eyedbg/session
+event with the session's id, a capabilities event, and initialized; its breakpoints and exception
+filters are in place before the program runs. Stop (terminate) ends the session and forgets it, as
+'eyedbg stop' does; a Restart is a new launch, so the program really restarts. When this connection
+ends, the session it launched is forgotten if its program has exited, and keeps running otherwise.
 
 With --launch, console integratedTerminal (Python only; the default is internalConsole) runs the
 program in the client's own terminal, for a program that reads its input: when the debug adapter

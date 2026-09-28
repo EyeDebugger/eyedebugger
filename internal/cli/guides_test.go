@@ -259,8 +259,9 @@ func allGuides() []*cobra.Command {
 
 // TestGuideExamplesMatchExtensionSchema checks every launch.json object in a
 // guide's Long and Example against extensions/vscode/package.json's real
-// configurationAttributes (D4a): every guide except the 'lang' index has at
-// least one launch and one attach example, so this can't pass by finding
+// configurationAttributes (docs/CONVENTIONS.md § Help text): every guide
+// except the 'lang' index has at least one launch and one attach example, so
+// this can't pass by finding
 // zero examples.
 func TestGuideExamplesMatchExtensionSchema(t *testing.T) {
 	t.Parallel()
@@ -278,13 +279,15 @@ func TestGuideExamplesMatchExtensionSchema(t *testing.T) {
 }
 
 // assertGuideExamples validates every JSON example in g's Long and Example
-// against pkg and langs, and requires at least one launch and one attach
-// example (the 'lang' index guide instead requires none: D5's table has no
-// invented examples).
+// against pkg and langs, requires at least one launch and one attach example
+// (the 'lang' index guide instead requires none: its table names real
+// commands, not invented JSON examples), and checks that every "--
+// launch.json: ..." caption really introduces one.
 func assertGuideExamples(t *testing.T, g *cobra.Command, pkg extensionSchema, langs map[string]bool) {
 	t.Helper()
 
-	examples := jsonExamples(g.Long + "\n" + g.Example)
+	text := g.Long + "\n" + g.Example
+	examples := jsonExamples(text)
 
 	var hasLaunch, hasAttach bool
 
@@ -300,6 +303,8 @@ func assertGuideExamples(t *testing.T, g *cobra.Command, pkg extensionSchema, la
 			hasAttach = true
 		}
 	}
+
+	assertLaunchJSONCaptionsParse(t, g, text)
 
 	if g.Use == "lang" {
 		if len(examples) != 0 {
@@ -318,10 +323,51 @@ func assertGuideExamples(t *testing.T, g *cobra.Command, pkg extensionSchema, la
 	}
 }
 
+// launchJSONCaptionRE matches a "-- launch.json: ..." caption line, the
+// package's convention (docs/CONVENTIONS.md § Help text) for introducing a
+// launch.json body meant to be copied verbatim.
+var launchJSONCaptionRE = regexp.MustCompile(`(?m)^[ \t]*-- launch\.json:.*$`)
+
+// assertLaunchJSONCaptionsParse checks that the JSON object right after
+// every "-- launch.json:" caption in text really decodes as an "eyedbg"
+// example: jsonExamples silently drops anything that fails to decode (by
+// design, so one bad "{" doesn't desync the scan), so without a check tied
+// to the caption itself, a broken example — the exact text an agent then
+// pastes — would only be caught by luck, through the weaker "at least one
+// launch and one attach" count above.
+func assertLaunchJSONCaptionsParse(t *testing.T, g *cobra.Command, text string) {
+	t.Helper()
+
+	for _, loc := range launchJSONCaptionRE.FindAllStringIndex(text, -1) {
+		caption := strings.TrimSpace(text[loc[0]:loc[1]])
+		rest := text[loc[1]:]
+
+		start := strings.IndexByte(rest, '{')
+		if start < 0 {
+			t.Errorf("%s: %q: no JSON object follows this caption", g.CommandPath(), caption)
+			continue
+		}
+
+		var m map[string]any
+		if err := json.NewDecoder(strings.NewReader(rest[start:])).Decode(&m); err != nil {
+			t.Errorf("%s: %q: JSON does not decode: %v", g.CommandPath(), caption, err)
+			continue
+		}
+
+		if m["type"] != "eyedbg" {
+			t.Errorf("%s: %q: JSON's \"type\" is %v, want %q", g.CommandPath(), caption, m["type"], "eyedbg")
+		}
+	}
+}
+
 // singleQuotedInvocation matches a single-quoted 'eyedbg …' span, the
 // package's prose convention for naming a command inline (docs/CONVENTIONS.md
-// § Help text), as opposed to SKILL.md's markdown code spans.
-var singleQuotedInvocation = regexp.MustCompile(`'eyedbg ([^']*)'`)
+// § Help text), as opposed to SKILL.md's markdown code spans. "eyedbg" and
+// the rest are separated by \s+, not a literal space, so a span the
+// ~100-column wrap broke right after the word ("'eyedbg\nadapters doctor'")
+// still matches: the space that would otherwise sit there became the line
+// break instead.
+var singleQuotedInvocation = regexp.MustCompile(`'eyedbg\s+([^']*)'`)
 
 // longInvocations finds every single-quoted 'eyedbg …' span in long's prose.
 // A span the ~100-column wrap (docs/CONVENTIONS.md) broke across a line
@@ -333,6 +379,31 @@ func longInvocations(long string) [][]string {
 	for _, m := range singleQuotedInvocation.FindAllStringSubmatch(long, -1) {
 		collapsed := strings.Join(strings.Fields(m[1]), " ")
 		out = append(out, splitShellWords(truncateAtDelimiter(collapsed)))
+	}
+
+	return out
+}
+
+// tableCellRE splits a table row into cells on runs of 2+ spaces, the lang
+// index guide's own table format (guides.go's langLong).
+var tableCellRE = regexp.MustCompile(`  +`)
+
+// tableInvocations finds every "eyedbg …" invocation sitting in its own
+// cell of a table row in long: it is neither single-quoted prose (matched by
+// longInvocations) nor an Example line (matched by exampleInvocations), so
+// without this the lang index's INSTALL and GUIDE columns are never checked
+// at all.
+func tableInvocations(long string) [][]string {
+	var out [][]string
+
+	for line := range strings.SplitSeq(long, "\n") {
+		for _, cell := range tableCellRE.Split(strings.TrimSpace(line), -1) {
+			if !strings.HasPrefix(cell, "eyedbg ") {
+				continue
+			}
+
+			out = append(out, splitShellWords(truncateAtDelimiter(strings.TrimPrefix(cell, "eyedbg"))))
+		}
 	}
 
 	return out
@@ -356,9 +427,10 @@ func exampleInvocations(example string) [][]string {
 	return out
 }
 
-// TestGuideInvocationsResolve checks D4b: every "eyedbg …" invocation named
-// in a guide's Long (single-quoted prose) or Example (command lines)
-// resolves against the real command tree.
+// TestGuideInvocationsResolve keeps a guide's own invocations honest: every
+// "eyedbg …" it names, in its Long (single-quoted prose), its Example
+// (command lines) or its "help …" cross-references, resolves against the
+// real command tree.
 func TestGuideInvocationsResolve(t *testing.T) {
 	t.Parallel()
 
@@ -368,6 +440,7 @@ func TestGuideInvocationsResolve(t *testing.T) {
 
 			invocations := longInvocations(g.Long)
 			invocations = append(invocations, exampleInvocations(g.Example)...)
+			invocations = append(invocations, tableInvocations(g.Long)...)
 
 			if len(invocations) == 0 {
 				t.Fatalf("%s: no 'eyedbg …' invocations found to check", g.CommandPath())
@@ -383,13 +456,17 @@ func TestGuideInvocationsResolve(t *testing.T) {
 				if err := resolveInvocation(root, args); err != nil {
 					t.Errorf("%s: %q does not resolve: %v", g.CommandPath(), "eyedbg "+strings.Join(args, " "), err)
 				}
+
+				if err := resolveHelpInvocation(root, args); err != nil {
+					t.Errorf("%s: %v", g.CommandPath(), err)
+				}
 			}
 		})
 	}
 }
 
-// TestVSCodeGuideNamesExtensionIdentity checks D4a(c): the vscode guide
-// names the extension's real id, publisher and debug type, read from
+// TestVSCodeGuideNamesExtensionIdentity checks that the vscode guide names
+// the extension's real id, publisher and debug type, read from
 // package.json, not a copy that can drift.
 func TestVSCodeGuideNamesExtensionIdentity(t *testing.T) {
 	t.Parallel()
@@ -412,7 +489,7 @@ func TestVSCodeGuideNamesExtensionIdentity(t *testing.T) {
 	}
 }
 
-// TestLangGuideUnknownLanguageFails checks D1: an unknown language under
+// TestLangGuideUnknownLanguageFails checks that an unknown language under
 // 'lang' exits 1 (cobra's own "unknown command" handling), both directly
 // and through 'help'.
 func TestLangGuideUnknownLanguageFails(t *testing.T) {
@@ -435,14 +512,15 @@ func TestLangGuideUnknownLanguageFails(t *testing.T) {
 	}
 }
 
-func TestVSCodeGuideLaunchJSONIsValidJSON(t *testing.T) {
+// TestVSCodeGuideServerReadyActionCount pins the count of the two
+// step-1-verified serverReadyAction examples (dotnet, flask): a guide's
+// launch.json bodies must be strict JSON (no comments, no trailing commas),
+// which assertLaunchJSONCaptionsParse already requires of every captioned
+// example; this additionally catches one of the two silently losing its
+// serverReadyAction key while staying otherwise valid JSON.
+func TestVSCodeGuideServerReadyActionCount(t *testing.T) {
 	t.Parallel()
 
-	// A guide's launch.json bodies must be strict JSON (D3: no comments, no
-	// trailing commas); jsonExamples already requires this to find them at
-	// all, but this pins the count for the two step-1-verified
-	// serverReadyAction examples specifically, so a future edit that breaks
-	// their JSON silently drops to zero instead of failing loudly.
 	examples := jsonExamples(newVSCodeGuide().Long)
 
 	var serverReady int

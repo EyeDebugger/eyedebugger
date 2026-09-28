@@ -27,14 +27,25 @@ var eyedbgWord = regexp.MustCompile(`\beyedbg\b`)
 var inlineSpan = regexp.MustCompile("`([^`]*)`")
 
 // skillInvocations finds every "eyedbg …" invocation in md, inside a fenced
-// code block (one per line) or an inline code span, and returns each as its
-// words after "eyedbg" (shell-aware: quotes group words; a comment, "|",
-// ";" or "&&" outside quotes ends the invocation).
+// code block (one per line, except a ```json fence: JSON, not shell) or an
+// inline code span, and returns each as its words after "eyedbg"
+// (shell-aware: quotes group words; a comment, "|", ";" or "&&" outside
+// quotes ends the invocation). An "eyedbg" sitting inside a double-quoted
+// JSON string, key or value (e.g. `"type": "eyedbg"`, or "eyedbg" as a plain
+// word inside `"name": "Join eyedbg session"`), is data, not an invocation,
+// and is skipped: an inline span can hold prose-quoted JSON even outside a
+// ```json fence, so this is checked by double-quote parity from the
+// region's start, not by only looking at the character right before the
+// match.
 func skillInvocations(md string) [][]string {
 	var out [][]string
 
 	for _, region := range invocationRegions(md) {
 		for _, loc := range eyedbgWord.FindAllStringIndex(region, -1) {
+			if insideDoubleQuotes(region, loc[0]) {
+				continue
+			}
+
 			out = append(out, splitShellWords(truncateAtDelimiter(region[loc[1]:])))
 		}
 	}
@@ -42,30 +53,65 @@ func skillInvocations(md string) [][]string {
 	return out
 }
 
-// invocationRegions returns md's fenced code block lines and, outside
-// fences, the content of its inline code spans.
+// invocationRegions returns md's fenced code block lines (except a ```json
+// fence, which holds data, not shell invocations) and, outside fences, the
+// content of its inline code spans. A non-fenced paragraph (its lines up to
+// the next blank line) is joined with single spaces before spans are
+// matched, so a span the markdown line width wraps mid-invocation still
+// pairs its backticks correctly: CommonMark lets an inline code span cross a
+// line ending (rendering it as a single space), but matching line by line,
+// as this used to, drops half of a wrapped span and mis-pairs the rest.
 func invocationRegions(md string) []string {
-	var regions []string
+	var (
+		regions   []string
+		paragraph []string
+		inFence   bool
+		fenceJSON bool
+	)
 
-	inFence := false
+	flushParagraph := func() {
+		if len(paragraph) == 0 {
+			return
+		}
+
+		for _, m := range inlineSpan.FindAllStringSubmatch(strings.Join(paragraph, " "), -1) {
+			regions = append(regions, m[1])
+		}
+
+		paragraph = nil
+	}
 
 	for line := range strings.SplitSeq(md, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+		trimmed := strings.TrimSpace(line)
+
+		if info, ok := strings.CutPrefix(trimmed, "```"); ok {
+			if !inFence {
+				fenceJSON = info == "json"
+			}
+
 			inFence = !inFence
 
 			continue
 		}
 
 		if inFence {
-			regions = append(regions, line)
+			if !fenceJSON {
+				regions = append(regions, line)
+			}
 
 			continue
 		}
 
-		for _, m := range inlineSpan.FindAllStringSubmatch(line, -1) {
-			regions = append(regions, m[1])
+		if trimmed == "" {
+			flushParagraph()
+
+			continue
 		}
+
+		paragraph = append(paragraph, line)
 	}
+
+	flushParagraph()
 
 	return regions
 }
@@ -93,6 +139,21 @@ func truncateAtDelimiter(s string) string {
 	}
 
 	return s
+}
+
+// insideDoubleQuotes reports whether pos in s sits inside a double-quoted
+// string, counting unescaped '"' from s's start: an odd count means pos is
+// inside one.
+func insideDoubleQuotes(s string, pos int) bool {
+	inside := false
+
+	for i := 0; i < pos && i < len(s); i++ {
+		if s[i] == '"' && (i == 0 || s[i-1] != '\\') {
+			inside = !inside
+		}
+	}
+
+	return inside
 }
 
 // splitShellWords splits s on whitespace outside single or double quotes,
@@ -217,7 +278,7 @@ func rejectUnknownFlag(target *cobra.Command, args []string) error {
 }
 
 // resolveHelpInvocation additionally checks a "help path..." invocation's
-// path against the real command tree (D4c): resolveInvocation alone can't
+// path against the real command tree: resolveInvocation alone can't
 // catch a bad one, because cobra's help command has no subcommands of its
 // own, so root.Find silently treats anything typed after "help" as a
 // leftover positional on the help command itself instead of rejecting it —
@@ -433,6 +494,9 @@ func TestSkillInvocationResolution(t *testing.T) {
 		{name: "eyedbgd not matched", snippet: "`eyedbgd version`", wantNone: true},
 		{name: "env prefix matched", snippet: "```sh\nEYEDBG_CLIENT=agent:x eyedbg next\n```"},
 		{name: "args after -- ignored", snippet: "`eyedbg start dotnet --project P -- --weird`"},
+		{name: "span wrapped mid-invocation by a line break", snippet: "See `eyedbg lease\ntake --force` here."},
+		{name: "JSON span with eyedbg as a value, not an invocation", snippet: "`{ \"type\": \"eyedbg\", \"request\": \"attach\" }`", wantNone: true},
+		{name: "json fence holds data, not shell invocations", snippet: "```json\n{ \"type\": \"eyedbg\" }\n```", wantNone: true},
 	}
 
 	for _, tt := range tests {
@@ -462,7 +526,7 @@ func TestSkillInvocationResolution(t *testing.T) {
 	}
 }
 
-// TestHelpInvocationResolution covers resolveHelpInvocation directly (D4c):
+// TestHelpInvocationResolution covers resolveHelpInvocation directly:
 // a "help path" invocation whose path doesn't resolve to a real, specific
 // command is an error, even though plain resolveInvocation lets it through
 // (help.HasSubCommands() is false, so rejectUnknownSubcommand never fires).

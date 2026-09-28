@@ -55,8 +55,8 @@ human-priority; default free), exceptions (all, uncaught or none), adapter (dotn
 netcoredbg or sharpdbg), console (internalConsole, the default, or integratedTerminal; python
 only for now, needs an eyedbg with dap.terminal: the program runs in a VS Code terminal, started
 directly with no shell, for typing its input). Unknown keys (e.g. serverReadyAction,
-preLaunchTask) are kept and forwarded to VS Code, not to eyedbg. An agent can join a session you
-launched this way too.
+preLaunchTask) are kept in the launch sent to eyedbg, which ignores them; VS Code acts on the ones
+it understands itself. An agent can join a session you launched this way too.
 
 Watching what happens: the EyeDebugger Activity view (Run and Debug) shows every client's steps,
 breakpoints and control changes (eyedbg.activity.hide filters kinds); Clients shows who is in the
@@ -117,8 +117,8 @@ the agent's side and join it instead.
 
 See 'eyedbg help lang' for what each language needs and its own launch.json shape.`
 
-const vscodeExample = `  code --install-extension eyedebugger_0.2.0-beta.1_vscode.vsix
-  gh attestation verify eyedebugger_0.2.0-beta.1_vscode.vsix -R EyeDebugger/eyedebugger
+const vscodeExample = `  code --install-extension eyedebugger_<version>_vscode.vsix
+  gh attestation verify eyedebugger_<version>_vscode.vsix -R EyeDebugger/eyedebugger
 
   -- launch.json: join a running eyedbg session (the picker asks if there is more than one)
   {
@@ -302,6 +302,18 @@ const goGuideExample = `  eyedbg start go --program . --cwd . --bp main.go:12
     "lang": "go",
     "program": "${workspaceFolder}",
     "cwd": "${workspaceFolder}",
+    "stopOnEntry": true
+  }
+
+  -- launch.json: run a package's tests, stop at the first line
+  {
+    "type": "eyedbg",
+    "request": "launch",
+    "name": "Go tests (eyedbg)",
+    "lang": "go",
+    "program": "${workspaceFolder}/pkg",
+    "cwd": "${workspaceFolder}/pkg",
+    "opts": { "mode": "test" },
     "stopOnEntry": true
   }
 

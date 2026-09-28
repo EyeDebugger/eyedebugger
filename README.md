@@ -58,7 +58,8 @@ code --install-extension eyedebugger_0.2.0-beta.1_vscode.vsix   # from a GitHub 
 { "type": "eyedbg", "request": "launch", "name": "Debug app.py", "lang": "python", "program": "${workspaceFolder}/app.py" }
 ```
 
-Full guide: [extensions/vscode/README.md](extensions/vscode/README.md), `eyedbg help vscode`.
+Full guide: [extensions/vscode/README.md](extensions/vscode/README.md), `eyedbg help vscode` (the
+0.2.0-beta.1 release above doesn't have it yet; it ships with the next release).
 
 ## Roadmap
 

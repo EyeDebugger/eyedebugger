@@ -12,13 +12,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
 
 // bannedWords are the competing debuggers and IDEs the published site must
-// never name (AGENTS.md rule 1, D8 in the p2-discoverability plan): matched
-// word-bounded and case-insensitive.
+// never name (AGENTS.md rule 1): matched word-bounded and case-insensitive.
 var bannedWords = []string{
 	"vsdbg", "rider", "jetbrains", "intellij", "pycharm", "goland", "clion",
 	"webstorm", "rustrover", "xcode", "eclipse", "windbg", "gdb",
@@ -34,8 +34,15 @@ var bannedWordRE = func() []*regexp.Regexp {
 
 // visualStudioRE finds "Visual Studio", capturing a trailing "Code" if
 // present: a bare "Visual Studio" (no capture) reads as naming Microsoft's
-// IDE, which "Visual Studio Code" does not.
+// IDE, which "Visual Studio Code" does not. \s already matches a newline, so
+// this also catches a name a hard wrap splits across two lines.
 var visualStudioRE = regexp.MustCompile(`(?i)\bVisual\s+Studio\b(\s+Code\b)?`)
+
+// nbspRE matches a non-breaking space, in the forms a hand-typed or
+// templated line might use it, normalized to an ordinary space before
+// matching: "Visual&nbsp;Studio" should be caught the same as "Visual
+// Studio".
+var nbspRE = regexp.MustCompile(`&nbsp;|&#160;|\x{00A0}`)
 
 // textExtensions are the file types sitecheck reads as text; everything
 // else under site/ (images, video) is skipped.
@@ -50,23 +57,47 @@ var textExtensions = map[string]bool{
 	".xml":  true,
 }
 
-// bannedNameHits returns one message per line in text that names a
-// competing debugger or IDE eyedbg doesn't ship, or "Visual Studio" without
-// "Code".
+// bannedNameHits returns one message per hit in text that names a competing
+// debugger or IDE eyedbg doesn't ship, or "Visual Studio" without "Code".
+// Matching runs over the whole text, not line by line, so a name split
+// across a line wrap (e.g. by site/llms.txt's own markdown wrap) is still
+// caught, and every hit on a line is reported, not just the first; each
+// hit's line number is then computed from its match offset.
 func bannedNameHits(text string) []string {
-	var hits []string
-	for i, line := range strings.Split(text, "\n") {
-		lineNo := i + 1
-		for j, re := range bannedWordRE {
-			if re.MatchString(line) {
-				hits = append(hits, fmt.Sprintf("line %d: names %q", lineNo, bannedWords[j]))
-			}
-		}
-		if m := visualStudioRE.FindStringSubmatch(line); len(m) > 1 && m[1] == "" {
-			hits = append(hits, fmt.Sprintf("line %d: names %q without %q", lineNo, "Visual Studio", "Code"))
+	normalized := nbspRE.ReplaceAllString(text, " ")
+
+	type hit struct {
+		line int
+		msg  string
+	}
+
+	var hits []hit
+
+	for j, re := range bannedWordRE {
+		for _, loc := range re.FindAllStringIndex(normalized, -1) {
+			hits = append(hits, hit{lineAt(normalized, loc[0]), fmt.Sprintf("names %q", bannedWords[j])})
 		}
 	}
-	return hits
+
+	for _, m := range visualStudioRE.FindAllStringSubmatchIndex(normalized, -1) {
+		if m[2] == -1 { // group 1 ("Code") did not participate: a bare "Visual Studio"
+			hits = append(hits, hit{lineAt(normalized, m[0]), fmt.Sprintf("names %q without %q", "Visual Studio", "Code")})
+		}
+	}
+
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].line < hits[j].line })
+
+	out := make([]string, len(hits))
+	for i, h := range hits {
+		out[i] = fmt.Sprintf("line %d: %s", h.line, h.msg)
+	}
+
+	return out
+}
+
+// lineAt returns the 1-based line number containing byte offset in text.
+func lineAt(text string, offset int) int {
+	return strings.Count(text[:offset], "\n") + 1
 }
 
 func TestBannedNameHits(t *testing.T) {
@@ -88,6 +119,11 @@ func TestBannedNameHits(t *testing.T) {
 		{"gdbserver passes, not a whole word", "No gdbserver support here.", 0},
 		{"clean line passes", "eyedbg uses netcoredbg and SharpDbg.", 0},
 		{"two hits on one line", "Never vsdbg or gdb.", 2},
+		{"visual studio code then visual studio alone on one line", "Works in Visual Studio Code and Visual Studio 2022.", 1},
+		{"visual studio split across a line wrap", "Works in Visual\nStudio 2022.", 1},
+		{"visual studio code split across a line wrap passes", "Install the Visual Studio\nCode extension.", 0},
+		{"visual studio joined by an nbsp entity", "Also works alongside Visual&nbsp;Studio 2022.", 1},
+		{"same banned word twice on one line", "No gdb here, really, no gdb.", 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
