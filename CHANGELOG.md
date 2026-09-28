@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   build error) now shows that output — errors gain an optional `output` field, the CLI prints it
   after the hint, and the DAP facade appends it to the error shown in the editor — instead of only
   a generic "Failed to launch". It is never written to the daemon log.
+- `eyedbg dap`'s follower reconciles an editor's breakpoint mirrors once per batch of events it
+  relays, not once per breakpoint event in it (the first reconcile of a batch already covers every
+  later one): a `setBreakpoints`/`setFunctionBreakpoints` of many entries no longer costs the
+  connection an O(every breakpoint) reconcile per entry. The events an editor receives are
+  unchanged.
 
 ## [0.2.0-beta.1] - 2026-09-28
 
