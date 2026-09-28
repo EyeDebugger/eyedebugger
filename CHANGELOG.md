@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `THIRD-PARTY-NOTICES.txt` at the repo root, listing the Go modules statically linked into
+  `eyedbg`/`eyedbgd` (go-dap, cobra, mousetrap: Apache-2.0; pflag: BSD-3-Clause) and their license
+  texts; bundled in every release archive alongside LICENSE and NOTICE.
+
 ## [0.2.0-beta.1] - 2026-09-28
 
 ### Added

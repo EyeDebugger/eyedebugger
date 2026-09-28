@@ -115,4 +115,6 @@ See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party Go dependencies statically
+linked into `eyedbg`/`eyedbgd` are listed in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt);
+the .NET side helper's are in [helpers/dotnet/THIRD-PARTY-NOTICES.txt](helpers/dotnet/THIRD-PARTY-NOTICES.txt).
