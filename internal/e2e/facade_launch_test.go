@@ -513,9 +513,10 @@ func TestFacadeLaunchTerminalPython(t *testing.T) {
 	p.waitEvent("exited")
 	p.waitEvent("terminated")
 
-	events := p.all()
-	if want := `args ['a b', '$HOME;echo x', '"q"']`; !outputHas(events, "got hello") || !outputHas(events, want) {
-		t.Errorf("output holds no %q and %q: %s", "got hello", want, outputs(events))
+	// debugpy may split a print across output events: match the joined text.
+	out := outputs(p.all())
+	if want := `args ['a b', '$HOME;echo x', '"q"']`; !strings.Contains(out, "got hello") || !strings.Contains(out, want) {
+		t.Errorf("output holds no %q and %q: %s", "got hello", want, out)
 	}
 
 	launchLeave(t, p)
@@ -587,7 +588,7 @@ func startTerminal(t *testing.T, body facade.TerminalEventBody) (*exec.Cmd, io.W
 	return cmd, stdin
 }
 
-// outputs are the output events' texts, for a failure message.
+// outputs are the output events' texts, joined.
 func outputs(events []godap.EventMessage) string {
 	var b strings.Builder
 
