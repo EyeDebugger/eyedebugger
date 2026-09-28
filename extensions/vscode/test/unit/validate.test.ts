@@ -66,6 +66,23 @@ test('launch configurations: valid', () => {
   assert.deepEqual(min.value, { lang: 'dotnet', args: [], env: [], opts: [], stopOnEntry: false, noBuild: false });
 });
 
+test('launch configurations: console', () => {
+  for (const c of ['internalConsole', 'integratedTerminal'] as const) {
+    const r = validateLaunch({ lang: 'python', console: c });
+    assert.ok(r.ok);
+    assert.equal(r.value.console, c);
+    assert.equal(launched({ lang: 'python', console: c }).console, c);
+  }
+  for (const absent of [undefined, null, '']) {
+    const r = validateLaunch({ lang: 'python', console: absent });
+    assert.ok(r.ok);
+    assert.equal(r.value.console, undefined);
+    assert.ok(!('console' in launched({ lang: 'python', console: absent })));
+  }
+  const out = launched({ lang: 'python', Console: 'integratedTerminal', CONSOLE: 'x' });
+  assert.ok(!('Console' in out) && !('CONSOLE' in out) && !('console' in out), JSON.stringify(out));
+});
+
 test('launch configurations: refused', () => {
   const long = 'x'.repeat(33);
   const cases: [string, Record<string, unknown>, RegExp][] = [
@@ -96,6 +113,9 @@ test('launch configurations: refused', () => {
     ['upper adapter', { lang: 'dotnet', adapter: 'SharpDbg' }, /"adapter"/],
     ['long adapter', { lang: 'dotnet', adapter: `s${long}` }, /"adapter"/],
     ['number adapter', { lang: 'dotnet', adapter: 1 }, /"adapter"/],
+    ['external console', { lang: 'python', console: 'externalTerminal' }, /"console"/],
+    ['console case', { lang: 'python', console: 'IntegratedTerminal' }, /"console"/],
+    ['number console', { lang: 'python', console: 1 }, /"console"/],
   ];
   for (const [name, cfg, want] of cases) {
     const r = validateLaunch(cfg);

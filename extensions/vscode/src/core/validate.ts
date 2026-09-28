@@ -17,6 +17,10 @@ const adapterPattern = /^[a-z][a-z0-9-]{0,31}$/;
 export type ExceptionMode = 'all' | 'uncaught' | 'none';
 export const exceptionModes: readonly ExceptionMode[] = ['all', 'uncaught', 'none'];
 
+/** Where the program's input and output go: the Debug Console, or a terminal (docs/adr/0019 D15). */
+export type ConsoleMode = 'internalConsole' | 'integratedTerminal';
+export const consoleModes: readonly ConsoleMode[] = ['internalConsole', 'integratedTerminal'];
+
 /** A launch configuration's fields, validated. */
 export interface LaunchSpec {
   lang: string;
@@ -32,6 +36,7 @@ export interface LaunchSpec {
   exceptions?: ExceptionMode;
   /** The debug adapter, for a language with a choice (dotnet: netcoredbg or sharpdbg). */
   adapter?: string;
+  console?: ConsoleMode;
 }
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -192,6 +197,15 @@ export function validateLaunch(cfg: Record<string, unknown>): Result<LaunchSpec>
     spec.adapter = adapter;
   }
 
+  const consoleMode = cfg.console;
+  if (consoleMode !== undefined && consoleMode !== null && consoleMode !== '') {
+    const c = consoleModes.find((x) => x === consoleMode);
+    if (c === undefined) {
+      return fail(`"console" must be internalConsole or integratedTerminal, not ${describe(consoleMode)}`);
+    }
+    spec.console = c;
+  }
+
   if (spec.noBuild && spec.program === undefined) {
     return fail('"noBuild" needs "program"');
   }
@@ -213,6 +227,7 @@ export const launchKeys = [
   'leasePolicy',
   'exceptions',
   'adapter',
+  'console',
 ] as const;
 
 /**
@@ -248,5 +263,6 @@ export function launchConfiguration(cfg: Record<string, unknown>, spec: LaunchSp
   put('leasePolicy', spec.leasePolicy);
   put('exceptions', spec.exceptions);
   put('adapter', spec.adapter);
+  put('console', spec.console);
   return out;
 }

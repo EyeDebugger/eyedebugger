@@ -8,7 +8,15 @@
 
 import os from 'node:os';
 import * as vscode from 'vscode';
-import { adapterUnsupported, isLive, launchCwd, launchUnsupported, parseSessions, sessionsArgs } from '../core/cli';
+import {
+  adapterUnsupported,
+  isLive,
+  launchCwd,
+  launchUnsupported,
+  parseSessions,
+  sessionsArgs,
+  terminalUnsupported,
+} from '../core/cli';
 import { clientId } from '../core/identity';
 import { EyedbgError, type SessionInfo } from '../core/protocol';
 import { joinConfigName, sessionPickItem } from '../core/render';
@@ -138,7 +146,10 @@ export class ConfigurationProvider implements vscode.DebugConfigurationProvider 
       throw new EyedbgError('INVALID_REQUEST', `"cwd" ${JSON.stringify(spec.cwd)} is not a directory`);
     }
     const { version, features } = await this.eyedbg.check();
-    const unsupported = launchUnsupported(version, features) || adapterUnsupported(spec, version, features);
+    const unsupported =
+      launchUnsupported(version, features) ||
+      adapterUnsupported(spec, version, features) ||
+      terminalUnsupported(spec, version, features);
     if (unsupported !== '') {
       throw new EyedbgError('VERSION_MISMATCH', unsupported, 'update eyedbg');
     }

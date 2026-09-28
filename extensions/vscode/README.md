@@ -78,10 +78,27 @@ SharpDbg can't pause). A property name in another case (`Program`) is dropped. S
 session and removes it from `eyedbg sessions`; Restart starts the program again, as a new session.
 Launching needs an eyedbg that lists `dap.launch` in `eyedbg version --json`.
 
+### A program that reads input: `"console": "integratedTerminal"`
+
+A Python program that reads its input (`input()`, `sys.stdin`) needs a terminal: add
+`"console": "integratedTerminal"` (the default, `internalConsole`, shows its output in the Debug
+Console). The program then runs in a terminal named "Python Debug Console" — you type its input
+there — and its output also reaches the Debug Console. Python only for now (a .NET launch with it is
+refused), and it needs an eyedbg that lists `dap.terminal`.
+
+The program is the terminal's own process: VS Code starts it directly with its arguments, never
+through a shell and never by typing a command line into one, so an argument like `$HOME;echo x`
+arrives exactly as written. Before that, the extension checks the request again (eyedbg checked it
+first): it must come from this window's own launch that asked for a terminal, while that launch is
+starting, once; the program and working directory must be local absolute paths (on Windows an
+`.exe`), with no control characters, and it is refused, never rewritten, otherwise. Other DAP
+clients (nvim-dap) get no terminal from eyedbg.
+
 ### launch.json snippets
 
 In `launch.json`, **Add Configuration…** lists the EyeDebugger snippets: join a session, a Python
-file, a Python module (`python -m`), a .NET project (built first) and a built .NET program.
+file (in the Debug Console or in a terminal), a Python module (`python -m`), a .NET project (built
+first) and a built .NET program.
 
 ![The EyeDebugger snippets in Add Configuration](images/snippets.png)
 
