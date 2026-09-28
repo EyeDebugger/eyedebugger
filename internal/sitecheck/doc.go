@@ -7,6 +7,5 @@
 // .github/workflows/pages.yml doesn't publish), and fails, word-bounded and
 // case-insensitive, on the name of a competing debugger or IDE eyedbg
 // doesn't ship, or on "Visual Studio" not followed by "Code" (AGENTS.md rule
-// 1, docs/DESIGN.md's naming rule). Nothing here is imported outside its own
-// tests.
+// 1). Nothing here is imported outside its own tests.
 package sitecheck
