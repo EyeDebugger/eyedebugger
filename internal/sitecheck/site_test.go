@@ -138,6 +138,144 @@ func TestSiteNamesNoCompetingDebugger(t *testing.T) {
 	}
 }
 
+// toneWords are the AI-tell words the site's tone rule (p2-discoverability
+// plan, step 7) bans: matched word-bounded and case-insensitive. "delve" is
+// deliberately excluded: it's the name of the Go adapter eyedbg drives, not
+// the verb.
+var toneWords = []string{"seamless", "seamlessly", "powerful", "robust", "leverage", "unlock"}
+
+var toneWordRE = func() []*regexp.Regexp {
+	res := make([]*regexp.Regexp, len(toneWords))
+	for i, w := range toneWords {
+		res[i] = regexp.MustCompile(`(?i)\b` + w + `\b`)
+	}
+	return res
+}()
+
+// toneWordHits returns one message per line in text that uses a banned tone
+// word.
+func toneWordHits(text string) []string {
+	var hits []string
+	for i, line := range strings.Split(text, "\n") {
+		lineNo := i + 1
+		for j, re := range toneWordRE {
+			if re.MatchString(line) {
+				hits = append(hits, fmt.Sprintf("line %d: uses banned tone word %q", lineNo, toneWords[j]))
+			}
+		}
+	}
+	return hits
+}
+
+func TestToneWordHits(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		text string
+		want int
+	}{
+		{"seamless fails", "A seamless experience for agents.", 1},
+		{"seamlessly fails", "It works seamlessly with your editor.", 1},
+		{"powerful fails", "A powerful new debugger.", 1},
+		{"robust fails", "Built on a robust foundation.", 1},
+		{"leverage fails", "Leverage the daemon to share state.", 1},
+		{"unlock fails", "Unlock deeper diagnostics.", 1},
+		{"delve passes, it's the Go adapter's name", "Go uses Delve as its adapter.", 0},
+		{"clean line passes", "eyedbg gives your agent a real debugger.", 0},
+		{"two hits on one line", "A powerful, robust CLI.", 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := toneWordHits(tt.text)
+			if len(got) != tt.want {
+				t.Errorf("toneWordHits(%q) = %v, want %d hit(s)", tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
+// emDashHits returns one message per line in text that contains a U+2014 em
+// dash (p2-discoverability plan, step 7: the site's tone rule bans them in
+// favor of commas, periods and parentheses).
+func emDashHits(text string) []string {
+	var hits []string
+	for i, line := range strings.Split(text, "\n") {
+		if strings.ContainsRune(line, '—') {
+			hits = append(hits, fmt.Sprintf("line %d: contains an em dash (U+2014)", i+1))
+		}
+	}
+	return hits
+}
+
+func TestEmDashHits(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		text string
+		want int
+	}{
+		{"em dash fails", "eyedbg drives it — you join it.", 1},
+		{"hyphen passes", "A CLI-first debugger.", 0},
+		{"en dash passes", "Linux – macOS – Windows.", 0},
+		{"comma passes", "eyedbg drives it, you join it.", 0},
+		{"two em dashes on one line still one hit", "a — b — c", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := emDashHits(tt.text)
+			if len(got) != tt.want {
+				t.Errorf("emDashHits(%q) = %v, want %d hit(s)", tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSiteToneRules walks site/, except site/README.md (the one file Pages
+// doesn't publish), and fails on an em dash or a banned tone word in any
+// text file (p2-discoverability plan, step 7).
+func TestSiteToneRules(t *testing.T) {
+	t.Parallel()
+
+	root := filepath.Join("..", "..", "site")
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if rel == "README.md" {
+			return nil
+		}
+		if !textExtensions[strings.ToLower(filepath.Ext(path))] {
+			return nil
+		}
+		data, err := os.ReadFile(path) //nolint:gosec // path comes from filepath.WalkDir over a fixed, repo-local root.
+		if err != nil {
+			return err
+		}
+		text := string(data)
+		for _, hit := range emDashHits(text) {
+			t.Errorf("site/%s: %s", filepath.ToSlash(rel), hit)
+		}
+		for _, hit := range toneWordHits(text) {
+			t.Errorf("site/%s: %s", filepath.ToSlash(rel), hit)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+}
+
 // installPromptStartMarker and installPromptEndMarker bracket the copy of
 // site/install-prompt.txt kept verbatim in README.md and site/llms.txt (D6
 // in the p2-discoverability plan).
