@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/dap/daptest"
@@ -76,12 +77,14 @@ func TestFailedStartOutput(t *testing.T) {
 	}
 }
 
-// TestFailedStartOutputBytes: more than 4 KiB of output is cut to that many
-// bytes, keeping the end.
+// TestFailedStartOutputBytes: more than 4 KiB of output on a single line (so
+// the 20-line cap never triggers) is cut to that many bytes, keeping the
+// end, on a rune boundary: multi-byte runes so a naive byte cut could split
+// one in half (F1).
 func TestFailedStartOutputBytes(t *testing.T) {
 	t.Parallel()
 
-	line := strings.Repeat("x", 500) // one "line", no newline: a single chunk over the byte bound
+	line := strings.Repeat("é", 3000) // 6000 bytes, no newline, well over maxFailedStartBytes
 	m := newTestManagerWith(t, nil, fakeDriver{opts: daptest.Options{
 		FailLaunch:    true,
 		LaunchOutputs: []daptest.OutputEvent{{Category: "stderr", Text: line}},
@@ -94,12 +97,16 @@ func TestFailedStartOutputBytes(t *testing.T) {
 		t.Fatalf("start err = %#v, want *api.Error", err)
 	}
 
-	if len(e.Output) > maxFailedStartBytes {
-		t.Errorf("Output is %d bytes, want <= %d", len(e.Output), maxFailedStartBytes)
+	if len(e.Output) == 0 || len(e.Output) > maxFailedStartBytes {
+		t.Errorf("Output is %d bytes, want (0, %d]", len(e.Output), maxFailedStartBytes)
 	}
 
 	if !strings.HasSuffix(line, e.Output) {
 		t.Errorf("Output = %q, want a suffix of the original line", e.Output)
+	}
+
+	if !utf8.ValidString(e.Output) {
+		t.Errorf("Output = %q is not valid UTF-8 (cut mid-rune)", e.Output)
 	}
 }
 

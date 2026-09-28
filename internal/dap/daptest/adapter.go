@@ -181,6 +181,10 @@ type adapter struct {
 	program string
 	// threadsSeen counts threads requests received ($threadsRequests).
 	threadsSeen int
+	// lastPauseThread is the threadId the last pause request named
+	// ($lastPauseThread, F3): distinguishes D2's "last stop's thread, if
+	// still listed" from "always the first listed".
+	lastPauseThread int
 }
 
 // inbound is one message from the client, or why reading ended.
@@ -433,6 +437,7 @@ func (a *adapter) handle(req godap.RequestMessage, raw []byte) {
 			return
 		}
 
+		a.lastPauseThread = r.Arguments.ThreadId
 		a.respond(req, nil)
 		a.prog.pause(a.opts.PauseAsSignal)
 	case *godap.DisconnectRequest:
@@ -679,6 +684,12 @@ func (a *adapter) evaluate(req *godap.EvaluateRequest) {
 
 	if req.Arguments.Expression == "$threadsRequests" {
 		a.respond(req, godap.EvaluateResponseBody{Result: strconv.Itoa(a.threadsSeen), Type: typeInt})
+
+		return
+	}
+
+	if req.Arguments.Expression == "$lastPauseThread" {
+		a.respond(req, godap.EvaluateResponseBody{Result: strconv.Itoa(a.lastPauseThread), Type: typeInt})
 
 		return
 	}
