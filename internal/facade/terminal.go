@@ -12,12 +12,12 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf8"
 
 	godap "github.com/google/go-dap"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
+	"github.com/eyedebugger/eyedebugger/internal/session"
 )
 
 // CommandRunInTerminal is both an event and a request (docs/adr/0019): the
@@ -33,9 +33,6 @@ const (
 	consoleTerminal = "integratedTerminal"
 )
 
-// terminalWait bounds the wait for the editor's answer.
-const terminalWait = 30 * time.Second
-
 // Bounds of a terminal request (the validation table, docs/adr/0019).
 const (
 	maxTerminalArgs     = 1000
@@ -48,9 +45,6 @@ const (
 
 // goosWindows is Windows' GOOS.
 const goosWindows = "windows"
-
-// terminalHint is the hint of a terminal eyedbg won't or couldn't start.
-const terminalHint = `use "console": "internalConsole"`
 
 // envName is a terminal environment variable's name.
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
@@ -156,9 +150,6 @@ func (t *terminalState) deliver(id int, a terminalAnswer) bool {
 	return true
 }
 
-// errTerminalSilent is the cause of a terminal wait that timed out.
-var errTerminalSilent = errors.New("no answer within 30s")
-
 // runInTerminal is a terminal launch's Terminal hook (session.LaunchHooks),
 // on its own goroutine: it checks the adapter's request against the
 // validation table, asks the launching editor with an eyedbg/runInTerminal
@@ -169,17 +160,14 @@ func (c *connection) runInTerminal(ctx context.Context, args godap.RunInTerminal
 	if rule != "" {
 		c.logger.WarnContext(ctx, "facade terminal refused", slog.String("rule", rule))
 
-		return 0, api.NewError(api.CodeAdapterFailed, "the debug adapter asked to run a command eyedbg won't run in a terminal: "+rule, terminalHint)
+		return 0, api.NewError(api.CodeAdapterFailed, "the debug adapter asked to run a command eyedbg won't run in a terminal: "+rule, session.TerminalHint)
 	}
 
 	p, ok := c.launch.term.open()
 	if !ok {
-		return 0, api.NewError(api.CodeAdapterFailed, "the debug adapter asked for a second terminal", terminalHint)
+		return 0, api.NewError(api.CodeAdapterFailed, "the debug adapter asked for a second terminal", session.TerminalHint)
 	}
 	defer c.launch.term.close(p)
-
-	ctx, cancel := context.WithTimeoutCause(ctx, terminalWait, errTerminalSilent)
-	defer cancel()
 
 	body.ID = p.id
 	if !c.sendTerminal(&TerminalEvent{Event: event(CommandRunInTerminal), Body: body}) {
@@ -189,13 +177,14 @@ func (c *connection) runInTerminal(ctx context.Context, args godap.RunInTerminal
 	select {
 	case a := <-p.answer:
 		if a.err != "" {
-			return 0, api.NewError(api.CodeAdapterFailed, "the editor didn't start the program's terminal: "+a.err, terminalHint)
+			return 0, api.NewError(api.CodeAdapterFailed, "the editor didn't start the program's terminal: "+a.err, session.TerminalHint)
 		}
 
 		return a.pid, nil
 	case <-ctx.Done():
-		if cause := context.Cause(ctx); errors.Is(cause, errTerminalSilent) {
-			return 0, api.NewError(api.CodeAdapterFailed, "the editor didn't start the program's terminal: "+cause.Error(), terminalHint)
+		// The session bounds the wait: its cause is then ErrTerminalTimeout.
+		if cause := context.Cause(ctx); errors.Is(cause, session.ErrTerminalTimeout) {
+			return 0, api.NewError(api.CodeAdapterFailed, "the editor didn't start the program's terminal: "+cause.Error(), session.TerminalHint)
 		}
 
 		return 0, ctx.Err() //nolint:wrapcheck // The start's own end.

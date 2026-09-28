@@ -83,7 +83,7 @@ func (d *Driver) Prepare(ctx context.Context, spec session.LaunchSpec) (session.
 func (d *Driver) PrepareWith(ctx context.Context, spec session.LaunchSpec, o session.PrepareOptions) (session.Launch, error) {
 	if o.Terminal && d.m.Launch.Terminal == nil {
 		return session.Launch{}, api.NewError(api.CodeUnsupported,
-			"the "+d.Name()+" debug adapter can't run the program in a terminal", `use "console": "internalConsole"`)
+			"the "+d.Name()+" debug adapter can't run the program in a terminal", session.TerminalHint)
 	}
 
 	opts, err := d.options(spec.Options)
