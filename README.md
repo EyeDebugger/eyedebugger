@@ -96,18 +96,22 @@ Project: https://github.com/EyeDebugger/eyedebugger
 2. Before installing anything, ask me which of these I want. Use your question tool if you have
    one, otherwise show a numbered list; I can pick several.
    - eyedbg itself: the eyedbg CLI and its eyedbgd daemon (always installed)
-   - .NET: netcoredbg (the default), and optionally SharpDbg (it bundles a Microsoft library whose
-     license isn't open source; `eyedbg help adapters install` explains)
+   - .NET: netcoredbg (the default), and optionally SharpDbg (it bundles a Microsoft library under
+     a license that isn't open source and may send data to Microsoft; `eyedbg help adapters
+     install` explains)
    - Python: debugpy
    - Go: Delve
    - C, C++ and Rust: LLVM's lldb-dap (from my OS's LLVM package, not from eyedbg)
    - The VS Code extension
    - The eyedbg skill for you (the agent)
 
-3. Open https://github.com/EyeDebugger/eyedebugger/releases and take the newest release (the newest
-   stable one; if there is none yet, the newest pre-release). Download checksums.txt and the archive
-   for my system: eyedebugger_<version>_<os>_<arch>.tar.gz on Linux and macOS, .zip on Windows,
-   where <os> is linux, darwin or windows and <arch> is amd64 or arm64.
+3. Open https://github.com/EyeDebugger/eyedebugger/releases. It lists releases newest first, each
+   with its assets. Pick the release to use: the newest stable release whose assets include a file
+   named exactly eyedebugger_<version>_vscode.vsix; if no stable release has one yet, the newest
+   pre-release that does. Use that release's own <version> for everything below, and don't mix
+   assets from two different releases. Download checksums.txt and the archive for my system:
+   eyedebugger_<version>_<os>_<arch>.tar.gz on Linux and macOS, .zip on Windows, where <os> is
+   linux, darwin or windows and <arch> is amd64 or arm64.
 
 4. Check the archive before using it. checksums.txt has one "<sha256>  <file name>" line per file.
    Find the line whose file name is exactly the archive's name, compute the archive's SHA-256, and
@@ -132,8 +136,9 @@ Project: https://github.com/EyeDebugger/eyedebugger
    Then run eyedbg adapters doctor with the languages I picked (for example:
    eyedbg adapters doctor dotnet python) and fix what it reports.
 
-8. VS Code extension: download eyedebugger_<version>_vscode.vsix from the same release, check it
-   against checksums.txt the same way as in step 4, then run:
+8. VS Code extension: download eyedebugger_<version>_vscode.vsix from the same release, and check
+   it exactly as in step 4: checksum against checksums.txt, then gh attestation verify if the gh
+   CLI is installed. Then run:
    code --install-extension <the .vsix file>
 
 9. The skill: eyedbg skill install puts it where Claude Code looks. For another agent, use

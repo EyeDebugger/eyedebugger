@@ -174,10 +174,9 @@ func TestSiteNamesNoCompetingDebugger(t *testing.T) {
 	}
 }
 
-// toneWords are the AI-tell words the site's tone rule (p2-discoverability
-// plan, step 7) bans: matched word-bounded and case-insensitive. "delve" is
-// deliberately excluded: it's the name of the Go adapter eyedbg drives, not
-// the verb.
+// toneWords are the AI-tell words banned from the site's copy: matched
+// word-bounded and case-insensitive. "delve" is deliberately excluded: it's
+// the name of the Go adapter eyedbg drives, not the verb.
 var toneWords = []string{"seamless", "seamlessly", "powerful", "robust", "leverage", "unlock"}
 
 var toneWordRE = func() []*regexp.Regexp {
@@ -232,13 +231,18 @@ func TestToneWordHits(t *testing.T) {
 	}
 }
 
+// emDashEntityRE matches an em dash written as an HTML entity, in decimal
+// (&#8212;), hex (&#x2014; or &#X2014;) or named (&mdash;) form: any of these
+// renders as a literal U+2014 in a browser, same as the rune itself.
+var emDashEntityRE = regexp.MustCompile(`(?i)&mdash;|&#8212;|&#x2014;`)
+
 // emDashHits returns one message per line in text that contains a U+2014 em
-// dash (p2-discoverability plan, step 7: the site's tone rule bans them in
-// favor of commas, periods and parentheses).
+// dash, written as the rune itself or as an HTML entity (the site's tone
+// rule bans them in favor of commas, periods and parentheses).
 func emDashHits(text string) []string {
 	var hits []string
 	for i, line := range strings.Split(text, "\n") {
-		if strings.ContainsRune(line, '—') {
+		if strings.ContainsRune(line, '—') || emDashEntityRE.MatchString(line) {
 			hits = append(hits, fmt.Sprintf("line %d: contains an em dash (U+2014)", i+1))
 		}
 	}
@@ -258,6 +262,10 @@ func TestEmDashHits(t *testing.T) {
 		{"en dash passes", "Linux – macOS – Windows.", 0},
 		{"comma passes", "eyedbg drives it, you join it.", 0},
 		{"two em dashes on one line still one hit", "a — b — c", 1},
+		{"named entity fails", "eyedbg drives it &mdash; you join it.", 1},
+		{"decimal entity fails", "eyedbg drives it &#8212; you join it.", 1},
+		{"hex entity fails", "eyedbg drives it &#x2014; you join it.", 1},
+		{"hex entity uppercase X fails", "eyedbg drives it &#X2014; you join it.", 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -272,7 +280,7 @@ func TestEmDashHits(t *testing.T) {
 
 // TestSiteToneRules walks site/, except site/README.md (the one file Pages
 // doesn't publish), and fails on an em dash or a banned tone word in any
-// text file (p2-discoverability plan, step 7).
+// text file.
 func TestSiteToneRules(t *testing.T) {
 	t.Parallel()
 
@@ -313,8 +321,7 @@ func TestSiteToneRules(t *testing.T) {
 }
 
 // installPromptStartMarker and installPromptEndMarker bracket the copy of
-// site/install-prompt.txt kept verbatim in README.md and site/llms.txt (D6
-// in the p2-discoverability plan).
+// site/install-prompt.txt kept verbatim in README.md and site/llms.txt.
 const (
 	installPromptStartMarker = "<!-- install-prompt:start -->"
 	installPromptEndMarker   = "<!-- install-prompt:end -->"
@@ -353,13 +360,11 @@ func fencedPromptBetweenMarkers(text string) (string, error) {
 }
 
 // normalizePromptBytes normalises CRLF to LF and trims exactly one leading
-// and one trailing newline, matching the contract in the p2-discoverability
-// plan step 5 ("after trimming one leading/trailing newline; CRLF
-// normalised"): a fenced block's content starts right after the opening
-// fence's newline and ends right before the closing fence, so it carries no
-// leading newline and exactly one trailing one; install-prompt.txt itself is
-// plain text ending in one trailing newline and no leading one. Both sides
-// go through the same normalisation so either form matches.
+// and one trailing newline: a fenced block's content starts right after the
+// opening fence's newline and ends right before the closing fence, so it
+// carries no leading newline and exactly one trailing one; install-prompt.txt
+// itself is plain text ending in one trailing newline and no leading one.
+// Both sides go through the same normalisation so either form matches.
 func normalizePromptBytes(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.TrimPrefix(s, "\n")
@@ -464,10 +469,53 @@ func TestCodeElementContent(t *testing.T) {
 	}
 }
 
+// browserCodeText returns the text a browser would show for the DOM text
+// node inside a <code> element whose raw (still-escaped) HTML content is
+// block, i.e. what el.textContent would be, which is what the site's copy
+// button (index.html's initCode, code.textContent) actually copies. It
+// errors on a literal '<' or '>' in block: valid HTML always escapes those
+// as &lt;/&gt;, so a raw one means a browser would parse it as markup and
+// drop it from the visible/copied text (index.html's install-prompt
+// placeholders, e.g. <os> or <version>, must be written as &lt;os&gt;).
+func browserCodeText(block string) (string, error) {
+	if strings.ContainsAny(block, "<>") {
+		return "", errors.New("contains an unescaped '<' or '>': a browser parses it as a tag, not as text, and drops it from what's shown and copied")
+	}
+	return html.UnescapeString(block), nil
+}
+
+func TestBrowserCodeText(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		block   string
+		want    string
+		wantErr bool
+	}{
+		{"plain text passes through", "hello world", "hello world", false},
+		{"escaped placeholder decodes", "eyedebugger_&lt;version&gt;_&lt;os&gt;.tar.gz", "eyedebugger_<version>_<os>.tar.gz", false},
+		{"escaped ampersand decodes", "a &amp; b", "a & b", false},
+		{"raw unescaped placeholder fails", "eyedebugger_<version>_<os>.tar.gz", "", true},
+		{"bare angle bracket fails", "3 < 5", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := browserCodeText(tt.block)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("browserCodeText(%q) error = %v, wantErr %v", tt.block, err, tt.wantErr)
+			}
+			if err == nil && got != tt.want {
+				t.Errorf("browserCodeText(%q) = %q, want %q", tt.block, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestInstallPromptSyncedEverywhere checks that the install prompt copy in
 // README.md, site/llms.txt and site/index.html is byte-for-byte identical to
-// site/install-prompt.txt, the canonical file (D6, step 5's contract;
-// index.html joined step 6's).
+// site/install-prompt.txt, the canonical file.
 func TestInstallPromptSyncedEverywhere(t *testing.T) {
 	t.Parallel()
 
@@ -492,7 +540,7 @@ func TestInstallPromptSyncedEverywhere(t *testing.T) {
 			if err != nil {
 				return "", err
 			}
-			return html.UnescapeString(block), nil
+			return browserCodeText(block)
 		}},
 	}
 	for _, c := range copies {
@@ -544,7 +592,11 @@ func readVSCodeExtensionManifest(t *testing.T) vscodeExtensionManifest {
 
 // TestLlmsTxtHasExtensionFacts checks that site/llms.txt names the real
 // extension id (publisher.name), publisher and debug type read from
-// extensions/vscode/package.json, so the two can't silently drift apart.
+// extensions/vscode/package.json, so the two can't silently drift apart. The
+// publisher check requires the literal phrase "publisher `<publisher>`":
+// checking for m.Publisher alone proves nothing here, since it's also the
+// GitHub org name and already appears in every github.com/EyeDebugger/...
+// URL on the page.
 func TestLlmsTxtHasExtensionFacts(t *testing.T) {
 	t.Parallel()
 
@@ -558,7 +610,7 @@ func TestLlmsTxtHasExtensionFacts(t *testing.T) {
 	}
 	text := string(data)
 
-	for _, want := range []string{id, m.Publisher, "`" + debugType + "`"} {
+	for _, want := range []string{id, "publisher `" + m.Publisher + "`", "`" + debugType + "`"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("site/llms.txt does not mention %q (from extensions/vscode/package.json)", want)
 		}
