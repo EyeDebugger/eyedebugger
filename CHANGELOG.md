@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `eyedbg dap --launch` takes the launch argument `console`: `integratedTerminal` runs a Python
+  program in the launching editor's terminal (so it can read its input) — the adapter's
+  `runInTerminal`, during that launch only, is checked against a fixed table (absolute program,
+  no shell, no control characters, …) and sent to that editor alone as `eyedbg/runInTerminal`,
+  which it runs without a shell and answers (ADR 0019). `version --json` lists `dap.terminal`.
+  Adapter manifests gain `launch.terminal` (debugpy's asks for the integrated terminal); the .NET
+  adapters refuse a terminal.
 - `THIRD-PARTY-NOTICES.txt` at the repo root, listing the Go modules statically linked into
   `eyedbg`/`eyedbgd` (go-dap, cobra, mousetrap: Apache-2.0; pflag: BSD-3-Clause) and their license
   texts; bundled in every release archive alongside LICENSE and NOTICE.

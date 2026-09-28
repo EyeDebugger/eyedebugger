@@ -1,6 +1,6 @@
 # EyeDebugger (`eyedbg`) — AI-native debugger (design)
 
-Status: v0.3 · 2026-09-26 · phase 1 (MVP) complete; phase 2: DAP facade (P2-M1), collaboration (P2-M2), VS Code extension (P2-M3, P2-M5), .NET side helper (P2-M6), .NET dumps, heap and threads (P2-M7), .NET traces (P2-M8), the extension's .NET views (P2-M9), per-owner conditions at shared lines (P2-S1), launching through the DAP facade (P2-S3a)
+Status: v0.3 · 2026-09-26 · phase 1 (MVP) complete; phase 2: DAP facade (P2-M1), collaboration (P2-M2), VS Code extension (P2-M3, P2-M5), .NET side helper (P2-M6), .NET dumps, heap and threads (P2-M7), .NET traces (P2-M8), the extension's .NET views (P2-M9), per-owner conditions at shared lines (P2-S1), launching through the DAP facade (P2-S3a), terminals for launched programs (P2-S3b, facade side)
 
 ## 1. What and why
 
@@ -69,7 +69,7 @@ eyedbg dotnet … ─stdio, one process per command (JSON-RPC 2.0)─► side he
 - DAP `seq` is owned by the daemon toward the adapter; an editor's request ids are mapped per
   connection (the facade answers each with its own `seq`, and never relays the editor's bytes: it
   re-encodes the request the policy decided on).
-- Reverse requests from adapters (`runInTerminal`, `startDebugging`) are refused ("not supported"). Phase 2 plans to route `runInTerminal` only to the editor connection whose DAP `launch` started the session, while that launch runs (ADR 0019, S3b; not built yet).
+- Reverse requests from adapters (`runInTerminal`, `startDebugging`) are refused ("not supported"), with one exception (ADR 0019 D8): a start made by an editor's DAP `launch` with `console: integratedTerminal` takes the adapter's first `runInTerminal` while that start runs, and hands it to the launching connection alone (§9). The lease is not consulted — the command comes from that editor's own launch and goes back to it — and only such a start tells the adapter `supportsRunInTerminalRequest`. The DAP read goroutine only hands the request over; it is answered from another goroutine, once.
 
 ## 4. CLI surface (MVP)
 
@@ -378,9 +378,21 @@ Restart restarts the program. `version --json` lists `dap.launch`. The VS Code e
 `eyedbg dap --launch --as human:NAME` as its debug adapter (in the launch's cwd, else the workspace
 folder, else an absolute program's directory) and sends the validated configuration as the launch; it needs `dap.launch` (no fallback to
 `eyedbg start`), learns the id from `eyedbg/session`, and no longer stops sessions itself: Stop is
-the facade's terminate, and Restart a new launch. Not built yet (S3b): routing an
-adapter's `runInTerminal` to the launching editor's terminal — reverse requests are still refused
-(§3).
+the facade's terminate, and Restart a new launch.
+
+Built (P2-S3b, ADR 0019, facade side): **terminals** — the launch argument `console` is
+`internalConsole` (default) or `integratedTerminal` (Python only: a manifest's `launch.terminal`,
+debugpy's, is merged over its launch arguments; the .NET driver and a manifest without it refuse:
+`UNSUPPORTED_BY_ADAPTER`). With `integratedTerminal`, the adapter's `runInTerminal` during that
+launch (§3) is checked against the validation table (§11) and sent to the launching connection as
+the custom event `eyedbg/runInTerminal {id, title, cwd, args, env}` built from the checked values;
+the editor starts `args` itself, without a shell, and answers with the request
+`eyedbg/runInTerminal {id, processId}` or `{id, error}` within 30 s, which the adapter gets as its
+answer. A refused request, the editor's error or silence fails the launch at once
+(`ADAPTER_ERROR`). The standard `runInTerminal` is never sent to an editor (VS Code's types a
+command line into a shell). `version --json` lists `dap.terminal`. The VS Code extension's runner
+(`createTerminal` with the program as the terminal's process) is next; other DAP clients get no
+terminal.
 
 ## 10. Agent integration
 
@@ -391,6 +403,7 @@ adapter's `runInTerminal` to the launching editor's terminal — reverse request
 
 - `eval` may run code (method calls, property getters). Default: read-only intent (DAP `context: "watch"`) plus the driver's syntactic check (`SIDE_EFFECTS`; for manifest languages, the manifest's `evalGuard`), since netcoredbg enforces nothing and debugpy only refuses statements in `watch`; `--allow-side-effects` (context `repl`) is an execution request: it needs the lease and is logged. `vars --expand` doesn't evaluate a path the check flags. Breakpoint conditions and logpoint expressions are not checked: the user wrote them for the program to run. The conditions eyedbg evaluates itself — a shared line's `--if` (§4) and every `--log` message's `{EXPR}` — run in the program as the adapter's would, without the lease; the daemon's log holds neither their text nor their values, and recordings keep a stop's reason and thread only (no attribution).
 - Socket access restricted to the user; token file; no TCP listener by default. Editors reach sessions through the same socket and token (`eyedbg dap`); their DAP frames are bounded (one `Content-Length` header, ≤ 1 MiB) and a malformed one closes the connection. A launch connection (ADR 0019) logs its launch's language only, never its arguments; the build's output goes to that connection alone, bounded, never to the event log or the daemon's log.
+- Terminals (ADR 0019 D7–D11): a command reaches an editor's terminal only from that editor's own launch (§3), refused whole — never cut or rewritten — unless it passes one table: the integrated kind, no shell interpretation, 1–1000 arguments, no control characters (C0, DEL, C1, U+2028/2029) anywhere, ≤ 256 KiB, the program and working directory local absolute paths (no UNC or `\\?\`; a drive root on Windows), on Windows an `.exe` and no quote-enclosed spaced argument (node-pty would pass it unquoted), plain environment names with string or null values, a title of ≤ 200 characters. The editor gets only the checked values, re-encoded, and runs them without a shell; the extension checks them again. Nothing of the command is logged.
 - Redaction (§5), not implemented yet. Session recordings (`sessions/<id>.jsonl` in the private runtime dir, 0600, never overwritten, capped at 4 MiB, pruned 7 days after the session ended) hold control events only: started, client, lease, exec, continued, stopped (reason and thread only), breakpoints (conditions included), threads, exited, ended — no program output, stop text, launch arguments, environment or variable values, until redaction exists. On by default; `start --no-record` or `EYEDBG_NO_RECORD=1` turns it off.
 - `attach` only to processes owned by the same user (checked first: Linux `/proc`, other Unix `ps`, Windows the process token's SID), shown as `pid N (name)`, never by command line. For .NET the ptrace-scope/`task_for_pid` hints don't apply: CoreCLR's debugger falls back to its pipe transport when it can't read memory directly (dotnet/runtime `shimremotedatatarget.cpp`), so the real failure modes — not a started .NET runtime, `DOTNET_EnableDiagnostics=0`, another debugger attached, a different `TMPDIR`, another user — are what `ATTACH_FAILED`'s hint lists. A native (non-.NET) manifest-driven adapter's `ATTACH_FAILED` keeps the generic ptrace-scope (Linux)/`task_for_pid` (macOS) hint instead, since such an adapter typically does attach through the OS's own mechanism. `stop` detaches from an attached program, never kills it.
 - `test` passes the filter, framework and environment to `dotnet test` as argv, never through a shell, and runs it in its own process group, killed as a whole by `stop`.
@@ -468,8 +481,11 @@ Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; mor
 - **P2-S3a launch through the facade** (done): `session.Manager.Launch` with build-output and
   configure hooks, the .NET driver's streamed build, launch connections (`eyedbg dap --launch`,
   `facade.open {launch}`, `dap.launch`), real-binary e2e (ADR 0019), and the VS Code extension's F5
-  through it (a Restart restarts the program). S3b (an adapter's `runInTerminal` in the launching
-  editor's terminal) follows.
+  through it (a Restart restarts the program).
+- **P2-S3b terminals** (in progress): asynchronous reverse replies in the DAP client, the session's
+  terminal route (D8), `launch.terminal` (debugpy), the facade's `console`, validation table and
+  `eyedbg/runInTerminal` exchange, `dap.terminal`, real-binary e2e (done); the VS Code extension's
+  shell-free runner is next.
 
 **More languages** (ADR 0013, run independently of phase 2's own sequencing): C, C++, Rust
 (lldb-dap, manifest-only, no schema change) and Go (Delve, manifest-only through a new

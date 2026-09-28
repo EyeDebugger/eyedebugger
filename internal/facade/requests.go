@@ -50,6 +50,8 @@ func (c *connection) dispatch(ctx context.Context, req godap.RequestMessage, in 
 		}
 
 		c.configurationDone(ctx, r)
+	case *TerminalRequest:
+		c.terminalAnswered(ctx, r)
 	case *godap.DisconnectRequest:
 		c.disconnect(ctx, r)
 

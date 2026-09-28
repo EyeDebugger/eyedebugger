@@ -718,11 +718,20 @@ func TestLaunchParams(t *testing.T) {
 	}
 
 	tests := []struct {
-		name string
-		args string
-		want api.StartParams
+		name     string
+		args     string
+		want     api.StartParams
+		terminal bool
 	}{
 		{name: "defaults", args: `{"lang":"python"}`, want: api.StartParams{Lang: "python", LaunchSpec: spec(api.LaunchSpec{Project: dir}), NoRecord: true}},
+		{
+			name: "internal console", args: `{"lang":"python","console":"internalConsole"}`,
+			want: api.StartParams{Lang: "python", LaunchSpec: spec(api.LaunchSpec{Project: dir}), NoRecord: true},
+		},
+		{
+			name: "terminal", args: `{"lang":"python","console":"integratedTerminal"}`, terminal: true,
+			want: api.StartParams{Lang: "python", LaunchSpec: spec(api.LaunchSpec{Project: dir}), NoRecord: true},
+		},
 		{
 			name: "everything",
 			args: `{"lang":"python","program":` + jsonString(abs) + `,"cwd":"sub","args":["a b",""],"env":{"K":"v"},"opts":{"module":"pytest"},` +
@@ -749,8 +758,8 @@ func TestLaunchParams(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if p, err := launchParams(json.RawMessage(tt.args), d); err != nil || !reflect.DeepEqual(p, tt.want) {
-				t.Errorf("launchParams = %+v, %v\nwant %+v", p, err, tt.want)
+			if p, terminal, err := launchParams(json.RawMessage(tt.args), d); err != nil || !reflect.DeepEqual(p, tt.want) || terminal != tt.terminal {
+				t.Errorf("launchParams = %+v, %v, %v\nwant %+v, %v", p, terminal, err, tt.want, tt.terminal)
 			}
 		})
 	}
@@ -761,34 +770,38 @@ func TestLaunchParamsRefused(t *testing.T) {
 	t.Parallel()
 
 	for name, args := range map[string]string{
-		"null arguments":     `null`,
-		"not an object":      `[1]`,
-		"no lang":            `{"program":"x"}`,
-		"bad lang":           `{"lang":"Py"}`,
-		"long lang":          `{"lang":"` + strings.Repeat("a", 33) + `"}`,
-		"bad adapter":        `{"lang":"python","adapter":"a_b"}`,
-		"case variant":       `{"lang":"python","Program":"x"}`,
-		"case variant lang":  `{"LANG":"python"}`,
-		"number program":     `{"lang":"python","program":1}`,
-		"null program":       `{"lang":"python","program":null}`,
-		"string args":        `{"lang":"python","args":"a b"}`,
-		"number in args":     `{"lang":"python","args":["a",1]}`,
-		"number env":         `{"lang":"python","env":{"K":1}}`,
-		"string stopOnEntry": `{"lang":"python","stopOnEntry":"true"}`,
-		"NUL program":        `{"lang":"python","program":"a\u0000b"}`,
-		"NUL arg":            `{"lang":"python","args":["\u0000"]}`,
-		"NUL env key":        `{"lang":"python","env":{"K\u0000":"v"}}`,
-		"NUL opt value":      `{"lang":"python","opts":{"k":"\u0000"}}`,
-		"empty env key":      `{"lang":"python","env":{"":"v"}}`,
-		"= in env key":       `{"lang":"python","env":{"PATH=/x:":"y"}}`,
-		"= env key":          `{"lang":"python","env":{"=":"y"}}`,
-		"empty opt key":      `{"lang":"python","opts":{"":"v"}}`,
-		"= in opt key":       `{"lang":"python","opts":{"a=b":"v"}}`,
+		"null arguments":       `null`,
+		"not an object":        `[1]`,
+		"no lang":              `{"program":"x"}`,
+		"bad lang":             `{"lang":"Py"}`,
+		"long lang":            `{"lang":"` + strings.Repeat("a", 33) + `"}`,
+		"bad adapter":          `{"lang":"python","adapter":"a_b"}`,
+		"case variant":         `{"lang":"python","Program":"x"}`,
+		"case variant lang":    `{"LANG":"python"}`,
+		"number program":       `{"lang":"python","program":1}`,
+		"null program":         `{"lang":"python","program":null}`,
+		"string args":          `{"lang":"python","args":"a b"}`,
+		"number in args":       `{"lang":"python","args":["a",1]}`,
+		"number env":           `{"lang":"python","env":{"K":1}}`,
+		"string stopOnEntry":   `{"lang":"python","stopOnEntry":"true"}`,
+		"NUL program":          `{"lang":"python","program":"a\u0000b"}`,
+		"NUL arg":              `{"lang":"python","args":["\u0000"]}`,
+		"NUL env key":          `{"lang":"python","env":{"K\u0000":"v"}}`,
+		"NUL opt value":        `{"lang":"python","opts":{"k":"\u0000"}}`,
+		"empty env key":        `{"lang":"python","env":{"":"v"}}`,
+		"= in env key":         `{"lang":"python","env":{"PATH=/x:":"y"}}`,
+		"= env key":            `{"lang":"python","env":{"=":"y"}}`,
+		"empty opt key":        `{"lang":"python","opts":{"":"v"}}`,
+		"= in opt key":         `{"lang":"python","opts":{"a=b":"v"}}`,
+		"external terminal":    `{"lang":"python","console":"externalTerminal"}`,
+		"unknown console":      `{"lang":"python","console":"terminal"}`,
+		"number console":       `{"lang":"python","console":1}`,
+		"case variant console": `{"lang":"python","Console":"integratedTerminal"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			if p, err := launchParams(json.RawMessage(args), api.FacadeLaunch{ClientDir: t.TempDir()}); api.CodeOf(err) != api.CodeInvalidRequest {
+			if p, _, err := launchParams(json.RawMessage(args), api.FacadeLaunch{ClientDir: t.TempDir()}); api.CodeOf(err) != api.CodeInvalidRequest {
 				t.Errorf("launchParams = %+v, %v; want INVALID_REQUEST", p, err)
 			}
 		})

@@ -46,6 +46,15 @@ place before the program runs. Stop (terminate) ends the session and forgets it,
 does; a Restart is a new launch, so the program really restarts. When this connection ends, the
 session it launched is forgotten if its program has exited, and keeps running otherwise.
 
+With --launch, console integratedTerminal (Python only; the default is internalConsole) runs the
+program in the client's own terminal, for a program that reads its input: when the debug adapter
+asks to run it there (its runInTerminal request, during this launch only, once), eyedbg checks the
+command (an absolute program, no shell, no control characters; else the launch fails) and sends
+the client an eyedbg/runInTerminal event {id, title, cwd, args, env}; the client starts args
+itself, without a shell, and answers with an eyedbg/runInTerminal request {id, processId} or {id,
+error} within 30 s. The EyeDebugger extension does; other DAP clients get no terminal (use
+internalConsole). The standard DAP runInTerminal request is never sent to the client.
+
 The client acts under the same rules as the CLI: continue, steps, pause, terminate, setting a
 variable and evaluating in the debug console (repl) are execution requests that need the control
 lease ('eyedbg lease --help'; refused with LEASE_HELD); watch and hover evaluation are reads that

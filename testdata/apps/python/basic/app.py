@@ -6,6 +6,8 @@
 #                          RuntimeError nothing catches (exit 1)
 #   python app.py child    runs a child Python process; prints "child ok"
 #   python app.py wait     sleeps for a minute
+#   python app.py input A...  prints "tty <stdin is a tty>", reads a line,
+#                          prints "got <line>" and "args <repr of A...>"
 import subprocess  # marker: entry
 import sys
 import time
@@ -45,6 +47,11 @@ def main(mode):
     elif mode == "wait":
         for _ in range(600):
             time.sleep(0.1)
+    elif mode == "input":
+        print("tty", sys.stdin.isatty(), flush=True)
+        line = sys.stdin.readline().rstrip("\r\n")
+        print("got", line)
+        print("args", repr(sys.argv[2:]))
 
 
 if __name__ == "__main__":
