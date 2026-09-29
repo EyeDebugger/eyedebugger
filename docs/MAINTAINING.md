@@ -79,6 +79,13 @@ push/pull_request (its full 6-platform matrix runs on `workflow_dispatch` and th
    Its last job then calls `publish-extension.yml` (below).
 5. Pre-release tags (`vX.Y.Z-rc.N`, same version format in `package.json`): the VSIX is built and
    attached like any other, but never published to either registry.
+6. Stable releases only: refresh the Claude Code plugin in
+   [EyeDebugger/claude-plugin](https://github.com/EyeDebugger/claude-plugin). Copy
+   `skill/eyedbg/SKILL.md` over its `skills/eyedbg/SKILL.md`, set `version` in its
+   `.claude-plugin/plugin.json` to `X.Y.Z`, and push to `main` (users get the update from there).
+   It's a separate repository so the marketplace directory scans only the plugin's own files.
+   Skip this step when `SKILL.md` didn't change, and also change the plugin repo whenever the
+   skill's install wording or `plugin.json` metadata needs to.
 
 ## Publishing the VS Code extension
 

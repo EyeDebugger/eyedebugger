@@ -39,6 +39,9 @@ decisions are recorded in `docs/adr/`.
   `drivers/dotnet/helper.go` finds it and holds its wire types.
 - `skill/eyedbg/SKILL.md` — the agent-facing usage guide, embedded in `eyedbg`; a test keeps it in
   sync with the command tree.
+  A copy ships as a Claude Code plugin from the separate repo `EyeDebugger/claude-plugin`
+  (not vendored here): when `SKILL.md` changes, refresh that copy at release (`docs/MAINTAINING.md`
+  § Releasing, step 6).
 - `internal/e2e/` — CLI end-to-end tests driving the real `eyedbg`/`eyedbgd` binaries.
 - `extensions/vscode/` — the VS Code extension (TypeScript, pnpm, esbuild; ADR 0015): `src/core/`
   pure and unit-tested, `src/vscode/` the glue, `test/integration/` the suite in real VS Code.
