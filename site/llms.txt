@@ -1,0 +1,142 @@
+# EyeDebugger
+
+> eyedbg is a free, open-source, AI-native debugger. An AI coding agent drives it from the
+> terminal, and you can join the same live debug session from VS Code.
+
+eyedbg is a stateless CLI backed by a per-user daemon that owns the debug session: clients,
+breakpoints, the control lease, the event log and stop snapshots. An agent and a human can attach
+to the same session at once, hand control back and forth, and see the same stops and variables.
+Languages plug in through the Debug Adapter Protocol. Today that's .NET (netcoredbg by default,
+SharpDbg as an alternative), Python (debugpy), Go (Delve), and C, C++ and Rust (lldb-dap). It runs
+on Linux, macOS and Windows.
+
+**Install.** Give this prompt to your AI agent and it installs eyedbg for you (also at
+[install-prompt.txt](https://eyedbg.izzat.dev/install-prompt.txt), and in the
+[README](https://github.com/EyeDebugger/eyedebugger/blob/main/README.md) above the manual install
+steps):
+
+<!-- install-prompt:start -->
+```text
+Please install eyedbg (EyeDebugger) on this machine for me. It's a free, open-source debugger that
+AI coding agents drive from the terminal, and I can join the same debug session from VS Code.
+Project: https://github.com/EyeDebugger/eyedebugger
+
+1. Work out my OS (Linux, macOS or Windows) and CPU (x64 or arm64).
+
+2. Before installing anything, ask me which of these I want. Use your question tool if you have
+   one, otherwise show a numbered list; I can pick several.
+   - eyedbg itself: the eyedbg CLI and its eyedbgd daemon (always installed)
+   - .NET: netcoredbg (the default), and optionally SharpDbg (it bundles a Microsoft library under
+     a license that isn't open source and may send data to Microsoft; `eyedbg help adapters
+     install` explains)
+   - Python: debugpy
+   - Go: Delve
+   - C, C++ and Rust: LLVM's lldb-dap (from my OS's LLVM package, not from eyedbg)
+   - The VS Code extension
+   - The eyedbg skill for you (the agent)
+
+3. Open https://github.com/EyeDebugger/eyedebugger/releases. It lists releases newest first, each
+   with its assets. Pick the release to use: the newest stable release whose assets include a file
+   named exactly eyedebugger_<version>_vscode.vsix; if no stable release has one yet, the newest
+   pre-release that does. Use that release's own <version> for everything below, and don't mix
+   assets from two different releases. Download checksums.txt and the archive for my system:
+   eyedebugger_<version>_<os>_<arch>.tar.gz on Linux and macOS, .zip on Windows, where <os> is
+   linux, darwin or windows and <arch> is amd64 or arm64.
+
+4. Check the archive before using it. checksums.txt has one "<sha256>  <file name>" line per file.
+   Find the line whose file name is exactly the archive's name, compute the archive's SHA-256, and
+   compare (ignore upper/lower case). If there is no such line, more than one, or the hashes differ,
+   stop and tell me; don't continue without that check. If the gh CLI is installed, also run
+   gh attestation verify <archive> -R EyeDebugger/eyedebugger and stop if it fails.
+
+5. Unpack the whole archive into a folder of its own that my user owns (for example
+   ~/.local/share/eyedbg, or %LOCALAPPDATA%\Programs\eyedbg on Windows). Keep eyedbg, eyedbgd and
+   the helpers folder together in it. Add that folder to my PATH for new terminals (or link eyedbg
+   and eyedbgd into a folder already on PATH). Don't use sudo or admin rights unless I say so.
+
+6. Run: eyedbg version
+
+7. For each language I picked, run the matching command:
+   eyedbg adapters install netcoredbg
+   eyedbg adapters install sharpdbg
+   eyedbg adapters install debugpy
+   eyedbg adapters install delve
+   For C, C++ or Rust, install lldb-dap 18 or newer with my OS's package manager (ask me first). If
+   it isn't on PATH as lldb-dap, set EYEDBG_LLDB_DAP to its full path.
+   Then run eyedbg adapters doctor with the languages I picked (for example:
+   eyedbg adapters doctor dotnet python) and fix what it reports.
+
+8. VS Code extension: download eyedebugger_<version>_vscode.vsix from the same release, and check
+   it exactly as in step 4: checksum against checksums.txt, then gh attestation verify if the gh
+   CLI is installed. Then run:
+   code --install-extension <the .vsix file>
+
+9. The skill: eyedbg skill install puts it where Claude Code looks. For another agent, use
+   eyedbg skill install --dir <your skills folder>. Tell me to restart you so you load it.
+
+Only use the debug adapters eyedbg installs or finds itself. Don't download or set up any other
+debugger. When you're done, tell me what you installed, where, and anything I still need to do.
+```
+<!-- install-prompt:end -->
+
+Or install it by hand: download an archive from
+[Releases](https://github.com/EyeDebugger/eyedebugger/releases) (`checksums.txt` and the VS Code
+extension's `.vsix` are there too), or see the
+[README](https://github.com/EyeDebugger/eyedebugger/blob/main/README.md) for `go install` and the
+rest.
+
+**VS Code extension.** The extension is real and first-party: `EyeDebugger`, extension id
+`eyedebugger.eyedbg`, publisher `eyedebugger`, debug type `eyedbg`. It's not on a marketplace yet
+(pre-release only): install the `.vsix` from a GitHub release with `code --install-extension
+eyedebugger_<version>_vscode.vsix`. Join a running agent session from a launch configuration:
+
+```json
+{ "type": "eyedbg", "request": "attach", "name": "Join eyedbg session" }
+```
+
+Or start your own session with F5 and let the agent join you. Full guide:
+[extensions/vscode/README.md](https://github.com/EyeDebugger/eyedebugger/blob/main/extensions/vscode/README.md),
+or run `eyedbg help vscode` (0.2.0 and later).
+
+**Key commands.**
+
+```sh
+eyedbg skill install                              # writes SKILL.md, once per machine
+eyedbg start dotnet --project src/App --bp 'Orders.cs@"var total ="'
+eyedbg run-until Orders.cs:42 --if 'i == 3'
+eyedbg vars --changed
+eyedbg eval 'order.Items.Count'
+eyedbg stop                                       # always, when done
+```
+
+`eyedbg help --all` prints every command's help in one read. From 0.2.0, `eyedbg help vscode` and
+`eyedbg help lang <language>` cover the VS Code extension and each language in depth.
+
+**Languages.** Supported: .NET (`eyedbg adapters install netcoredbg`), Python (`debugpy`), Go
+(`delve`), and C, C++ and Rust (`lldb-dap`, from your OS's LLVM package). Not supported: Android,
+iOS and .NET MAUI mobile targets, WebAssembly and Blazor WASM, JavaScript, TypeScript and Node.js,
+Java and Kotlin, Ruby, PHP, and a process on another machine. Use that platform's own debugger for
+those. A JSON adapter manifest can add a language eyedbg doesn't bundle, no Go code needed: see
+[docs/adapter-manifests.md](https://github.com/EyeDebugger/eyedebugger/blob/main/docs/adapter-manifests.md).
+
+## Docs
+
+- [SKILL.md](https://raw.githubusercontent.com/EyeDebugger/eyedebugger/main/skill/eyedbg/SKILL.md):
+  the full agent-facing guide to using eyedbg from a coding session.
+- [docs/DESIGN.md](https://github.com/EyeDebugger/eyedebugger/blob/main/docs/DESIGN.md): the
+  architecture and design decisions behind eyedbg.
+- [README](https://github.com/EyeDebugger/eyedebugger/blob/main/README.md): project overview,
+  features and the manual install steps.
+- [Releases](https://github.com/EyeDebugger/eyedebugger/releases): downloadable archives,
+  `checksums.txt` and the VS Code extension's `.vsix`.
+- [extensions/vscode/README.md](https://github.com/EyeDebugger/eyedebugger/blob/main/extensions/vscode/README.md):
+  the VS Code extension's own guide.
+- [docs/adapter-manifests.md](https://github.com/EyeDebugger/eyedebugger/blob/main/docs/adapter-manifests.md):
+  how to add a language with a JSON manifest, no Go code needed.
+- [install-prompt.txt](https://eyedbg.izzat.dev/install-prompt.txt): this page's install prompt,
+  as plain text.
+
+## Optional
+
+- [AGENTS.md](https://github.com/EyeDebugger/eyedebugger/blob/main/AGENTS.md): rules for
+  contributing to eyedbg as, or with, an AI agent.
