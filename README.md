@@ -144,6 +144,13 @@ eyedbg adapters install netcoredbg   # or: python, delve (c, cpp and rust use ll
 eyedbg adapters doctor
 ```
 
+Claude Code users can also add the skill as a plugin (it still needs the `eyedbg` binary above):
+
+```sh
+/plugin marketplace add EyeDebugger/eyedebugger
+/plugin install eyedbg@eyedebugger
+```
+
 From a clone: `task build` (or `go build -trimpath -o bin/ ./cmd/...`); `task snapshot` builds
 release-shaped archives (and the VSIX's checksum) into `dist/`.
 

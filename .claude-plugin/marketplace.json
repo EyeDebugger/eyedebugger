@@ -1,0 +1,14 @@
+{
+  "name": "eyedebugger",
+  "owner": { "name": "EyeDebugger Authors" },
+  "metadata": { "description": "EyeDebugger: the eyedbg agent skill." },
+  "plugins": [
+    {
+      "name": "eyedbg",
+      "source": "./",
+      "description": "Agent skill for eyedbg, the AI-native CLI debugger. Requires the eyedbg binary on PATH.",
+      "homepage": "https://github.com/EyeDebugger/eyedebugger",
+      "license": "Apache-2.0"
+    }
+  ]
+}

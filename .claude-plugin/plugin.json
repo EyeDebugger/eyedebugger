@@ -1,0 +1,10 @@
+{
+  "name": "eyedbg",
+  "description": "Debug running .NET, Python, C, C++, Rust and Go programs from the shell with eyedbg: breakpoints, stepping, locals, eval and exception stops. Requires the eyedbg binary on PATH.",
+  "author": { "name": "EyeDebugger Authors" },
+  "homepage": "https://github.com/EyeDebugger/eyedebugger",
+  "repository": "https://github.com/EyeDebugger/eyedebugger",
+  "license": "Apache-2.0",
+  "keywords": ["debugger", "debugging", "dap", "cli"],
+  "skills": ["./skill/"]
+}
