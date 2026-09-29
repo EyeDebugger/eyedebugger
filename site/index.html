@@ -326,7 +326,7 @@ html[data-theme="light"] .code { border-color: rgba(15, 23, 42, .22); }
 .stage::before { content: ""; position: absolute; inset: 8% 6% -4%; z-index: -1; border-radius: 50%; filter: blur(70px); opacity: .55;
   background: radial-gradient(closest-side at 32% 50%, color-mix(in srgb, var(--agent) 45%, transparent), transparent), radial-gradient(closest-side at 70% 50%, color-mix(in srgb, var(--human) 45%, transparent), transparent);
   animation: breathe 8s ease-in-out infinite; }
-.stage-grid { display: grid; grid-template-columns: minmax(0, 1.04fr) minmax(0, 1fr); gap: 18px; transform: rotateX(10deg) translateY(24px) scale(.97); transform-origin: 50% 0; opacity: 0;
+.stage-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.06fr); gap: 18px; transform: rotateX(10deg) translateY(24px) scale(.97); transform-origin: 50% 0; opacity: 0;
   transition: transform 1.4s var(--ease), opacity 1s var(--ease); }
 .stage.in .stage-grid, html:not(.js) .stage-grid { transform: none; opacity: 1; }
 .win { position: relative; display: flex; flex-direction: column; height: 468px; overflow: hidden; border-radius: 16px; background: var(--scr-bg); border: 1px solid var(--scr-line); box-shadow: var(--shadow-lg); color: var(--scr-text); }
@@ -344,6 +344,21 @@ html[data-theme="light"] .win { border-color: rgba(15, 23, 42, .25); }
 @keyframes line-in { from { opacity: 0; transform: translateY(4px); } }
 .caret { display: inline-block; width: .6em; height: 1.15em; margin-left: 1px; vertical-align: -.2em; background: var(--tk-cmd); animation: caret 1.05s steps(1) infinite; }
 @keyframes caret { 50% { opacity: 0; } }
+.cc .term-body { font-size: 12.3px; }
+.cc .cl-w { color: #d97757; font-weight: 700; }
+.cc .cl-you { margin: 6px 0; padding: 3px 8px; border-radius: 4px; background: rgba(148, 163, 184, .1); }
+.cc .cl-you .gt, .cc-gt { color: #94a3b8; margin-right: 8px; user-select: none; }
+.cc .cl-say { margin: 6px 0; padding-left: 2ch; text-indent: -2ch; }
+.cc .cl-say i, .cc .cl-tool i { font-style: normal; color: #e2e8f0; }
+.cc .cl-tool { margin: 6px 0 0; padding-left: 2ch; text-indent: -2ch; }
+.cc .cl-tool i { color: #34d399; }
+.cc .cl-tool b { color: #f1f5f9; font-weight: 700; }
+.cc .cl-res { padding-left: 5ch; text-indent: -3ch; }
+.cc .cl-res + .cl-say, .cc .cl-res + .cl-tool { margin-top: 8px; }
+.cc-box { flex: none; display: flex; align-items: center; min-height: 34px; margin: 0 12px; padding: 6px 12px; border: 1px solid rgba(148, 163, 184, .35); border-radius: 8px; font: 12.3px/1.5 var(--font-mono); color: #e2e8f0; }
+.cc-txt { white-space: pre-wrap; overflow-wrap: anywhere; }
+.cc-foot { flex: none; padding: 4px 20px 8px; font: 11px/1.4 var(--font-mono); color: #64748b; }
+.caret { background: #d97757; }
 /* the editor mock */
 .ed { position: relative; }
 .ed-top { flex: none; display: flex; align-items: center; height: 34px; background: #0a0f1b; border-bottom: 1px solid var(--scr-line); }
@@ -788,15 +803,11 @@ html.vt *, html.vt *::before, html.vt *::after { transition: none !important; }
     </div>
     <p class="works">Works with Claude Code, Codex and any agent that can run a shell command.</p>
 
-    <!-- The shared session, animated by the script: the agent's terminal on the left, your editor on the right. -->
+    <!-- The shared session, animated by the script: your editor on the left, the agent in Claude Code on the right. -->
     <div class="stage" id="stage" data-reveal="fade">
       <div class="stage-grid" aria-hidden="true">
-        <div class="win term">
-          <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span><span class="win-title">agent · zsh · ~/shop</span><span class="role agent">AGENT</span></div>
-          <div class="term-body"></div>
-        </div>
         <div class="win ed">
-          <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span><span class="win-title">Orders.cs · shop</span><span class="role human">YOU</span></div>
+          <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span><span class="win-title">Orders.cs · shop · Visual Studio Code</span><span class="role human">YOU</span></div>
           <div class="ed-top">
             <div class="ed-tab"><b></b>Orders.cs</div>
             <div class="ed-tools">
@@ -827,8 +838,14 @@ html.vt *, html.vt *::before, html.vt *::after { transition: none !important; }
           <div class="ed-input"><small>Tell agent why (optional) · Enter to send</small><div></div></div>
           <svg class="ed-cursor" viewBox="0 0 24 24"><path d="M4 2.5l15.5 9.8-6.9 1.4-3.9 6.3z" fill="#fff" stroke="#0a0f1c" stroke-width="1.4" stroke-linejoin="round"/></svg>
         </div>
+        <div class="win term cc">
+          <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span><span class="win-title">Claude Code · ~/shop</span><span class="role agent">AGENT</span></div>
+          <div class="term-body"></div>
+          <div class="cc-box"><span class="cc-gt">&gt;</span><span class="cc-txt"></span><span class="caret"></span></div>
+          <div class="cc-foot">? for shortcuts</div>
+        </div>
       </div>
-      <p class="sr-only">Animation: an agent starts a debug session from its terminal and stops at a breakpoint; you join the same session from VS Code; the agent runs to the iteration with the bug; you ask for control, and the agent hands it over.</p>
+      <p class="sr-only">Animation: you ask Claude Code to debug a wrong order total, and it starts a debug session with eyedbg and stops at a breakpoint; you join the same session from VS Code; Claude Code runs to the iteration with the bug and reads a value; you ask for control, and Claude Code hands it over.</p>
       <ol class="stage-steps">
         <li><button type="button" data-go="0"><b>1</b>Agent starts a session</button></li>
         <li><button type="button" data-go="1" class="human"><b>2</b>You join from VS Code</button></li>
@@ -2062,46 +2079,39 @@ hint: ask human:alex to run 'eyedbg lease grant agent'; 'eyedbg events --wait --
       while (!live()) { await new Promise(r => waiters.push(r)); check(p); }
     };
 
-    // terminal
+    // Claude Code: the prompt box, the user's message, the agent's text and its tool calls
+    const box = $(".cc-txt", stage);
     const scroll = () => { term.scrollTop = term.scrollHeight; };
-    const prompt = () => {
-      let ln = term.lastElementChild;
-      if (!ln || !ln.classList.contains("idle")) {
-        ln = doc.createElement("div");
-        ln.className = "ln idle";
-        ln.innerHTML = '<span class="t-pr">$ </span><span class="cmd"></span><span class="caret"></span>';
-        term.append(ln);
-      }
-      return ln;
-    };
-    const type = async (p, text) => {
-      const ln = prompt(), cmd = $(".cmd", ln);
-      ln.classList.remove("idle");
-      if (!p.fast) {
-        await wait(p, 380);
-        for (let i = 1; i <= text.length; i++) {
-          cmd.innerHTML = hlShell(text.slice(0, i));
-          await wait(p, text[i - 1] === " " ? 60 : 16 + Math.random() * 34);
-        }
-        await wait(p, 280);
-      }
-      cmd.innerHTML = hlShell(text);
-      const caret = $(".caret", ln);
-      if (caret) caret.remove();
+    const add = (cls, html) => {
+      const d = doc.createElement("div");
+      d.className = "ln " + cls;
+      d.innerHTML = html;
+      term.append(d);
+      while (term.childElementCount > 80) term.firstElementChild.remove();
       scroll();
+      return d;
     };
-    const out = async (p, lines) => {
-      for (const l of lines) {
-        const d = doc.createElement("div");
-        d.className = "ln";
-        d.innerHTML = hlOut(l);
-        term.append(d);
-        while (term.childElementCount > 80) term.firstElementChild.remove();
-        scroll();
-        await wait(p, 45);
+    const user = async (p, text) => {
+      await wait(p, 500);
+      for (let i = 1; i <= text.length; i++) {
+        if (p.fast) break;
+        box.textContent = text.slice(0, i);
+        await wait(p, text[i - 1] === " " ? 55 : 14 + Math.random() * 30);
       }
-      prompt();
-      scroll();
+      if (!p.fast) await wait(p, 300);
+      box.textContent = "";
+      add("cl-you", '<span class="gt">&gt;</span>' + esc(text));
+      await wait(p, 500);
+    };
+    const say = async (p, text) => {
+      add("cl-say", '<span class="cl-w">\u25CF</span> <i>' + rich(text) + "</i>");
+      await wait(p, 700);
+    };
+    const tool = async (p, cmd, lines) => {
+      add("cl-tool", '<i>\u25CF</i> <b>Bash</b>(' + hlShell(cmd) + ")");
+      await wait(p, 700);
+      lines.forEach((l, i) => add("cl-res", tok("t-d", i ? "   " : "\u23BF  ") + hlOut(l)));
+      await wait(p, 45 * lines.length);
     };
 
     // editor
@@ -2146,8 +2156,8 @@ hint: ask human:alex to run 'eyedbg lease grant agent'; 'eyedbg events --wait --
     };
 
     const reset = () => {
-      term.innerHTML = "";
-      prompt();
+      term.innerHTML = '<div class="ln"><span class="cl-w">\u273B</span> <b>Welcome to Claude Code</b></div>';
+      box.textContent = "";
       ed.classList.remove("joined", "debugging");
       hl.classList.remove("on");
       $$(".ed-line", ed).forEach(l => l.classList.remove("bp", "cur"));
@@ -2160,17 +2170,18 @@ hint: ask human:alex to run 'eyedbg lease grant agent'; 'eyedbg events --wait --
     };
 
     const scenes = [
-      async p => { // the agent starts a session
-        await type(p, "eyedbg start dotnet --project src/Shop --bp 'Orders.cs@\"var total =\"'");
-        await wait(p, 900);
-        await out(p, [
+      async p => { // you ask, the agent starts a session
+        await user(p, "The order total is wrong for big orders. Can you debug it with eyedbg?");
+        await say(p, "I'll start a debug session with a breakpoint in Orders.Total().");
+        await tool(p, "eyedbg start dotnet --project src/Shop --bp 'Orders.cs@\"var total =\"'", [
           "session s-7f3k (dotnet, netcoredbg) stopped: breakpoint, thread 4242",
           "  at Shop.Orders.Total() Orders.cs:14",
           "    13 | {",
           "  > 14 |     var total = 0m;",
           "    15 |     for (var i = 0; i < orders.Count; i++)",
         ]);
-        await wait(p, 600);
+        await say(p, "Stopped at the top of Total(). The session is live.");
+        await wait(p, 500);
         toast.classList.add("on");
         await wait(p, 1500);
       },
@@ -2189,12 +2200,8 @@ hint: ask human:alex to run 'eyedbg lease grant agent'; 'eyedbg events --wait --
         await wait(p, 900);
       },
       async p => { // the agent runs to the bug
-        await type(p, "eyedbg run-until Orders.cs:18 --if 'i == 3'");
-        await wait(p, 800);
-        setHl(18);
-        note(18, true);
-        activity("agent continued → Orders.cs:18 (breakpoint)");
-        await out(p, [
+        await say(p, "Running to the fourth iteration, where the total drifts.");
+        await tool(p, "eyedbg run-until Orders.cs:18 --if 'i == 3'", [
           "session s-7f3k (dotnet, netcoredbg) stopped: breakpoint, thread 4242",
           "  lease: agent (free); clients: agent, human:alex (connected)",
           "  at Shop.Orders.Total() Orders.cs:18",
@@ -2205,11 +2212,13 @@ hint: ask human:alex to run 'eyedbg lease grant agent'; 'eyedbg events --wait --
           "    i: int = 3  (was 0)",
           "    total: decimal = 127.50  (was 0)",
         ]);
-        await wait(p, 900);
-        await type(p, "eyedbg eval 'order.Quantity'");
-        await wait(p, 350);
-        await out(p, ["-2  (int)"]);
-        await wait(p, 1300);
+        setHl(18);
+        note(18, true);
+        activity("agent continued → Orders.cs:18 (breakpoint)");
+        await wait(p, 500);
+        await tool(p, "eyedbg eval 'order.Quantity'", ["-2  (int)"]);
+        await say(p, "order.Quantity is -2 on this row, so it subtracts from the total. The bad value is set upstream.");
+        await wait(p, 1000);
       },
       async p => { // you ask for control
         await point(p, lease);
@@ -2228,16 +2237,16 @@ hint: ask human:alex to run 'eyedbg lease grant agent'; 'eyedbg events --wait --
         input.classList.remove("on");
         setLease("agent has control · free · 1 request", false);
         await wait(p, 800);
-        await type(p, "eyedbg lease");
-        await out(p, [
+        await say(p, "Checking whether anyone is waiting on the session.");
+        await tool(p, "eyedbg lease", [
           "session s-7f3k: lease held by agent (policy free)",
           '  requested by human:alex: "let me check the refund path"',
         ]);
-        await wait(p, 1200);
+        await wait(p, 1000);
       },
       async p => { // the agent hands it over
-        await type(p, "eyedbg lease grant human:alex");
-        await out(p, ["session s-7f3k: lease held by human:alex (connected, policy free)"]);
+        await say(p, "alex wants to look at the refund path. Handing control over.");
+        await tool(p, "eyedbg lease grant human:alex", ["session s-7f3k: lease held by human:alex (connected, policy free)"]);
         setLease("you have control · free", true);
         activity("lease: agent gave it to human:alex");
         await wait(p, 900);
@@ -2250,14 +2259,14 @@ hint: ask human:alex to run 'eyedbg lease grant agent'; 'eyedbg events --wait --
         await wait(p, 500);
         over.classList.remove("hot");
         await wait(p, 700);
-        await type(p, "eyedbg events --since 22");
-        await out(p, [
+        await tool(p, "eyedbg events --since 22", [
           '23  lease: human:alex asks agent for it: "let me check the refund path"',
           "24  lease: agent gave it to human:alex",
           "25  human:alex: next (thread 4242)",
           "26  stopped: step, thread 4242",
           "next: eyedbg events --since 26",
         ]);
+        await say(p, "alex stepped over the loop. I can see it in the event log and will pick up when they hand it back.");
         await wait(p, 4200);
       },
     ];
