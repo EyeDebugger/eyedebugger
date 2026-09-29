@@ -25,7 +25,7 @@ eyedbg CLI (stateless) ──┐
                          ├── local IPC (JSON-RPC 2.0) ──► eyedbgd (daemon, per user)
 VS Code extension      ──┘     + per-session DAP facade            │
                                                                    ├── Session ── DAP ──► adapter process
-                                                                   │   (netcoredbg | sharpdbg | debugpy | lldb-dap | delve; js-debug planned)
+                                                                   │   (netcoredbg | sharpdbg | debugpy | lldb-dap | delve)
                                                                    └── Side helpers (JSON-RPC over stdio)
                                                                        └── eyedbg-dotnet-helper (C#): ClrMD, EventPipe, dumps
 ```
@@ -59,26 +59,6 @@ code --install-extension eyedebugger_0.2.0_vscode.vsix   # from a GitHub release
 ```
 
 Full guide: [extensions/vscode/README.md](extensions/vscode/README.md), `eyedbg help vscode`.
-
-## Roadmap
-
-1. ✅ Skeleton: daemon auto-start, IPC + token, version handshake, `daemon start/status/stop/logs`.
-2. ✅ DAP core: go-dap client, netcoredbg install/doctor, `start` a console app, `bp add` (line), `continue`, `status`, `stack`, `vars`, `stop`.
-3. ✅ Agent ergonomics: stop snapshot, `--dump`, `run-until`, `wait`, `--changed`, budgets, JSON schema, errors, `help --all`.
-4. ✅ Model for P2: client identity, breakpoint ownership merge, lease, event log + `events --since`.
-5. ✅ Breadth: hit counts, logpoints, function and exception breakpoints, eval with side effects, `set`, `attach`/`detach`, `test`, anchors.
-6. ✅ Ship: SKILL.md, CI matrix (6 os/arch), e2e tests driving sample apps.
-7. ✅ Second language via manifest only: Python through debugpy (`eyedbg start python`), adapter manifests, `adapters ls`, `--opt`.
-
-Phase 1 (MVP) is complete. Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg
-adapter (done: `--adapter sharpdbg`, [ADR 0017](docs/adr/0017-sharpdbg-as-an-alternative-dotnet-adapter.md));
-more languages.
-
-More languages, done independently of phase 2's own sequencing: C, C++ and Rust via lldb-dap, and
-Go via Delve over a new socket transport (`adapter.transport: "connect"`) — manifest only, no new
-Go driver ([ADR 0013](docs/adr/0013-socket-transport-and-native-manifest-languages.md)). Ruby,
-Java, Kotlin, JS/TS and PHP were scoped and descoped in the same pass; each needs more than a
-manifest.
 
 ## Install
 
