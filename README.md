@@ -147,7 +147,7 @@ eyedbg adapters doctor
 Claude Code users can also add the skill as a plugin (it still needs the `eyedbg` binary above):
 
 ```sh
-/plugin marketplace add EyeDebugger/eyedebugger
+/plugin marketplace add EyeDebugger/claude-plugin
 /plugin install eyedbg@eyedebugger
 ```
 
