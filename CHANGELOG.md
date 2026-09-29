@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-29
+
+### Added
+
+- Claude Code plugin marketplace: `/plugin marketplace add EyeDebugger/eyedebugger` then
+  `/plugin install eyedbg@eyedebugger` installs the eyedbg skill (`.claude-plugin/`). The plugin
+  needs the `eyedbg` binary on PATH.
+
+### Changed
+
+- The skill tells the agent to stop and point the user to the README's Install section when
+  `eyedbg` isn't on PATH.
+
 ## [0.2.0] - 2026-09-29
 
 ### Added
@@ -396,7 +409,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A response over 1 MiB (e.g. `output` after a lot of program output) dropped the connection.
 - Stopping a session that is also ending by itself no longer races over its end reason.
 
-[Unreleased]: https://github.com/EyeDebugger/eyedebugger/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/EyeDebugger/eyedebugger/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/EyeDebugger/eyedebugger/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/EyeDebugger/eyedebugger/compare/v0.2.0-beta.1...v0.2.0
 [0.2.0-beta.1]: https://github.com/EyeDebugger/eyedebugger/compare/v0.1.2...v0.2.0-beta.1
 [0.1.2]: https://github.com/EyeDebugger/eyedebugger/compare/v0.1.1...v0.1.2
