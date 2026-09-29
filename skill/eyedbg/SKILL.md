@@ -10,6 +10,9 @@ A CLI debugger that agents and humans share. Every command is a one-shot call; a
 keeps the session and starts by itself. `eyedbg help <command>` is authoritative;
 `eyedbg help --all` prints every command's help in one read.
 
+If `eyedbg` isn't on PATH, it isn't installed: don't try to work around it. Point the user to the
+Install section of https://github.com/EyeDebugger/eyedebugger and stop.
+
 ## When to reach for it
 
 After a fix or two based on reading the code has failed: stop guessing and look at the real state.
