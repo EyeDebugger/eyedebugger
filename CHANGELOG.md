@@ -11,9 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Claude Code plugin marketplace: `/plugin marketplace add EyeDebugger/eyedebugger` then
-  `/plugin install eyedbg@eyedebugger` installs the eyedbg skill (`.claude-plugin/`). The plugin
-  needs the `eyedbg` binary on PATH.
+- The eyedbg skill as a Claude Code plugin, in its own repository: `/plugin marketplace add
+  EyeDebugger/claude-plugin` then `/plugin install eyedbg@eyedebugger`. The plugin needs the
+  `eyedbg` binary on PATH.
 
 ### Changed
 
