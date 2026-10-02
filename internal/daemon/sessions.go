@@ -49,6 +49,11 @@ func lifecycleHandlers(m *session.Manager) map[string]handler {
 				return nil, api.NewError(api.CodeInvalidRequest, "a container is attached to with "+api.MethodContainerAttach+", not session.start", "")
 			}
 
+			// Likewise a launch in a container.
+			if p.ContainerLaunch != nil {
+				return nil, api.NewError(api.CodeInvalidRequest, "an app is launched in a container with "+api.MethodContainerLaunch+", not session.start", "")
+			}
+
 			return startSession(ctx, m, c, p)
 		}),
 		api.MethodSessionList: func(context.Context, json.RawMessage) (any, error) { return m.List(), nil },

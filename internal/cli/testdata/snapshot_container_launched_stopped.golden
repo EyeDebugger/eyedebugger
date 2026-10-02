@@ -1,0 +1,1 @@
+session s-k3f9 (dotnet, netcoredbg; service web, container web-1, group myapp) exited: stopped by agent (container web-1 keeps running, idle)

@@ -278,13 +278,7 @@ func snapshotHeader(snap api.Snapshot, now time.Time) string {
 			fmt.Fprintf(&b, " (stopped %s)", d)
 		}
 	case api.StateExited:
-		if s.ExitCode != nil {
-			fmt.Fprintf(&b, " with code %d", *s.ExitCode)
-		}
-
-		if s.EndReason != "" {
-			fmt.Fprintf(&b, ": %s", s.EndReason)
-		}
+		b.WriteString(exitedText(s))
 	case api.StateRunning:
 		if snap.TimedOut {
 			b.WriteString(" (still running when the wait ended; 'eyedbg wait' or 'eyedbg pause')")
@@ -292,6 +286,27 @@ func snapshotHeader(snap api.Snapshot, now time.Time) string {
 	case api.StateLost:
 		b.WriteString(" (eyedbgd exited while it was live)")
 	case api.StateStarting:
+	}
+
+	return b.String()
+}
+
+// exitedText is how an exited session's header ends: its exit code and why it
+// ended, and for an app launched in a container (which died with its session)
+// that the container itself goes on.
+func exitedText(s api.SessionInfo) string {
+	var b strings.Builder
+
+	if s.ExitCode != nil {
+		fmt.Fprintf(&b, " with code %d", *s.ExitCode)
+	}
+
+	if s.EndReason != "" {
+		fmt.Fprintf(&b, ": %s", s.EndReason)
+	}
+
+	if c := s.Container; c != nil && c.Launched {
+		fmt.Fprintf(&b, " (container %s keeps running, idle)", c.Name)
 	}
 
 	return b.String()
