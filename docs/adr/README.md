@@ -29,6 +29,8 @@ security model, major dependencies, licensing and the contribution process.
 | [0017](0017-sharpdbg-as-an-alternative-dotnet-adapter.md) | SharpDbg as an alternative .NET adapter | proposed |
 | [0018](0018-per-owner-conditions-at-shared-lines.md) | Per-owner conditions at shared breakpoint lines | proposed |
 | [0019](0019-launch-sessions-and-their-terminals-through-the-dap-facade.md) | Launch sessions and their terminals through the DAP facade | proposed |
+| [0020](0020-debug-services-in-containers-and-compose-groups.md) | Debug services in containers, and compose stacks as groups | proposed |
+| [0021](0021-fast-mode-host-debug-builds-in-compose-services.md) | Fast mode: host Debug builds launched under the debugger in compose services | proposed |
 
 ## Process
 
