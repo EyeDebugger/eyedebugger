@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
+	"github.com/eyedebugger/eyedebugger/internal/container"
 	"github.com/eyedebugger/eyedebugger/internal/container/containertest"
 )
 
@@ -132,5 +133,82 @@ func TestImagePlatform(t *testing.T) {
 	e := containertest.Engine(t, containertest.Scenario{})
 	if _, _, _, err := e.ImagePlatform(t.Context(), "--format"); err == nil {
 		t.Error("ImagePlatform accepted a flag as the image")
+	}
+}
+
+func TestComposePSViaDocker(t *testing.T) {
+	t.Parallel()
+
+	row := `{"Command":"\"dotnet Web.dll\"","ID":"0123456789ab","Name":"my-app-web-1","Project":"my-app","Service":"web","State":"running"}`
+	calls := filepath.Join(t.TempDir(), "calls")
+	e := containertest.Engine(t, containertest.Scenario{Calls: calls, Rules: []containertest.Rule{
+		{Match: []string{"compose", "--file=a.yml", "--project-name=my-app", "ps", "--format", "json"}, Stdout: row + "\n"},
+	}})
+	e.Context = "colima"
+
+	list, err := e.ComposePS(t.Context(), container.ComposeOptions{Files: []string{"a.yml"}, ProjectName: "my-app"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(list) != 1 || list[0].Service != "web" || list[0].Project != "my-app" || list[0].State != "running" {
+		t.Errorf("list = %+v", list)
+	}
+
+	want := []string{"--context=colima", "compose", "--file=a.yml", "--project-name=my-app", "ps", "--format", "json"}
+	if got := containertest.ReadCalls(t, calls); len(got) != 1 || !slices.Equal(got[0], want) {
+		t.Errorf("docker was run as %q, want one call %q", got, want)
+	}
+}
+
+func TestComposePSErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		rule     containertest.Rule
+		opts     container.ComposeOptions
+		wantCode api.Code
+		wantMsg  string
+	}{
+		{
+			"no compose file",
+			containertest.Rule{Match: []string{"compose"}, Exit: 1, Stderr: "no configuration file provided: not found"},
+			container.ComposeOptions{},
+			api.CodeInvalidRequest, "no compose file",
+		},
+		{
+			"engine down",
+			containertest.Rule{Match: []string{"compose"}, Exit: 1, Stderr: "Cannot connect to the Docker daemon"},
+			container.ComposeOptions{},
+			api.CodeAttachFailed, "Cannot connect",
+		},
+		{"garbage", containertest.Rule{Match: []string{"compose"}, Stdout: "hello"}, container.ComposeOptions{}, api.CodeAttachFailed, "unexpected answer"},
+		{
+			"flag as project",
+			containertest.Rule{Match: []string{"compose"}, Stdout: "[]"},
+			container.ComposeOptions{ProjectName: "--privileged"},
+			api.CodeInvalidRequest, "invalid project name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			calls := filepath.Join(t.TempDir(), "calls")
+			e := containertest.Engine(t, containertest.Scenario{Calls: calls, Rules: []containertest.Rule{tt.rule}})
+
+			_, err := e.ComposePS(t.Context(), tt.opts)
+			if api.CodeOf(err) != tt.wantCode || err == nil || !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("ComposePS error = %v, want %s containing %q", err, tt.wantCode, tt.wantMsg)
+			}
+
+			if tt.wantCode == api.CodeInvalidRequest && strings.Contains(tt.name, "flag") {
+				if got := containertest.ReadCalls(t, calls); len(got) != 0 {
+					t.Errorf("docker ran for an invalid project: %q", got)
+				}
+			}
+		})
 	}
 }
