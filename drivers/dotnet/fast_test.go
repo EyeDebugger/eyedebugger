@@ -485,7 +485,9 @@ func TestPublishForContainerRefusals(t *testing.T) {
 			s.Project = filepath.Join(f.root, "Web", "Program.cs")
 		}, "not a project file"},
 		{"project missing", func(f publishFixture, s *PublishSpec) { s.Project = filepath.Join(f.root, "Nope.csproj") }, "can't be resolved"},
-		{"root is a file system root", func(_ publishFixture, s *PublishSpec) { s.Root = filepath.VolumeName(os.TempDir()) + string(filepath.Separator) }, "file system root"},
+		{"root is a file system root", func(_ publishFixture, s *PublishSpec) {
+			s.Root = filepath.VolumeName(os.TempDir()) + string(filepath.Separator)
+		}, "file system root"},
 		{"root missing", func(f publishFixture, s *PublishSpec) { s.Root = filepath.Join(f.root, "nowhere") }, "can't be resolved"},
 		{"relative root", func(_ publishFixture, s *PublishSpec) { s.Root = "rel" }, ""},
 		{"relative project", func(_ publishFixture, s *PublishSpec) { s.Project = "Web/Web.csproj" }, ""},
