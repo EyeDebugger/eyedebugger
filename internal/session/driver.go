@@ -5,6 +5,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
@@ -103,6 +104,10 @@ type Launch struct {
 	// outside the map and reads source excerpts only inside its host
 	// directories (see [PathMap]). Nil: paths are the host's.
 	PathMap *PathMap
+	// Container, when set, says the attach is to a process in a container
+	// (see [ContainerAttacher]): the session reports it, has no host pid of
+	// its own, and takes a claim on the container's process.
+	Container *api.ContainerInfo
 }
 
 // Request kinds for [Launch.Request].
@@ -126,6 +131,24 @@ type Attacher interface {
 	// PrepareAttach describes how to attach to spec's process.
 	PrepareAttach(ctx context.Context, spec api.AttachSpec) (Launch, error)
 }
+
+// ContainerAttacher is a [Driver] that can attach to a process inside a
+// container (docs/adr/0020): its adapter is whatever it can run there, over
+// docker or the like, so the session sees only a [Launch] (with Container and
+// usually PathMap set).
+type ContainerAttacher interface {
+	// PrepareContainerAttach describes how to attach to spec.Container's
+	// process (spec.PID, 0 meaning 1). It returns ErrNotCandidate, joined
+	// with the reason as an *api.Error, for a container that is not a
+	// candidate when spec.Container.RequireDotnet says it was picked
+	// implicitly.
+	PrepareContainerAttach(ctx context.Context, spec api.AttachSpec) (Launch, error)
+}
+
+// ErrNotCandidate marks (in an error's chain) a container that an implicit
+// pick should skip rather than fail on: the daemon reports its member as
+// skipped, with the error's message as the reason.
+var ErrNotCandidate = errors.New("not a candidate")
 
 // TestSpec is a test run to debug: the project (in LaunchSpec's Project),
 // its environment, and which tests.

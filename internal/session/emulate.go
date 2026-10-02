@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	godap "github.com/google/go-dap"
 
@@ -231,6 +232,7 @@ func (s *Session) pendingLocked(gen int) bool {
 func (s *Session) applyStopLocked(stop api.StopInfo) {
 	s.stops++
 	s.stop = stop
+	s.stoppedAt = time.Now()
 	s.stepping, s.pauseRequested = false, false
 	s.setStateLocked(api.StateStopped)
 	s.log.append(api.Event{Kind: api.EventStopped, Stop: &stop})
