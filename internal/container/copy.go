@@ -194,6 +194,23 @@ func (e Engine) InstallAdapter(ctx context.Context, id string, a Adapter) error 
 		return api.NewError(api.CodeAttachFailed, "can't copy "+a.Name+" into the container: "+failureText(fail), copyHint)
 	}
 
+	return e.ProbeAdapter(ctx, id, a)
+}
+
+// ProbeAdapter runs a's executable in the container with the full id id, with
+// a's ProbeArgs, which must exit 0: ATTACH_FAILED with docker's own words
+// when it is not there or doesn't run. A launch probes first and copies only
+// when this fails, so a relaunch skips the copy (the directory's name holds
+// the adapter's version).
+func (e Engine) ProbeAdapter(ctx context.Context, id string, a Adapter) error {
+	if !isFullID(id) {
+		return api.NewError(api.CodeInternal, "probe an adapter in a container with a non-full id", "")
+	}
+
+	if err := a.check(); err != nil {
+		return err
+	}
+
 	if _, fail := e.run(ctx, QueryTimeout, nil, e.Args(append([]string{"exec", id, a.ContainerPath()}, a.ProbeArgs...)...)); fail != nil {
 		return api.NewError(api.CodeAttachFailed, a.Name+" doesn't run in the container: "+failureText(fail),
 			"only glibc-based linux/amd64 and linux/arm64 images work, not Alpine or other musl images")

@@ -261,3 +261,38 @@ func TestInstallAdapterOnlyFullIDs(t *testing.T) {
 		}
 	}
 }
+
+// TestProbeAdapter: the probe alone runs the adapter's own executable and
+// copies nothing, as the container's user: a launch uses it to skip the copy.
+func TestProbeAdapter(t *testing.T) {
+	t.Parallel()
+
+	calls := filepath.Join(t.TempDir(), "calls")
+
+	e := containertest.Engine(t, containertest.Scenario{Calls: calls, Rules: []containertest.Rule{
+		{Match: []string{"exec", fullID, "/.eyedbg-netcoredbg-3.2.0-1092/netcoredbg", "--version"}, Stdout: "NET Core debugger\n"},
+	}})
+
+	if err := e.ProbeAdapter(t.Context(), fullID, testAdapter(adapterDir(t))); err != nil {
+		t.Fatal(err)
+	}
+
+	want := [][]string{{"exec", fullID, "/.eyedbg-netcoredbg-3.2.0-1092/netcoredbg", "--version"}}
+	if got := containertest.ReadCalls(t, calls); !slices.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("docker calls = %q, want %q", got, want)
+	}
+
+	// A probe that fails says so; a short id is never used.
+	failing := containertest.Engine(t, containertest.Scenario{Rules: []containertest.Rule{
+		{Match: []string{"exec"}, Exit: 126, Stderr: "OCI runtime exec failed: no such file or directory"},
+	}})
+
+	err := failing.ProbeAdapter(t.Context(), fullID, testAdapter(adapterDir(t)))
+	if api.CodeOf(err) != api.CodeAttachFailed || !strings.Contains(err.Error(), "doesn't run in the container") {
+		t.Errorf("failing probe: %v, want ATTACH_FAILED", err)
+	}
+
+	if err := e.ProbeAdapter(t.Context(), fullID[:12], testAdapter(adapterDir(t))); api.CodeOf(err) != api.CodeInternal {
+		t.Errorf("a short id: %v, want INTERNAL", err)
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/eyedebugger/eyedebugger/internal/adapters"
 	"github.com/eyedebugger/eyedebugger/internal/api"
@@ -97,6 +98,10 @@ type driverEnv struct {
 	// finds an adapter installed for another platform (both: container.go).
 	engine       func(api.ContainerEngine) (container.Engine, error)
 	installedFor func(m *adapters.Manifest, platform string) (dir, entry string, err error)
+	// strayChecks is how many times a launch into a container looks for an
+	// earlier app, strayEvery apart (zero: the defaults in container_launch.go).
+	strayChecks int
+	strayEvery  time.Duration
 }
 
 func systemDriverEnv() driverEnv {
@@ -418,16 +423,11 @@ func launchArguments(host, program, cwd string, spec session.LaunchSpec) map[str
 		exe, args = program, spec.Args
 	}
 
-	launchArgs := map[string]any{
-		"name":        "eyedbg",
-		"type":        adapterType,
-		"request":     "launch",
-		"program":     exe,
-		"args":        args,
-		"cwd":         cwd,
-		"stopAtEntry": spec.StopOnEntry,
-		"justMyCode":  true,
-	}
+	launchArgs := dapArguments("launch")
+	launchArgs["program"] = exe
+	launchArgs["args"] = args
+	launchArgs["cwd"] = cwd
+	launchArgs["stopAtEntry"] = spec.StopOnEntry
 
 	if len(spec.Env) > 0 {
 		launchArgs["env"] = spec.Env

@@ -35,11 +35,19 @@ func (d *Driver) PrepareAttach(ctx context.Context, spec api.AttachSpec) (sessio
 // attachArguments builds the attach request (netcoredbg's; SharpDbg takes
 // the same); it reads only processId (justMyCode stays on).
 func attachArguments(pid int) map[string]any {
+	args := dapArguments("attach")
+	args["processId"] = pid
+
+	return args
+}
+
+// dapArguments are the fields every launch and attach request of eyedbg's
+// starts from: its name, the coreclr type, the request and justMyCode on.
+func dapArguments(request string) map[string]any {
 	return map[string]any{
 		"name":       "eyedbg",
 		"type":       adapterType,
-		"request":    "attach",
-		"processId":  pid,
+		"request":    request,
 		"justMyCode": true,
 	}
 }

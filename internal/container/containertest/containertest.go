@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -30,10 +31,17 @@ type Rule struct {
 	// Match is the start of the argv after the engine flags (--host=,
 	// --context=); "*" matches any one element. The first rule that matches
 	// answers.
-	Match  []string `json:"match"`
-	Stdout string   `json:"stdout,omitempty"`
-	Stderr string   `json:"stderr,omitempty"`
-	Exit   int      `json:"exit,omitempty"`
+	Match []string `json:"match"`
+	// Has, when set, also needs some argv element to contain it (two
+	// inspects with different templates differ only there).
+	Has    string `json:"has,omitempty"`
+	Stdout string `json:"stdout,omitempty"`
+	Stderr string `json:"stderr,omitempty"`
+	Exit   int    `json:"exit,omitempty"`
+	// Times, when set (with Scenario.Calls), makes the rule answer only the
+	// first Times calls that match it; later ones fall through to the next
+	// rule: a state that changes between two identical calls.
+	Times int `json:"times,omitempty"`
 	// SaveStdin is a file the fake writes its standard input to.
 	SaveStdin string `json:"saveStdin,omitempty"`
 	// Flood is how many bytes of "x" the fake writes to stdout after Stdout.
@@ -143,7 +151,7 @@ func run(raw string, argv []string, stdin io.Reader, stdout, stderr io.Writer) i
 	}
 
 	for _, r := range sc.Rules {
-		if !matches(r.Match, rest) {
+		if !r.applies(rest) || (r.Times > 0 && callsMatching(sc.Calls, r) > r.Times) {
 			continue
 		}
 
@@ -170,6 +178,43 @@ func run(raw string, argv []string, stdin io.Reader, stdout, stderr io.Writer) i
 	_, _ = io.WriteString(stderr, "fake docker: no rule for "+strings.Join(rest, " ")+"\n")
 
 	return 125
+}
+
+// applies reports whether r matches argv (after the engine flags).
+func (r Rule) applies(argv []string) bool {
+	return matches(r.Match, argv) && (r.Has == "" || slices.ContainsFunc(argv, func(a string) bool { return strings.Contains(a, r.Has) }))
+}
+
+// callsMatching is how many calls in the Calls file r applies to, the
+// current one (already appended) included.
+func callsMatching(path string, r Rule) int {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	n := 0
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(nil, 1<<20)
+
+	for sc.Scan() {
+		var argv []string
+		if json.Unmarshal(sc.Bytes(), &argv) != nil {
+			continue
+		}
+
+		for len(argv) > 0 && (strings.HasPrefix(argv[0], "--host=") || strings.HasPrefix(argv[0], "--context=")) {
+			argv = argv[1:]
+		}
+
+		if r.applies(argv) {
+			n++
+		}
+	}
+
+	return n
 }
 
 func matches(pattern, argv []string) bool {
