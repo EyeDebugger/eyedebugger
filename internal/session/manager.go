@@ -465,8 +465,29 @@ func (m *Manager) only() (*Session, error) {
 
 	slices.Sort(ids)
 
-	return nil, api.NewError(api.CodeNoSession, "several sessions exist: "+strings.Join(ids, ", "),
-		"pick one with -s <id> or EYEDBG_SESSION")
+	hint := "pick one with -s <id> or EYEDBG_SESSION"
+	if g := sharedGroup(live); g != "" {
+		hint += "; they are one group: 'eyedbg compose wait -g " + g + "' waits for whichever stops"
+	}
+
+	return nil, api.NewError(api.CodeNoSession, "several sessions exist: "+strings.Join(ids, ", "), hint)
+}
+
+// sharedGroup is the group every session in list belongs to; "" when they
+// have none or differ.
+func sharedGroup(list []*Session) string {
+	group := ""
+
+	for i, s := range list {
+		g := s.Info().Group
+		if g == "" || (i > 0 && g != group) {
+			return ""
+		}
+
+		group = g
+	}
+
+	return group
 }
 
 // List returns every live and lost session, oldest first.
