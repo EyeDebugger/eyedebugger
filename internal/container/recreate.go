@@ -62,11 +62,17 @@ func (r ProjectRef) validate() error {
 		}
 	}
 
-	if len(r.EnvFiles) > maxComposeFiles {
+	return ValidateEnvFiles(r.EnvFiles)
+}
+
+// ValidateEnvFiles checks --env-file values the way [Engine.ComposeUp] does, so
+// a caller can refuse them before it changes anything.
+func ValidateEnvFiles(files []string) error {
+	if len(files) > maxComposeFiles {
 		return api.NewError(api.CodeInvalidRequest, fmt.Sprintf("more than %d --env-file flags", maxComposeFiles), "")
 	}
 
-	for _, f := range r.EnvFiles {
+	for _, f := range files {
 		if err := checkComposePath("--env-file", f); err != nil {
 			return err
 		}
@@ -74,6 +80,11 @@ func (r ProjectRef) validate() error {
 
 	return nil
 }
+
+// Validate checks every value of r that reaches docker compose's argv, as
+// [Engine.ComposeUp] does before it runs, so a caller can refuse a project
+// before it changes anything.
+func (r ProjectRef) Validate() error { return r.validate() }
 
 // upArgs is the argv (after the docker executable and engine flags) of
 // compose up for services: detached, only those services (--no-deps),

@@ -83,6 +83,36 @@ func (d *Driver) PrepareContainerLaunch(ctx context.Context, spec api.ContainerL
 	return launch, nil
 }
 
+// EnsureContainerAdapter makes netcoredbg runnable in the container fi
+// describes, as the launch will need it, before anything is changed
+// (docs/adr/0021, D19): `compose launch` calls it on a container it is about to
+// recreate, so a musl image, a foreign architecture, a read-only root file
+// system or a missing `--platform` install fail first. The adapter that is
+// already there is probed and left alone; otherwise it is copied and probed
+// (the same copy any attach makes). sharpdbg can't run in a container.
+func (d *Driver) EnsureContainerAdapter(ctx context.Context, engine container.Engine, fi container.FastInfo) error {
+	m, err := d.containerManifest()
+	if err != nil {
+		return err
+	}
+
+	arch, err := imageArch(ctx, engine, container.Info{Name: fi.Name, Image: fi.Image})
+	if err != nil {
+		return err
+	}
+
+	adapter, err := d.containerAdapter(m, "linux/"+arch)
+	if err != nil {
+		return err
+	}
+
+	if engine.ProbeAdapter(ctx, fi.ID, adapter) == nil {
+		return nil
+	}
+
+	return engine.InstallAdapter(ctx, fi.ID, adapter)
+}
+
 // launchTarget is what is known of a fast-mode container before the stray
 // guard runs and anything is copied into it.
 type launchTarget struct {

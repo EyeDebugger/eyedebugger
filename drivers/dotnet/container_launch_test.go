@@ -617,3 +617,82 @@ func TestStrayHintOfAFailedStart(t *testing.T) {
 		})
 	}
 }
+
+// TestEnsureContainerAdapter: the adapter is probed first and copied only when
+// the probe fails; every refusal comes before a copy.
+func TestEnsureContainerAdapter(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		c        fastContainer
+		wantDock []string
+		wantCode api.Code
+	}{
+		{"already there: probed, not copied", fastContainer{}, []string{"image inspect", "exec"}, ""},
+		{"missing: copied and probed", fastContainer{probeFirstFails: true}, []string{"image inspect", "exec", "cp", "exec"}, ""},
+		{"read-only root file system", fastContainer{probeFirstFails: true, copyFails: true}, []string{"image inspect", "exec", "cp"}, api.CodeAttachFailed},
+		{"a windows image", fastContainer{image: "windows/amd64/\n"}, []string{"image inspect"}, api.CodeAttachFailed},
+		{"an unsupported architecture", fastContainer{image: "linux/riscv64/\n"}, []string{"image inspect"}, api.CodeAttachFailed},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			r := newLaunchRig(t, tt.c)
+
+			engine, err := r.d.env.engine(api.ContainerEngine{})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			fi := container.FastInfo{ID: testContainerID, Name: "web-1", Image: testImageID}
+
+			err = r.d.EnsureContainerAdapter(t.Context(), engine, fi)
+			if api.CodeOf(err) != tt.wantCode {
+				t.Errorf("err = %v (%s), want code %q", err, api.CodeOf(err), tt.wantCode)
+			}
+
+			if got := r.docker(t); !slices.Equal(got, tt.wantDock) {
+				t.Errorf("docker ran %q, want %q", got, tt.wantDock)
+			}
+		})
+	}
+}
+
+// TestEnsureContainerAdapterRefusals: sharpdbg and an adapter that isn't
+// installed for the image's platform are refused without touching the
+// container.
+func TestEnsureContainerAdapterRefusals(t *testing.T) {
+	t.Parallel()
+
+	r := newLaunchRig(t, fastContainer{})
+
+	engine, err := r.d.env.engine(api.ContainerEngine{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fi := container.FastInfo{ID: testContainerID, Name: "web-1", Image: testImageID}
+
+	sharp := *r.d
+	sharp.pick = SharpDbg
+
+	if err := sharp.EnsureContainerAdapter(t.Context(), engine, fi); api.CodeOf(err) != api.CodeInvalidRequest {
+		t.Errorf("sharpdbg: err = %v", err)
+	}
+
+	missing := *r.d
+	missing.env.installedFor = func(*adapters.Manifest, string) (string, string, error) { return "", "", adapters.ErrNotInstalled }
+
+	if err := missing.EnsureContainerAdapter(t.Context(), engine, fi); api.CodeOf(err) != api.CodeAdapterMissing {
+		t.Errorf("not installed: err = %v", err)
+	}
+
+	for _, sub := range r.docker(t) {
+		if sub == "cp" || sub == "exec" {
+			t.Errorf("the container was touched: docker ran %s", sub)
+		}
+	}
+}
