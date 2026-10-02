@@ -105,9 +105,21 @@ type Launch struct {
 	// directories (see [PathMap]). Nil: paths are the host's.
 	PathMap *PathMap
 	// Container, when set, says the attach is to a process in a container
-	// (see [ContainerAttacher]): the session reports it, has no host pid of
-	// its own, and takes a claim on the container's process.
+	// (see [ContainerAttacher]), or the launch is of one (see
+	// [ContainerLauncher]): the session reports it, has no host pid of its
+	// own, and takes a claim on the container's process, or on the whole
+	// container for a launch.
 	Container *api.ContainerInfo
+	// StartFailureHint, when set, is called after a start of this launch
+	// failed and its adapter was killed, with a context that ends within a few
+	// seconds: what it returns (empty: nothing) is added to the error's hint.
+	// For a launch in a container, whose adapter's kill reaches only the
+	// docker client on the host: it says what may still run in the
+	// container.
+	StartFailureHint func(ctx context.Context) string
+	// Warnings are things the driver noticed and did not fail the start for;
+	// the manager logs each.
+	Warnings []string
 }
 
 // Request kinds for [Launch.Request].
@@ -143,6 +155,17 @@ type ContainerAttacher interface {
 	// candidate when spec.Container.RequireDotnet says it was picked
 	// implicitly.
 	PrepareContainerAttach(ctx context.Context, spec api.AttachSpec) (Launch, error)
+}
+
+// ContainerLauncher is a [Driver] that can launch a program inside a
+// container (docs/adr/0021): its adapter is whatever it can run there, over
+// docker or the like, so the session sees only a [Launch] (with Container and
+// usually PathMap set). What runs is the driver's to read from the container;
+// the spec names only the container.
+type ContainerLauncher interface {
+	// PrepareContainerLaunch describes how to launch spec's container's
+	// program under the adapter. Launch.Request must be a launch.
+	PrepareContainerLaunch(ctx context.Context, spec api.ContainerLaunchSpec) (Launch, error)
 }
 
 // ErrNotCandidate marks (in an error's chain) a container that an implicit

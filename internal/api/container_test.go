@@ -49,3 +49,29 @@ func TestContainerWireShapes(t *testing.T) {
 		t.Errorf("AttachSpec = %s, %v", att, err)
 	}
 }
+
+// TestContainerLaunchWireShapes pins the container launch's additions the same
+// way: zero values are omitted.
+func TestContainerLaunchWireShapes(t *testing.T) {
+	t.Parallel()
+
+	launch, err := json.Marshal(api.ContainerLaunchSpec{Ref: "web-1", StopOnEntry: true})
+	if err != nil || string(launch) != `{"ref":"web-1","stopOnEntry":true}` {
+		t.Errorf("ContainerLaunchSpec = %s, %v", launch, err)
+	}
+
+	plain, err := json.Marshal(api.ContainerInfo{ID: "i", Name: "n", PID: 1})
+	if err != nil || strings.Contains(string(plain), "launched") {
+		t.Errorf("an attached ContainerInfo = %s, %v: launched must be omitted", plain, err)
+	}
+
+	launched, err := json.Marshal(api.ContainerInfo{ID: "i", Name: "n", Launched: true})
+	if err != nil || !strings.Contains(string(launched), `"launched":true`) {
+		t.Errorf("a launched ContainerInfo = %s, %v", launched, err)
+	}
+
+	start, err := json.Marshal(api.StartParams{Lang: "dotnet"})
+	if err != nil || strings.Contains(string(start), "containerLaunch") {
+		t.Errorf("StartParams without a container launch = %s, %v", start, err)
+	}
+}
