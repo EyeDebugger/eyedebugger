@@ -1,0 +1,40 @@
+# Two .NET 10 services and a Kafka broker, shaped like a Visual Studio container-tools solution:
+# one build context for the whole tree, one Dockerfile per project, exec-form ENTRYPOINT.
+# Used by the docker e2e tests (internal/e2e, EYEDBG_E2E_DOCKER=1); see ../../README.md.
+services:
+  broker:
+    image: apache/kafka:3.8.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+  producer:
+    build:
+      context: .
+      dockerfile: Producer/Dockerfile
+    depends_on: [broker]
+    # Scratch canaries, not secrets: the fast-mode e2e checks that the launched app inherits both.
+    environment:
+      EYEDBG_FIXTURE_ENV: compose
+    env_file: fixture.env
+    # Healthy while the loop's heartbeat file is fresh, so a stop or an idle container goes unhealthy
+    # after about retries x interval + timeout (18 s).
+    healthcheck:
+      test: ["CMD-SHELL", "test $$(( $$(date +%s) - $$(date -r /tmp/alive +%s) )) -lt 10"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  consumer:
+    build:
+      context: .
+      dockerfile: Consumer/Dockerfile
+    depends_on: [broker]

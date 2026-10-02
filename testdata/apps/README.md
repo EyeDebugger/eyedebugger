@@ -20,6 +20,26 @@ tests (docs/DESIGN.md §12-13). Go tooling ignores `testdata/`.
   so the project's default assembly name (`mstest`, from the directory) collides with the `MSTest`
   package and fails restore with NU1108 otherwise. Restoring it needs network access to NuGet
   (MSTest).
+- `dotnet/compose`: a docker compose stack shaped like a Visual Studio container-tools solution,
+  for the docker e2e tests (`EYEDBG_E2E_DOCKER=1`; see `docs/adr/0020-…` and `0021-…`). One build
+  context (`.`) for the tree, one Dockerfile per project (VS template: `base` runtime stage,
+  `build`, `publish`, `final`, `WORKDIR /src`, `COPY . .`, exec-form `ENTRYPOINT ["dotnet", "X.dll"]`
+  so PDBs name `/src/...`), `ARG BUILD_CONFIGURATION=Release` as the VS template does. Services:
+  `producer` (root; healthcheck on a heartbeat file its loop rewrites, 5 s x 3 retries + 3 s timeout,
+  so a stop or an idle container goes `unhealthy` after about 18 s; `environment:` and `env_file:`
+  canaries `EYEDBG_FIXTURE_ENV=compose` / `EYEDBG_FIXTURE_ENVFILE=file`, scratch values, not
+  secrets), `consumer` (`USER $APP_UID`, Kafka `max.poll.interval.ms` 10 s) and `broker` (Apache
+  Kafka 3.8, KRaft). No service sets `command:`. Both apps reach their markers twice a second with
+  or without the broker, so automated runs start only the .NET services:
+  `docker compose -p eyedbg-e2e-x up -d --build --wait --no-deps producer consumer` (needs network
+  for the base images and NuGet; remove with `down --rmi local -v` for that project). Markers:
+  `// marker: startup` (producer, before its loop; local `startupEnv` = `compose/file` when the
+  container's environment and env_file reached the app), `produce` (producer, local `item`), `tick`
+  (consumer, local `ticks`), `handle` (consumer, local `doubled`). Each app's `Program` class holds
+  `static readonly string Build` (`"debug"` under `#if DEBUG`, else `"release"`: which build the
+  container runs) and `static string Tag` (`"v1"`; the fast-mode e2e edits it to `"v2"` and
+  rebuilds): read them with `eval Build` / `eval Tag` in a frame of a `Program` method (`Produce`,
+  `Tick`, `Handle`). Debug images: `--build-arg BUILD_CONFIGURATION=Debug`.
 - `python/basic`: the Python e2e app (`drivers/generic`, `TestPython*`); run it
   as `python app.py loop|raise|child|wait`.
 - `c/basic`, `cpp/basic`, `rust/basic`: the lldb-dap e2e apps (`drivers/generic`, `TestLldb*`,
