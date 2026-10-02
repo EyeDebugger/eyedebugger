@@ -27,7 +27,7 @@ func sessionHandlers(m *session.Manager) map[string]handler {
 	all := make(map[string]handler)
 
 	for _, group := range []map[string]handler{
-		lifecycleHandlers(m), execHandlers(m), breakpointHandlers(m), inspectHandlers(m), leaseHandlers(m),
+		lifecycleHandlers(m), execHandlers(m), breakpointHandlers(m), inspectHandlers(m), leaseHandlers(m), containerHandlers(m),
 	} {
 		maps.Copy(all, group)
 	}
@@ -41,6 +41,12 @@ func lifecycleHandlers(m *session.Manager) map[string]handler {
 			c, err := api.ParseClient(p.Client)
 			if err != nil {
 				return nil, err
+			}
+
+			// A container is attached to by its own method: an older daemon
+			// would drop the field here and attach to a host process.
+			if p.Attach != nil && p.Attach.Container != nil {
+				return nil, api.NewError(api.CodeInvalidRequest, "a container is attached to with "+api.MethodContainerAttach+", not session.start", "")
 			}
 
 			return startSession(ctx, m, c, p)

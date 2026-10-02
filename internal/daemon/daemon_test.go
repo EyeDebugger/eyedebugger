@@ -57,6 +57,13 @@ func startServer(t *testing.T) *testServer {
 func startServerIn(t *testing.T, paths Paths, idle time.Duration) *testServer {
 	t.Helper()
 
+	return startServerWith(t, paths, idle, fakeDriver{})
+}
+
+// startServerWith is startServerIn with drivers.
+func startServerWith(t *testing.T, paths Paths, idle time.Duration, drivers ...session.Driver) *testServer {
+	t.Helper()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	ts := &testServer{paths: paths, done: make(chan error, 1), stop: cancel}
 
@@ -66,7 +73,7 @@ func startServerIn(t *testing.T, paths Paths, idle time.Duration) *testServer {
 			IdleTimeout: idle,
 			Info:        testInfo,
 			Logger:      slog.New(slog.DiscardHandler),
-			Drivers:     []session.Driver{fakeDriver{}},
+			Drivers:     drivers,
 		})
 	}()
 
