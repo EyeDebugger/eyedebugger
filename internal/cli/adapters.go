@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -83,7 +84,9 @@ Without a subcommand, prints this help and exits 0; an unknown subcommand exits 
 }
 
 func newAdaptersInstallCommand(g *globals) *cobra.Command {
-	return &cobra.Command{
+	var platform string
+
+	cmd := &cobra.Command{
 		Use:   "install <adapter|language>",
 		Short: "Download and install an adapter",
 		Long: `Download the pinned release of an adapter (named, or by the language it debugs) for this
@@ -104,13 +107,21 @@ installing it), forbid reverse engineering, and say the software may collect dat
 Microsoft (docs/adr/0017). Install it only if you accept that; then 'eyedbg start dotnet --adapter
 sharpdbg' uses it, as do Intel Macs' sessions (no netcoredbg build; Windows on Arm: unverified).
 
+--platform OS/ARCH installs the build for another platform than this machine's, which is how a
+program for a Linux container is fetched on a Mac or Windows host: netcoredbg for
+'eyedbg attach dotnet --container' wants --platform linux/amd64 or linux/arm64 (the container
+image's architecture, 'docker image inspect --format {{.Architecture}} IMAGE'). It installs under
+<data dir>/_platform/OS-ARCH/ (the host's own install is untouched, and the adapter isn't used on
+this machine); an adapter with no download for that platform fails as for the host.
+
 Needs network access (github.com, files.pythonhosted.org, api.nuget.org); blocks until done
 (typically seconds, at most 5m). Idempotent: an installed adapter is left as is. Prints the
 installed path ("path" in --json). Exits 1 for an unknown adapter, an adapter with no download, or
 a download, checksum or extraction failure; nothing half-installed is left behind.`,
 		Example: `  eyedbg adapters install netcoredbg
   eyedbg adapters install python        # the same as: eyedbg adapters install debugpy
-  eyedbg adapters install sharpdbg      # then: eyedbg start dotnet --adapter sharpdbg`,
+  eyedbg adapters install sharpdbg      # then: eyedbg start dotnet --adapter sharpdbg
+  eyedbg adapters install netcoredbg --platform linux/arm64   # for 'eyedbg attach dotnet --container'`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			m, err := resolveAdapter(loadRegistry(), args[0])
@@ -126,23 +137,46 @@ a download, checksum or extraction failure; nothing half-installed is left behin
 			ctx, cancel := context.WithTimeout(cmd.Context(), installTimeout)
 			defer cancel()
 
-			path, err := adapters.Install(ctx, http.DefaultClient, m)
-			if err != nil {
-				return err
-			}
-
-			if g.json {
-				return writeJSON(cmd.OutOrStdout(), struct {
-					Schema  int    `json:"schema"`
-					Adapter string `json:"adapter"`
-					Version string `json:"version"`
-					Path    string `json:"path"`
-				}{jsonSchemaVersion, m.Name, m.Version, path})
-			}
-
-			return writeText(cmd.OutOrStdout(), fmt.Sprintf("%s %s installed at %s\n", m.Name, m.Version, path))
+			return installAdapter(ctx, http.DefaultClient, cmd.OutOrStdout(), m, platform, g.json)
 		},
 	}
+
+	cmd.Flags().StringVar(&platform, "platform", "", "install the build for OS/ARCH, e.g. linux/arm64, instead of this machine's (default "+adapters.HostPlatform()+")")
+
+	return cmd
+}
+
+// installAdapter installs m for platform ("": the host's) and reports where.
+func installAdapter(ctx context.Context, client *http.Client, w io.Writer, m *adapters.Manifest, platform string, asJSON bool) error {
+	if platform == "" {
+		platform = adapters.HostPlatform()
+	}
+
+	if err := adapters.CheckPlatform(platform); err != nil {
+		return api.NewError(api.CodeInvalidRequest, err.Error(), "")
+	}
+
+	path, err := adapters.InstallFor(ctx, client, m, platform)
+	if err != nil {
+		return err
+	}
+
+	if asJSON {
+		return writeJSON(w, struct {
+			Schema   int    `json:"schema"`
+			Adapter  string `json:"adapter"`
+			Version  string `json:"version"`
+			Path     string `json:"path"`
+			Platform string `json:"platform"`
+		}{jsonSchemaVersion, m.Name, m.Version, path, platform})
+	}
+
+	text := fmt.Sprintf("%s %s installed at %s", m.Name, m.Version, path)
+	if platform != adapters.HostPlatform() {
+		text += " (for " + platform + ", not used on this machine)"
+	}
+
+	return writeText(w, text+"\n")
 }
 
 // resolveAdapter finds the manifest named s, or serving language s.

@@ -4,9 +4,18 @@
 package cli
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -317,5 +326,105 @@ func TestDoctorDotnet(t *testing.T) {
 				t.Errorf("a problem = %v, want %v", failed, tt.wantFailed)
 			}
 		})
+	}
+}
+
+// installServer serves a tar.gz holding a netcoredbg directory over https and
+// returns a manifest whose one download it is.
+func installServer(t *testing.T) (*http.Client, *adapters.Manifest) {
+	t.Helper()
+
+	var buf bytes.Buffer
+
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+
+	for _, name := range []string{"netcoredbg/netcoredbg", "netcoredbg/lib.so"} {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: 1, Typeflag: tar.TypeReg}); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := tw.Write([]byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := errors.Join(tw.Close(), gz.Close()); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(buf.Bytes()) }))
+	t.Cleanup(srv.Close)
+
+	sum := sha256.Sum256(buf.Bytes())
+
+	return srv.Client(), &adapters.Manifest{
+		Name: "netcoredbg", Version: "3.2.0-1092",
+		Adapter: adapters.Adapter{ID: "coreclr", Entry: "netcoredbg"},
+		Install: &adapters.InstallSpec{Downloads: map[string]adapters.Download{"*": {
+			URL: srv.URL + "/a.tar.gz", SHA256: hex.EncodeToString(sum[:]), Archive: "tar.gz", Root: "netcoredbg", Size: int64(buf.Len()),
+		}}},
+	}
+}
+
+// TestInstallAdapterPlatform: --platform installs under _platform/OS-ARCH, says
+// so, reports the platform in --json, and refuses what isn't OS/ARCH. Not
+// parallel: it sets environment variables.
+func TestInstallAdapterPlatform(t *testing.T) {
+	data := t.TempDir()
+	t.Setenv(adapters.EnvDataDir, data)
+
+	client, m := installServer(t)
+
+	platform := "linux/arm64"
+	if adapters.HostPlatform() == platform {
+		platform = "linux/amd64"
+	}
+
+	var out bytes.Buffer
+	if err := installAdapter(t.Context(), client, &out, m, platform, false); err != nil {
+		t.Fatal(err)
+	}
+
+	want := filepath.Join(data, "_platform", strings.Replace(platform, "/", "-", 1), "netcoredbg", "3.2.0-1092", "netcoredbg")
+	if got := out.String(); got != "netcoredbg 3.2.0-1092 installed at "+want+" (for "+platform+", not used on this machine)\n" {
+		t.Errorf("text output = %q", got)
+	}
+
+	out.Reset()
+
+	if err := installAdapter(t.Context(), client, &out, m, platform, true); err != nil {
+		t.Fatal(err)
+	}
+
+	var res struct {
+		Schema   int    `json:"schema"`
+		Path     string `json:"path"`
+		Platform string `json:"platform"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil || res.Schema != 1 || res.Path != want || res.Platform != platform {
+		t.Errorf("json output = %s (%v)", out.String(), err)
+	}
+
+	// The host's own install: where it always was, no platform note.
+	out.Reset()
+
+	if err := installAdapter(t.Context(), client, &out, m, "", false); err != nil {
+		t.Fatal(err)
+	}
+
+	hostEntry := filepath.Join(data, "netcoredbg", "3.2.0-1092", "netcoredbg")
+	if runtime.GOOS == "windows" {
+		hostEntry += ".exe"
+	}
+
+	if got := out.String(); got != "netcoredbg 3.2.0-1092 installed at "+hostEntry+"\n" {
+		t.Errorf("host install output = %q", got)
+	}
+
+	for _, bad := range []string{"linux", "linux/arm64/v8", "../x/y", "Linux/arm64"} {
+		if err := installAdapter(t.Context(), client, &out, m, bad, false); api.CodeOf(err) != api.CodeInvalidRequest {
+			t.Errorf("installAdapter(%q) err = %v, want INVALID_REQUEST", bad, err)
+		}
 	}
 }

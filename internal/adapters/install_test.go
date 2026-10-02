@@ -139,12 +139,12 @@ func TestInstall(t *testing.T) {
 
 			dir := filepath.Join(t.TempDir(), m.Name, m.Version)
 
-			got, err := install(t.Context(), srv.Client(), m, "linux/amd64", dir)
+			got, err := install(t.Context(), srv.Client(), m, HostPlatform(), dir)
 			if err != nil || got != filepath.Join(dir, tt.want) {
 				t.Fatalf("install = %q, %v; want %s", got, err, filepath.Join(dir, tt.want))
 			}
 
-			again, err := install(t.Context(), srv.Client(), m, "linux/amd64", dir)
+			again, err := install(t.Context(), srv.Client(), m, HostPlatform(), dir)
 			if err != nil || again != got || hits.Load() != 1 {
 				t.Fatalf("second install = %q, %v after %d downloads; want a no-op", again, err, hits.Load())
 			}
