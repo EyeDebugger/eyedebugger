@@ -11,6 +11,11 @@ import "strings"
 // attach to a host process; an unknown method fails with UNKNOWN_METHOD.
 const MethodContainerAttach = "container.attach"
 
+// MessageOutsidePathMap ends the message of the INVALID_REQUEST for a line
+// breakpoint whose file is outside a container session's path map. The
+// compose commands read it as "not for this member", not as a failure.
+const MessageOutsidePathMap = " is outside the container's path map"
+
 // PathMapping pairs a directory in a container with the host directory
 // holding the same sources (docs/adr/0020, D5): Remote is an absolute
 // POSIX path as the debug adapter in the container names sources, Local an

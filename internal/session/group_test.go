@@ -5,6 +5,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -770,4 +771,51 @@ func TestAnyClosed(t *testing.T) {
 			t.Error("anyClosed = true with none closed")
 		}
 	})
+}
+
+// TestSeveralSessionsHintNamesTheGroup: when every live session is a member
+// of one group, the "several sessions" error points at 'compose wait'.
+func TestSeveralSessionsHintNamesTheGroup(t *testing.T) {
+	t.Parallel()
+
+	a, b, other := newBareMember(t, "s-a", "web"), newBareMember(t, "s-b", "db"), newBareMember(t, "s-c", "")
+	other.s.group = "else"
+
+	ended := newBareMember(t, "s-d", "")
+	ended.s.group = "else"
+	ended.setState(api.StateExited)
+
+	tests := []struct {
+		name         string
+		members      []*Session
+		wantGroup    bool
+		wantContains string
+	}{
+		{"one group", sessionsOf(a, b), true, "s-a, s-b"},
+		{"two groups", sessionsOf(a, b, other), false, "s-a, s-b, s-c"},
+		{"an exited one of another group doesn't count", sessionsOf(a, b, ended), true, "s-a, s-b"},
+		{"no group", func() []*Session {
+			x, y := newBareMember(t, "s-x", ""), newBareMember(t, "s-y", "")
+			x.s.group, y.s.group = "", ""
+
+			return sessionsOf(x, y)
+		}(), false, "s-x, s-y"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := newGroupManager(t, tt.members...).Get("")
+
+			var apiErr *api.Error
+			if !errors.As(err, &apiErr) || apiErr.Code != api.CodeNoSession || !strings.Contains(apiErr.Message, tt.wantContains) {
+				t.Fatalf("Get(\"\") = %v, want NO_SESSION naming %q", err, tt.wantContains)
+			}
+
+			if got := strings.Contains(apiErr.Hint, "eyedbg compose wait -g app"); got != tt.wantGroup {
+				t.Errorf("hint = %q; names the group = %v, want %v", apiErr.Hint, got, tt.wantGroup)
+			}
+		})
+	}
 }

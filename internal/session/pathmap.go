@@ -171,7 +171,7 @@ func (m *PathMap) checkBreakpoint(spec api.BreakpointSpec) error {
 		return nil
 	}
 
-	return api.NewError(api.CodeInvalidRequest, spec.File+" is outside the container's path map",
+	return api.NewError(api.CodeInvalidRequest, spec.File+api.MessageOutsidePathMap,
 		"the map is "+m.String()+": a breakpoint's file must be under one of its host directories (--map REMOTE=LOCAL adds one)")
 }
 
