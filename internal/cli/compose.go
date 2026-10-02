@@ -62,14 +62,17 @@ func composePS(ctx context.Context, host, dockerContext string, o container.Comp
 const composeLong = `Debug the .NET services of a running docker compose stack as one group, without editing any compose file:
 'eyedbg compose attach' attaches to every service at once (one session each, labeled with the compose project as
 their group), 'compose bp' puts breakpoints, by host path, in any of them, 'compose wait' blocks until whichever stops,
-you inspect and step that one with the ordinary commands and its -s ID, and 'compose stop' lets go of them all. The
-stack keeps running: attaching changes nothing in it but copies netcoredbg into the containers.
+you inspect and step that one with the ordinary commands and its -s ID, and 'compose stop' lets go of them all.
+Attaching changes nothing in the stack but copies netcoredbg into the containers.
 
-  attach [SERVICE...]  attach to the running services (the .NET ones, or the named ones)
-  wait                 block until any member stops; show where
-  events               the members' event logs merged into one stream
-  bp add|ls|rm         breakpoints in every member at once
-  stop                 end every member's session (the containers keep running)
+  attach [SERVICE...]   attach to the running services (the .NET ones, or the named ones)
+  launch [SERVICE...]   build Debug on this machine and launch the services under the debugger in their containers
+                        (fast mode: recreates the containers it names)
+  restore [SERVICE...]  put fast-mode services back as built
+  wait                  block until any member stops; show where
+  events                the members' event logs merged into one stream
+  bp add|ls|rm          breakpoints in every member at once
+  stop                  end every member's session (attached: detached; launched: the app is terminated)
 
 Needs docker with the compose plugin, and netcoredbg installed for the containers' platform ('eyedbg adapters
 install netcoredbg --platform linux/arm64', or linux/amd64): see 'eyedbg help compose attach'. Which group the
@@ -83,18 +86,22 @@ max.poll.interval.ms (5 minutes by default). Snapshots of a stopped service say 
 note when these thresholds pass: keep stops short.
 
 Line breakpoints bind in Debug builds. In verified runs a Release build's line breakpoints did not bind when attached
-(pause and stacks work): build the images with --build-arg BUILD_CONFIGURATION=Debug (the Visual Studio Dockerfile
-template has the argument) for breakpoints.
+(pause and stacks work): 'eyedbg compose launch' builds Debug for you and launches the app under the debugger (it
+RECREATES the containers it names: see 'eyedbg help compose launch'), or build the images with --build-arg
+BUILD_CONFIGURATION=Debug (the Visual Studio Dockerfile template has the argument).
 
 Docker access is the trust boundary: eyedbg attaches wherever your docker user may, to the engine DOCKER_HOST (else
 DOCKER_CONTEXT) names. eyedbg never reads a container's environment, command or arguments, nor 'docker compose
-config' (it inlines env_file values): its one compose call is 'docker compose ps'. Linux containers on docker 24 to
-26 are verified; Windows hosts, podman, rootless docker, remote engines and emulated architectures are not.
+config' (it inlines env_file values): its compose calls are 'docker compose ps' and, for launch and restore, 'docker
+compose up' for the named services only. Linux containers on docker 24 to 26 are verified; Windows hosts, podman,
+rootless docker, remote engines and emulated architectures are not.
 
 Without a subcommand, prints this help and exits 0; an unknown subcommand exits 1.`
 
 const composeExample = `  eyedbg compose attach                           # every running .NET service of the stack in this directory
   eyedbg compose attach producer consumer --bp Producer/Program.cs:42
+  eyedbg compose launch producer --bp Producer/Program.cs:6    # Debug build, launched under the debugger (recreates producer)
+  eyedbg compose restore                          # fast-mode services back as built
   eyedbg compose wait                             # block until one of them stops
   eyedbg compose bp add Consumer/Program.cs:17
   eyedbg compose events --since 's-k3f9:12,s-m2n4:4'

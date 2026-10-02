@@ -37,8 +37,9 @@ func (w *launchWorld) snap() snapshot {
 		s.ids[c.Service] = c.ID
 	}
 
-	for service, sess := range w.sessions() {
-		s.sessions[service] = sess.ID
+	sessions := w.sessions()
+	for service := range sessions {
+		s.sessions[service] = sessions[service].ID
 	}
 
 	return s

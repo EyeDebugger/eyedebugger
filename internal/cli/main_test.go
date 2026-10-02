@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
+	"github.com/eyedebugger/eyedebugger/internal/container/containertest"
 	"github.com/eyedebugger/eyedebugger/internal/dap/daptest"
 	"github.com/eyedebugger/eyedebugger/internal/helper/helpertest"
 	"github.com/eyedebugger/eyedebugger/internal/session"
@@ -20,6 +21,7 @@ import (
 // fake .NET side helper.
 func TestMain(m *testing.M) {
 	helpertest.MaybeRun()
+	containertest.MaybeRun()
 
 	if daptest.MaybeRun() {
 		return

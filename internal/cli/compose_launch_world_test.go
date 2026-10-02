@@ -4,11 +4,9 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -71,16 +69,8 @@ type fakeStack struct {
 	onUp func(c upCall)
 }
 
-func (f *fakeStack) record(format string, args ...any) {
+func (f *fakeStack) recordf(format string, args ...any) {
 	f.log = append(f.log, fmt.Sprintf(format, args...))
-}
-
-// logged is the ordered log of docker-side events.
-func (f *fakeStack) logged() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	return slices.Clone(f.log)
 }
 
 // upCalls are the 'compose up' calls so far.
@@ -161,7 +151,7 @@ func (f *fakeStack) InspectFast(_ context.Context, ref string) (container.FastIn
 		return container.FastInfo{}, api.NewError(api.CodeInvalidRequest, "no container "+ref, "")
 	}
 
-	f.record("inspect %s", c.fi.Service)
+	f.recordf("inspect %s", c.fi.Service)
 
 	return c.fi, nil
 }
@@ -171,7 +161,7 @@ func (f *fakeStack) ProbeIdle(_ context.Context, ref string) error {
 	defer f.mu.Unlock()
 
 	c := f.ctrs[ref]
-	f.record("probe %s", c.fi.Service)
+	f.recordf("probe %s", c.fi.Service)
 
 	return f.probeErr[c.fi.Service]
 }
@@ -180,7 +170,7 @@ func (f *fakeStack) FastContainers(_ context.Context, project string) ([]contain
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	f.record("list %s", project)
+	f.recordf("list %s", project)
 
 	if f.listErr != nil {
 		return nil, f.listErr
@@ -209,7 +199,7 @@ type overrideFile struct {
 		Volumes    []struct {
 			Source   string `json:"source"`
 			Target   string `json:"target"`
-			ReadOnly bool   `json:"read_only"`
+			ReadOnly bool   `json:"read_only"` //nolint:tagliatelle // Compose's own key.
 		} `json:"volumes"`
 	} `json:"services"`
 }
@@ -250,7 +240,7 @@ func (f *fakeStack) ComposeUp(_ context.Context, ref container.ProjectRef, overr
 	defer f.mu.Unlock()
 
 	f.ups = append(f.ups, call)
-	f.record("up %s", strings.Join(services, ","))
+	f.recordf("up %s", strings.Join(services, ","))
 
 	if err := ref.Validate(); err != nil {
 		f.t.Errorf("ComposeUp with an invalid project: %v", err)
@@ -281,40 +271,51 @@ func (f *fakeStack) ComposeUp(_ context.Context, ref container.ProjectRef, overr
 
 		delete(f.ctrs, c.fi.ID)
 
-		next := c.asBuilt
-		next.ID = f.newID()
-
-		if override != "" {
-			frag, ok := doc.Services[name]
-			if !ok || len(frag.Volumes) != 1 {
-				f.t.Errorf("the override has no fragment for %s", name)
-
-				continue
-			}
-
-			// What the mount source holds is what the app runs: a recreate
-			// after the mirror.
-			if _, err := os.Stat(filepath.Join(frag.Volumes[0].Source, "marker.txt")); err != nil {
-				f.t.Errorf("the build of %s isn't in %s when the container is recreated: %v", name, frag.Volumes[0].Source, err)
-			}
-
-			next.DLL = ""
-			next.ConfigFiles = append(slices.Clone(ref.Files), override)
-			next.Fast = &container.FastLabels{
-				Version: frag.Labels["dev.izzat.eyedbg.fast.version"], Override: frag.Labels["dev.izzat.eyedbg.fast.override"],
-				DLL: frag.Labels["dev.izzat.eyedbg.fast.dll"], WorkDir: frag.Labels["dev.izzat.eyedbg.fast.workdir"],
-				Project: frag.Labels["dev.izzat.eyedbg.fast.project"],
-			}
-			next.Fast.ProjectPath = filepath.Join(f.dir, filepath.FromSlash(next.Fast.Project))
-		} else {
-			next.ConfigFiles = slices.Clone(ref.Files)
-		}
-
-		next.Running = true
-		f.ctrs[next.ID] = &fakeCtr{fi: next, asBuilt: c.asBuilt}
+		next := f.recreated(c, call, doc)
+		f.ctrs[next.fi.ID] = &next
 	}
 
 	return nil
+}
+
+// recreated is the container 'compose up' makes of c: a new id, and either as
+// built or, with an override, idle with the build mounted and eyedbg's labels.
+func (f *fakeStack) recreated(c *fakeCtr, call upCall, doc overrideFile) fakeCtr {
+	next := c.asBuilt
+	next.ID = f.newID()
+	next.Running = true
+
+	if call.override == "" {
+		next.ConfigFiles = slices.Clone(call.ref.Files)
+
+		return fakeCtr{fi: next, asBuilt: c.asBuilt}
+	}
+
+	name := c.fi.Service
+
+	frag, ok := doc.Services[name]
+	if !ok || len(frag.Volumes) != 1 {
+		f.t.Errorf("the override has no fragment for %s", name)
+
+		return fakeCtr{fi: next, asBuilt: c.asBuilt}
+	}
+
+	// What the mount source holds is what the app runs: a recreate after the
+	// mirror.
+	if _, err := os.Stat(filepath.Join(frag.Volumes[0].Source, "marker.txt")); err != nil {
+		f.t.Errorf("the build of %s isn't in %s when the container is recreated: %v", name, frag.Volumes[0].Source, err)
+	}
+
+	next.DLL = ""
+	next.ConfigFiles = append(slices.Clone(call.ref.Files), call.override)
+	next.Fast = &container.FastLabels{
+		Version: frag.Labels["dev.izzat.eyedbg.fast.version"], Override: frag.Labels["dev.izzat.eyedbg.fast.override"],
+		DLL: frag.Labels["dev.izzat.eyedbg.fast.dll"], WorkDir: frag.Labels["dev.izzat.eyedbg.fast.workdir"],
+		Project: frag.Labels["dev.izzat.eyedbg.fast.project"],
+	}
+	next.Fast.ProjectPath = filepath.Join(f.dir, filepath.FromSlash(next.Fast.Project))
+
+	return fakeCtr{fi: next, asBuilt: c.asBuilt}
 }
 
 func (f *fakeStack) findLocked(service string) *fakeCtr {
@@ -325,25 +326,6 @@ func (f *fakeStack) findLocked(service string) *fakeCtr {
 	}
 
 	return nil
-}
-
-// enterFast puts service's container in fast mode as if an earlier launch had,
-// under override (an absolute path): a state a test starts from.
-func (f *fakeStack) enterFast(service, override, project string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	c := f.findLocked(service)
-	if c == nil {
-		f.t.Fatalf("no container for %s", service)
-	}
-
-	c.fi.DLL = ""
-	c.fi.Fast = &container.FastLabels{
-		Version: container.FastVersion, Override: override, DLL: c.asBuilt.DLL, WorkDir: c.asBuilt.WorkDir,
-		Project: project, ProjectPath: filepath.Join(f.dir, filepath.FromSlash(project)),
-	}
-	c.fi.ConfigFiles = append(slices.Clone(c.asBuilt.ConfigFiles), override)
 }
 
 // publishCall is one 'dotnet publish' of the fake.
@@ -379,6 +361,9 @@ type launchWorld struct {
 	hostErr   error
 	// psCalls counts 'docker compose ps' runs.
 	psCalls int
+	// engine, when set, is the docker the commands use instead of the fake
+	// stack: a fake docker CLI, to see the real argv.
+	engine stackDocker
 }
 
 // launchRecord is one launch the fake driver prepared.
@@ -407,7 +392,7 @@ func newLaunchWorld(t *testing.T) *launchWorld {
 
 	for _, rel := range []string{"Producer/Producer.csproj", "Consumer/Consumer.csproj", "producer.txt", "consumer.txt", "consumer2.txt", "compose.yml"} {
 		path := filepath.Join(dir, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			t.Fatal(err)
 		}
 
@@ -445,12 +430,18 @@ func (w *launchWorld) deps() composeDeps {
 			return slices.DeleteFunc(w.docker.rows(), func(r container.ComposeService) bool { return r.State != "running" }), nil
 		},
 		stack: stackDeps{
-			docker: func(string, string) (stackDocker, error) { return w.docker, nil },
+			docker: func(string, string) (stackDocker, error) {
+				if w.engine != nil {
+					return w.engine, nil
+				}
+
+				return w.docker, nil
+			},
 			ensureAdapter: func(_ context.Context, _, _ string, fi container.FastInfo) error {
 				w.docker.mu.Lock()
 				defer w.docker.mu.Unlock()
 
-				w.docker.record("adapter %s", fi.Service)
+				w.docker.recordf("adapter %s", fi.Service)
 
 				return w.docker.adapterErr[fi.Service]
 			},
@@ -477,7 +468,7 @@ func (w *launchWorld) publish(_ context.Context, spec dotnet.PublishSpec) error 
 	w.builds++
 	w.publishes = append(w.publishes, publishCall{spec: spec, at: time.Now()})
 	w.docker.mu.Lock()
-	w.docker.record("publish %s", filepath.Base(spec.Project))
+	w.docker.recordf("publish %s", filepath.Base(spec.Project))
 	w.docker.mu.Unlock()
 
 	if err := w.publishErr[filepath.Base(spec.Project)]; err != nil {
@@ -512,8 +503,8 @@ func (w *launchWorld) publishedProjects() []string {
 	defer w.mu.Unlock()
 
 	var out []string
-	for _, p := range w.publishes {
-		out = append(out, filepath.Base(p.spec.Project))
+	for i := range w.publishes {
+		out = append(out, filepath.Base(w.publishes[i].spec.Project))
 	}
 
 	return out
@@ -570,9 +561,11 @@ func (w *launchWorld) launched() []launchRecord {
 
 // launchedServices are the services of the launches so far, in order.
 func (w *launchWorld) launchedServices() []string {
+	launches := w.launched()
+
 	var out []string
-	for _, l := range w.launched() {
-		out = append(out, l.spec.Service)
+	for i := range launches {
+		out = append(out, launches[i].spec.Service)
 	}
 
 	return out
@@ -605,9 +598,9 @@ func (w *launchWorld) sessions() map[string]api.SessionInfo {
 
 	byService := map[string]api.SessionInfo{}
 
-	for _, s := range doc.Sessions {
-		if s.Container != nil && s.State != api.StateExited {
-			byService[s.Container.Service] = s
+	for i := range doc.Sessions {
+		if s := &doc.Sessions[i]; s.Container != nil && s.State != api.StateExited {
+			byService[s.Container.Service] = *s
 		}
 	}
 
@@ -725,25 +718,3 @@ func (d *launchDriver) launchOn(c *fakeCtr, request, service string, maps []api.
 		},
 	}, nil
 }
-
-// readCalls reads the lines of a calls file (unused helper kept for symmetry
-// with containertest).
-func readLines(path string) []string {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-
-	var out []string
-
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		out = append(out, sc.Text())
-	}
-
-	return out
-}
-
-// errBoom is an injected failure.
-var errBoom = errors.New("boom")
