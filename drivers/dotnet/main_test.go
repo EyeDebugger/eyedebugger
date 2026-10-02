@@ -11,9 +11,10 @@ import (
 )
 
 // TestMain lets the test binary double as the fake docker of the container
-// tests.
+// tests and as the fake dotnet of the publish tests.
 func TestMain(m *testing.M) {
 	containertest.MaybeRun()
+	maybeRunFakeDotnet()
 
 	os.Exit(m.Run())
 }
