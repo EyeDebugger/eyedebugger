@@ -104,6 +104,9 @@ func labelCases() []inspectCase {
 		{"missing labels", func(f []string) { f[9], f[10], f[11] = `""`, `""`, `""` }, func(i Info) string {
 			return wrongIf(i.Project != "" || i.Service != "" || i.WorkingDir != "", "labels from nowhere")
 		}},
+		{"null labels (docker 26 for a missing key)", func(f []string) { f[9], f[10], f[11], f[12] = `null`, `null`, `null`, `null` }, func(i Info) string {
+			return wrongIf(i.Project != "" || i.Service != "" || i.WorkingDir != "" || i.FastMode, "labels from nowhere")
+		}},
 	}
 }
 
@@ -197,5 +200,22 @@ func TestProcessName(t *testing.T) {
 
 	if got := (Info{Path: "/" + strings.Repeat("a", 500)}).ProcessName(); len(got) != 64 {
 		t.Errorf("ProcessName of a long path has %d bytes, want 64", len(got))
+	}
+}
+
+func TestWithoutEngineVars(t *testing.T) {
+	t.Parallel()
+
+	env := []string{"PATH=/bin", "DOCKER_HOST=tcp://stale:1", "DOCKER_CONTEXT=old", "docker_host=x", "DOCKER_CONFIG=/home/me/.docker", "DOCKER_HOSTILE=1", "HOME=/h"}
+
+	got := withoutEngineVars(env)
+	want := []string{"PATH=/bin", "DOCKER_CONFIG=/home/me/.docker", "DOCKER_HOSTILE=1", "HOME=/h"}
+
+	if !slices.Equal(got, want) {
+		t.Errorf("withoutEngineVars = %q, want %q", got, want)
+	}
+
+	if len(env) != 7 {
+		t.Error("withoutEngineVars changed its input")
 	}
 }
