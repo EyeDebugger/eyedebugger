@@ -260,3 +260,54 @@ func TestComposeUpFailure(t *testing.T) {
 		}
 	})
 }
+
+// TestProjectRefValidate: a caller that checks a project first, to refuse it
+// before it changes anything, gets the same refusals as ComposeUp.
+func TestProjectRefValidate(t *testing.T) {
+	t.Parallel()
+
+	ref := upRef(t)
+	if err := ref.Validate(); err != nil {
+		t.Fatalf("a good project: %v", err)
+	}
+
+	bad := ref
+	bad.EnvFiles = []string{"a\nb.env"}
+
+	if err := bad.Validate(); api.CodeOf(err) != api.CodeInvalidRequest {
+		t.Errorf("a bad env file: err = %v", err)
+	}
+
+	bad = ref
+	bad.Files = nil
+
+	if err := bad.Validate(); api.CodeOf(err) != api.CodeInvalidRequest {
+		t.Errorf("no files: err = %v", err)
+	}
+}
+
+func TestValidateEnvFiles(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		files []string
+		ok    bool
+	}{
+		{"none", nil, true},
+		{"one", []string{"a.env"}, true},
+		{"control char", []string{"a\x01.env"}, false},
+		{"empty", []string{""}, false},
+		{"too many", slices.Repeat([]string{"a.env"}, 17), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if err := container.ValidateEnvFiles(tt.files); (err == nil) != tt.ok {
+				t.Errorf("err = %v, want ok = %v", err, tt.ok)
+			}
+		})
+	}
+}

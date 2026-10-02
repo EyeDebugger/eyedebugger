@@ -894,3 +894,96 @@ func TestFastServicesChecksProjectNames(t *testing.T) {
 		t.Errorf("docker ran %d times for invalid projects", n)
 	}
 }
+
+func TestFastContainersAnswers(t *testing.T) {
+	t.Parallel()
+
+	a, b, c := strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64)
+
+	tests := []struct {
+		name   string
+		stdout string
+		want   []container.FastContainer
+	}{
+		{"sorted by service then id", c + " worker\n" + b + " web\n" + a + " web\n", []container.FastContainer{{ID: a, Service: "web"}, {ID: b, Service: "web"}, {ID: c, Service: "worker"}}},
+		{"none", "", nil},
+		{"crlf", a + " web\r\n", []container.FastContainer{{ID: a, Service: "web"}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			e, calls := fastServicesEngine(t, containertest.Rule{Stdout: tt.stdout})
+			e.Context = "remote"
+
+			got, err := e.FastContainers(t.Context(), "my-app")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+
+			want := []string{
+				"--context=remote", "ps", "--all", "--no-trunc", "--filter=label=com.docker.compose.project=my-app",
+				"--filter=label=dev.izzat.eyedbg.fast.override", `--format={{.ID}} {{.Label "com.docker.compose.service"}}`,
+			}
+
+			if argv := containertest.ReadCalls(t, calls)[0]; !slices.Equal(argv, want) {
+				t.Errorf("argv = %q\nwant   %q", argv, want)
+			}
+		})
+	}
+}
+
+// TestFastContainersBadAnswers: a partial answer must never come back, since
+// callers act on every container in it.
+func TestFastContainersBadAnswers(t *testing.T) {
+	t.Parallel()
+
+	full := strings.Repeat("a", 64)
+
+	tests := []struct {
+		name   string
+		stdout string
+		exit   int
+	}{
+		{name: "blank line", stdout: full + " web\n\n" + full + " api\n"},
+		{name: "short id", stdout: "abcdef012345 web\n"},
+		{name: "no service", stdout: full + " \n"},
+		{name: "service looks like a flag", stdout: full + " --rm\n"},
+		{name: "no separator", stdout: full + "web\n"},
+		{name: "docker fails", exit: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			e, _ := fastServicesEngine(t, containertest.Rule{Stdout: tt.stdout, Exit: tt.exit, Stderr: "boom"})
+
+			got, err := e.FastContainers(t.Context(), "my-app")
+			if err == nil || got != nil {
+				t.Errorf("got %v, %v; want an error and no list", got, err)
+			}
+		})
+	}
+}
+
+func TestFastContainersChecksProjectNames(t *testing.T) {
+	t.Parallel()
+
+	e, calls := fastServicesEngine(t, containertest.Rule{})
+
+	for _, p := range []string{"", "My App", "a,b", "--x"} {
+		if _, err := e.FastContainers(t.Context(), p); api.CodeOf(err) != api.CodeInvalidRequest {
+			t.Errorf("project %q: err = %v", p, err)
+		}
+	}
+
+	if n := len(containertest.ReadCalls(t, calls)); n != 0 {
+		t.Errorf("docker ran %d times for invalid projects", n)
+	}
+}

@@ -4,6 +4,7 @@
 package container
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -625,4 +626,54 @@ func (e Engine) FastServices(ctx context.Context, project string) (map[string]bo
 	}
 
 	return services, nil
+}
+
+// FastContainer is a container, in any state, of a compose project that
+// carries eyedbg's fast-mode override label.
+type FastContainer struct {
+	// ID is the full container id, Service its compose service.
+	ID, Service string
+}
+
+// FastContainers lists the containers of compose project (a name), in any
+// state, that carry eyedbg's fast-mode override label, with one docker ps -a:
+// full id and service, sorted by service then id. Every line must be a full id
+// and a service name: anything else fails, so the caller never acts on a
+// partial answer.
+func (e Engine) FastContainers(ctx context.Context, project string) ([]FastContainer, error) {
+	if err := api.CheckGroup(project); err != nil {
+		return nil, err
+	}
+
+	argv := e.Args("ps", "--all", "--no-trunc",
+		"--filter=label="+labelProject+"="+project, "--filter=label="+labelFastMode,
+		`--format={{.ID}} {{.Label "`+labelService+`"}}`)
+
+	res, fail := e.run(ctx, QueryTimeout, nil, argv)
+	if fail != nil {
+		return nil, dockerError(fail)
+	}
+
+	out := strings.TrimRight(string(res.stdout), "\r\n")
+	if out == "" {
+		return nil, nil
+	}
+
+	var found []FastContainer
+
+	for line := range strings.SplitSeq(out, "\n") {
+		id, service, ok := strings.Cut(strings.TrimSuffix(line, "\r"), " ")
+		if !ok || !isFullID(id) || ValidateService(service) != nil {
+			return nil, api.NewError(api.CodeAttachFailed, "unexpected answer from docker ps: "+show(line, 100),
+				"eyedbg reads a fixed set of fields; this docker may differ from the ones it was verified with (docker 24 to 26)")
+		}
+
+		found = append(found, FastContainer{ID: id, Service: service})
+	}
+
+	slices.SortFunc(found, func(a, b FastContainer) int {
+		return cmp.Or(strings.Compare(a.Service, b.Service), strings.Compare(a.ID, b.ID))
+	})
+
+	return found, nil
 }
