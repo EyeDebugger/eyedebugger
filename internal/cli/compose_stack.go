@@ -131,6 +131,13 @@ func (r *stackRun) takeLock() error {
 		return fmt.Errorf("find eyedbg's compose directory: %w", err)
 	}
 
+	// Compose records a container's files as one comma-separated label: a path
+	// with a comma can't be told apart from two (and fails closed when read).
+	if strings.ContainsRune(r.root, ',') {
+		return api.NewError(api.CodeInvalidRequest, "eyedbg's home directory has a comma in its path: "+r.root,
+			"compose records container files comma-separated; set EYEDBG_HOME to a path without one")
+	}
+
 	if r.projectDir, err = artifacts.ProjectDir(r.root, r.project); err != nil {
 		return fmt.Errorf("prepare eyedbg's directory for project %s: %w", r.project, err)
 	}
