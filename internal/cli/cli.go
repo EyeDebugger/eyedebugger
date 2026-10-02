@@ -93,9 +93,12 @@ func Run(ctx context.Context, root *cobra.Command, args []string) int {
 
 	if err := root.ExecuteContext(ctx); err != nil {
 		// Nothing useful can be done if writing the error itself fails.
-		if wantsJSON(root, args) {
+		switch {
+		case wantsJSON(root, args) && isReported(err):
+			// The command's own JSON document already holds it.
+		case wantsJSON(root, args):
 			_ = writeJSON(root.OutOrStdout(), errorOutput{Schema: jsonSchemaVersion, Error: toErrorDoc(err)})
-		} else {
+		default:
 			_, _ = io.WriteString(root.ErrOrStderr(), formatError(root.Name(), err))
 		}
 
@@ -153,6 +156,25 @@ func exitCode(err error) int {
 	}
 }
 
+// reportedError is an error whose details a command has already written in
+// its own output (the per-member results of a compose command): the exit
+// code is its code's, stderr repeats it, and a --json document isn't
+// followed by a second one for it.
+type reportedError struct {
+	err error
+}
+
+func (e *reportedError) Error() string { return e.err.Error() }
+
+func (e *reportedError) Unwrap() error { return e.err }
+
+// isReported reports whether err is, or wraps, a [reportedError].
+func isReported(err error) bool {
+	_, ok := errors.AsType[*reportedError](err)
+
+	return ok
+}
+
 // errorOutput is the --json form of an error.
 type errorOutput struct {
 	Schema int        `json:"schema"`
@@ -189,6 +211,8 @@ Run 'eyedbg <command> --help' or 'eyedbg help <command>' for a command's own hel
 when to use it, whether it blocks (and for how long), its effect on the debuggee, its output shape,
 and its exit codes (docs/DESIGN.md §4). 'eyedbg help --all' prints every command's help in one
 read; add --json for the same as structured data.
+
+A docker compose stack is debugged as one group of sessions, one per .NET service: 'eyedbg help compose'.
 
 Agents: 'eyedbg skill install' installs a usage guide (SKILL.md) for your agent. 'eyedbg help lang'
 covers what each language needs and its own launch.json shape; 'eyedbg help vscode' covers the VS
@@ -227,6 +251,12 @@ const eyedbgExample = `  eyedbg adapters install netcoredbg            # once pe
 
 // NewEyedbgCommand returns the root command of the eyedbg CLI.
 func NewEyedbgCommand(info version.Info) *cobra.Command {
+	return newEyedbgCommand(info, defaultComposeDeps())
+}
+
+// newEyedbgCommand is NewEyedbgCommand with the compose commands' outside
+// world (docker, the clock) given: tests pass fakes.
+func newEyedbgCommand(info version.Info, deps composeDeps) *cobra.Command {
 	root, g := newRoot("eyedbg", "AI-native, CLI-first debugger", eyedbgLong, eyedbgExample, info)
 	root.PersistentFlags().StringVarP(&g.session, "session", "s", "",
 		"session id to act on (default: $"+envSession+", else the only session)")
@@ -249,6 +279,7 @@ func NewEyedbgCommand(info version.Info) *cobra.Command {
 		newSetCommand(info, g),
 		newAttachCommand(info, g),
 		newDetachCommand(info, g),
+		newComposeCommand(info, g, deps),
 		newTestCommand(info, g),
 		newLeaseCommand(info, g),
 		newEventsCommand(info, g),

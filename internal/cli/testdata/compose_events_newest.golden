@@ -1,0 +1,6 @@
+(2 older events were dropped: the logs keep only recent events)
+web  3  stopped: breakpoint, thread 4
+consumer  2  output (stdout): tick 5
+s-q8x1  9  exited with code 1
+next: eyedbg compose events -g myapp --since s-k3f9:0,s-m2n4:2,s-q8x1:9  (12 more)
+(--newest shows only the latest events: reading on from this cursor starts at the older ones left out, and may show these again)

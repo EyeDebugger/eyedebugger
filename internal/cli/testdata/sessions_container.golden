@@ -1,4 +1,4 @@
-ID      LANG    ADAPTER     STATE                 LEASE  CONNECTED  PROGRAM
-s-k3f9  dotnet  netcoredbg  stopped (breakpoint)  agent  -          /work/app/bin/Debug/net10.0/app.dll
-s-k3f9  dotnet  netcoredbg  stopped (breakpoint)  agent  -          web (compose myapp, container web-1, pid 1)
-s-k3f9  dotnet  netcoredbg  running               agent  -          container web-1 (pid 7)
+ID      LANG    ADAPTER     STATE                      LEASE  CONNECTED  PROGRAM
+s-k3f9  dotnet  netcoredbg  stopped (breakpoint)       agent  -          /work/app/bin/Debug/net10.0/app.dll
+s-k3f9  dotnet  netcoredbg  stopped (breakpoint, 45s)  agent  -          web (compose myapp, container web-1, pid 1)
+s-k3f9  dotnet  netcoredbg  running                    agent  -          container web-1 (pid 7)

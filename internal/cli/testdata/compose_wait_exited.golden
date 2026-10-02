@@ -1,0 +1,2 @@
+group myapp: s-k3f9 (web) exited
+session s-k3f9 (dotnet, netcoredbg; service web, container myapp-web-1, group myapp) exited with code 0: the program terminated

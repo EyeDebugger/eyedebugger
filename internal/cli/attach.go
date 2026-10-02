@@ -277,13 +277,25 @@ Output: "session ID detached; pid N keeps running". Returns within a few seconds
 // writeEnded says a session ended, or that it was detached from and its
 // program keeps running (not when the program had exited by itself).
 func writeEnded(w io.Writer, info api.SessionInfo) error {
-	if info.Mode != api.ModeAttach || !strings.HasPrefix(info.EndReason, "detached by") {
-		return writeText(w, "session "+info.ID+" ended\n")
-	}
+	return writeText(w, "session "+info.ID+" "+endedPhrase(info)+"\n")
+}
 
-	if info.Container != nil {
-		return writeText(w, "session "+info.ID+" detached; container "+info.Container.Name+" keeps running\n")
-	}
+// endedPhrase is what became of a session that was stopped, without its id:
+// "ended"; "detached; pid N keeps running" or "detached; container NAME keeps
+// running" for an attached one, which the program or container outlives; and
+// for a program launched in a container, which dies with its session,
+// "app terminated; container NAME idles".
+func endedPhrase(info api.SessionInfo) string {
+	detached := info.Mode == api.ModeAttach && strings.HasPrefix(info.EndReason, "detached by")
 
-	return writeText(w, "session "+info.ID+" detached; pid "+strconv.Itoa(info.PID)+" keeps running\n")
+	switch {
+	case detached && info.Container != nil:
+		return "detached; container " + info.Container.Name + " keeps running"
+	case detached:
+		return "detached; pid " + strconv.Itoa(info.PID) + " keeps running"
+	case info.Container != nil && info.Mode != api.ModeAttach:
+		return "app terminated; container " + info.Container.Name + " idles"
+	default:
+		return "ended"
+	}
 }

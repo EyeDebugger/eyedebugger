@@ -1,0 +1,1 @@
+group myapp: every member has ended ('eyedbg compose stop -g myapp' clears them)
