@@ -214,6 +214,10 @@ func writeComposeRestore(w io.Writer, group string, members []restoredMember, re
 		}{jsonSchemaVersion, group, members, removed})
 	}
 
+	if len(members) == 0 {
+		return writeText(w, "group "+group+": no service is in fast mode\n")
+	}
+
 	var b strings.Builder
 
 	n := 0
