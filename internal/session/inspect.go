@@ -400,11 +400,8 @@ func (s *Session) Output(since, tail int) api.OutputResult {
 // (0: not at all) for one to exist. Output text is cut and the result fits
 // q.Budget tokens and present.MaxResultBytes.
 func (s *Session) Events(ctx context.Context, q api.EventsParams, wait time.Duration) (api.EventsResult, error) {
-	for _, k := range q.Kinds {
-		if !slices.Contains(api.EventKinds(), k) {
-			return api.EventsResult{}, api.NewError(api.CodeInvalidRequest, fmt.Sprintf("unknown event kind %q", k),
-				"kinds: "+api.EventKindNames())
-		}
+	if err := checkEventKinds(q.Kinds); err != nil {
+		return api.EventsResult{}, err
 	}
 
 	var res api.EventsResult
@@ -424,6 +421,17 @@ func (s *Session) Events(ctx context.Context, q api.EventsParams, wait time.Dura
 	res.More += omitted
 
 	return res, nil
+}
+
+// checkEventKinds refuses an unknown event kind.
+func checkEventKinds(kinds []api.EventKind) error {
+	for _, k := range kinds {
+		if !slices.Contains(api.EventKinds(), k) {
+			return api.NewError(api.CodeInvalidRequest, fmt.Sprintf("unknown event kind %q", k), "kinds: "+api.EventKindNames())
+		}
+	}
+
+	return nil
 }
 
 func truncate(v string) string {

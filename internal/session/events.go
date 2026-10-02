@@ -109,6 +109,15 @@ func (l *eventLog) query(q api.EventsParams) api.EventsResult {
 	return l.queryLocked(q)
 }
 
+// queryWatch is query plus the channel the next append closes, read under
+// the same lock: an append after the query is never missed.
+func (l *eventLog) queryWatch(q api.EventsParams) (res api.EventsResult, changed <-chan struct{}) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.queryLocked(q), l.changed
+}
+
 // wait returns once an event matching q exists or ctx ends (TimedOut). A
 // Since of -1 means events after the newest one now.
 func (l *eventLog) wait(ctx context.Context, q api.EventsParams) api.EventsResult {
