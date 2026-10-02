@@ -1,0 +1,9 @@
+group myapp: launched 2 of 2 service(s)
+  producer  s-q8x1  launched  built in 3.5s -> launched (2 breakpoints carried, 1 dropped: its file is gone or outside the map); container myapp-producer-1; its healthcheck fails after 18s of a stop
+  consumer  s-r7y2  launched  from the last build -> launched (1 breakpoint carried); container myapp-consumer-1; its healthcheck fails after 18s of a stop
+path map: /src=/work/app
+override: /home/me/.eyedbg/compose/myapp/override.yml
+build log: /home/me/.eyedbg/compose/myapp/build.log
+note: in fast mode a service's app runs only while its eyedbg session runs it: 'eyedbg stop' (or 'compose stop') kills the app and leaves the container idle and, after its healthcheck's interval, unhealthy, until the next 'eyedbg compose launch' or 'eyedbg compose restore'. Its output is in 'eyedbg output -s ID' and 'eyedbg compose events --kind output', not in 'docker compose logs'.
+undo with: eyedbg compose restore producer consumer
+next: eyedbg compose wait -g myapp  |  eyedbg compose bp add FILE:LINE -g myapp  |  eyedbg compose events --kind output -g myapp  |  eyedbg compose stop -g myapp

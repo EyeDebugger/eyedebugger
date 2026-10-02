@@ -19,6 +19,13 @@ import (
 // the API value plus "schema"; every renderer takes the time "now" it needs
 // as a parameter, so goldens are stable.
 
+// Words of the per-service tables.
+const (
+	rowSkipped  = "skipped"
+	rowFailed   = "failed"
+	rowNoAnswer = "no answer"
+)
+
 // kafkaNoteAfter is how long a stop lasts before the output mentions Kafka
 // consumers: max.poll.interval.ms is 5 minutes by default, and a consumer
 // stopped for most of it is about to leave its group.
@@ -112,7 +119,7 @@ func (o bpOutcome) text(base string) string {
 	case o.Error != nil:
 		return "failed: " + errorLine(o.Error)
 	case o.Breakpoint == nil:
-		return "no answer"
+		return rowNoAnswer
 	}
 
 	bp := o.Breakpoint
@@ -224,11 +231,11 @@ func attachRow(m *attachedMember) []string {
 
 		return []string{name, m.Session.ID, "attached", detail}
 	case m.Skipped != "":
-		return []string{name, "-", "skipped", m.Skipped}
+		return []string{name, "-", rowSkipped, m.Skipped}
 	case m.Error != nil:
-		return []string{name, "-", "failed", errorLine(m.Error)}
+		return []string{name, "-", rowFailed, errorLine(m.Error)}
 	default:
-		return []string{name, "-", "no answer", ""}
+		return []string{name, "-", rowNoAnswer, ""}
 	}
 }
 

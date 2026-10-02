@@ -1,0 +1,5 @@
+group myapp: restored 2 of 2 service(s)
+  producer  restored  recreated as built; ended 1 session (s-k3f9)
+  consumer  restored  recreated as built
+note: recreated as built, with this shell's compose environment (variables and --env-file files); whatever the old containers wrote outside volumes is gone.
+eyedbg's files for this project were removed: no service is in fast mode.
