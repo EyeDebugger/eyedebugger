@@ -316,6 +316,18 @@ func TestMirrorRefusesASymlinkInTheSource(t *testing.T) {
 			t.Helper()
 			symlink(t, filepath.Join(src, "nowhere"), filepath.Join(src, "a-link"))
 		}},
+		// A link that stays inside the source: followed, it would be copied as
+		// the file or directory it names, and the destination would hold a
+		// copy where the source has a link.
+		{"link to a file inside the source", func(t *testing.T, src, _ string) {
+			t.Helper()
+			symlink(t, "App.dll", filepath.Join(src, "a-link"))
+		}},
+		{"link to a directory inside the source", func(t *testing.T, src, _ string) {
+			t.Helper()
+			mkdirs(t, filepath.Join(src, "realdir"))
+			symlink(t, "realdir", filepath.Join(src, "a-link"))
+		}},
 		{"nested link", func(t *testing.T, src, outside string) {
 			t.Helper()
 			mkdirs(t, filepath.Join(src, "deep", "er"))

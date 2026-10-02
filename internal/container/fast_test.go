@@ -157,7 +157,7 @@ func TestInspectFastTemplateReadsOnlyItsFields(t *testing.T) {
 
 	labels := map[string]any{
 		"com.docker.compose.project": "myapp", "com.docker.compose.service": "web",
-		"com.docker.compose.project.working_dir": "/home/me/app", "com.docker.compose.other": "canary-label",
+		"com.docker.compose.project.working_dir": t.TempDir(), "com.docker.compose.other": "canary-label",
 		"dev.izzat.eyedbg.fast.canary": "canary-fast-label",
 	}
 
