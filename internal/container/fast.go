@@ -477,6 +477,8 @@ func ValidAppDir(dir string) error {
 	switch {
 	case dir == "":
 		return refuse("it has none")
+	case dir == "/":
+		return refuse("it is the root directory")
 	case len(dir) > maxAppDirLen || !utf8.ValidString(dir):
 		return refuse("it is too long or not text")
 	case !strings.HasPrefix(dir, "/") || path.Clean(dir) != dir:

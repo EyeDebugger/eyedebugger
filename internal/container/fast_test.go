@@ -596,6 +596,26 @@ func TestValidAppDir(t *testing.T) {
 	}
 }
 
+func TestValidAppDirSaysWhy(t *testing.T) {
+	t.Parallel()
+
+	for dir, want := range map[string]string{
+		"":                             "it has none",
+		"/":                            "root directory",
+		"app":                          "not an absolute, clean path",
+		"/app/../etc":                  "not an absolute, clean path",
+		"/a/b/c/d/e":                   "more than 4 levels",
+		"/ap p":                        "a segment",
+		"/usr/app":                     "system directory",
+		"/.eyedbg-x":                   "eyedbg's own",
+		"/" + strings.Repeat("a", 300): "too long",
+	} {
+		if err := container.ValidAppDir(dir); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("ValidAppDir(%q) = %v, want it to say %q", dir, err, want)
+		}
+	}
+}
+
 func TestValidDLL(t *testing.T) {
 	t.Parallel()
 
