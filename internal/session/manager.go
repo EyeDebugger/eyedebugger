@@ -205,6 +205,22 @@ func (m *Manager) create(ctx context.Context, c api.Client, p api.StartParams, p
 // hook (nil: none) during the configuration (see [Session.configure]); a
 // failure ends s and forgets it.
 func (m *Manager) run(ctx context.Context, s *Session, launch Launch, bps []api.BreakpointSpec, hook configureHook) (*Session, error) {
+	// A start breakpoint outside the path map fails the start before
+	// anything runs (configure checks again).
+	for _, spec := range bps {
+		if err := launch.PathMap.checkBreakpoint(spec); err != nil {
+			if s.run != nil { // a runner test run: shared already, end it properly
+				m.fail(ctx, s, err)
+
+				return nil, err
+			}
+
+			s.closeRecording()
+
+			return nil, err
+		}
+	}
+
 	// The adapter lives as long as the daemon, not this request.
 	if err := s.startAdapter(m.ctx, launch, m.stderr, m.connectTimeout); err != nil { //nolint:contextcheck // Deliberately not the request's context.
 		if s.run != nil { // a runner test run: shared already, end it properly

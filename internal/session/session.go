@@ -139,6 +139,9 @@ type Session struct {
 	// excFilters maps exception modes to the adapter's filters (the
 	// driver's).
 	excFilters map[api.ExceptionMode][]string
+	// pathMap maps the adapter's source paths to the host's (nil: they are
+	// the host's); the driver's, immutable, so read without mu.
+	pathMap *PathMap
 	// excModes are the clients' exception modes other than none, in the
 	// order they were first set.
 	excModes []api.ClientExceptionMode
@@ -226,6 +229,7 @@ func newSession(life context.Context, id, lang, mode string, launch Launch, logg
 		changed:     make(chan struct{}),
 		excFilters:  launch.ExceptionFilters,
 		sideEffects: launch.SideEffects,
+		pathMap:     launch.PathMap,
 
 		adapter:          launch.AdapterName,
 		pauseUnsupported: launch.PauseUnsupported,
@@ -283,7 +287,7 @@ func (s *Session) startAdapter(ctx context.Context, launch Launch, stderr io.Wri
 	// Under mu: a test run's session is shared before its adapter starts.
 	s.mu.Lock()
 	s.cmd, s.launched = cmd, launch.Request != RequestAttach
-	s.client = dap.NewClient(stdout, stdin, dap.Handlers{Event: s.onEvent, Reverse: s.onReverse})
+	s.client = dap.NewClient(stdout, stdin, dap.Handlers{Event: s.onEvent, Reverse: s.onReverse, Translate: s.translator()})
 	s.mu.Unlock()
 
 	go s.watchAdapter()
@@ -424,6 +428,12 @@ func (s *Session) configurationPhase(ctx context.Context, bps []api.BreakpointSp
 
 	for _, spec := range bps {
 		if err := s.checkBreakpointCapsLocked(spec); err != nil {
+			s.mu.Unlock()
+
+			return err
+		}
+
+		if err := s.checkMapped(spec); err != nil {
 			s.mu.Unlock()
 
 			return err
@@ -976,7 +986,7 @@ func (s *Session) Snapshot(ctx context.Context, dump api.DumpSpec) api.Snapshot 
 	if err == nil && len(frames) > 0 {
 		f := frames[0].Frame
 		snap.Frame = &f
-		snap.Source = readSource(f.File, f.Line, 2)
+		snap.Source = s.readSource(f.File, f.Line, 2)
 
 		if dump.Wants(api.DumpStack) {
 			for _, fr := range frames {

@@ -43,6 +43,12 @@ func (s *Session) AddBreakpoint(ctx context.Context, c api.Client, spec api.Brea
 		return api.Breakpoint{}, err
 	}
 
+	if err := s.checkMapped(spec); err != nil {
+		s.mu.Unlock()
+
+		return api.Breakpoint{}, err
+	}
+
 	b, isNew, changed := s.addBreakpointLocked(c.ID, spec)
 	s.mu.Unlock()
 
@@ -348,6 +354,18 @@ func (s *Session) syncBreakpoints(ctx context.Context, file string) error {
 	slots := slotsFor(s.bps[file])
 	s.mu.Unlock()
 
+	// Defense in depth: every way in refuses a line breakpoint outside the
+	// path map, so the file's list is empty here; it is not sent either way.
+	if s.pathMap != nil {
+		if _, ok := s.pathMap.ToRemote(file); !ok {
+			if len(slots) == 0 {
+				return nil
+			}
+
+			return s.checkMapped(api.BreakpointSpec{File: file})
+		}
+	}
+
 	sbps := make([]godap.SourceBreakpoint, len(slots))
 	for i, sl := range slots {
 		sbps[i] = godap.SourceBreakpoint{Line: sl.line, Condition: sl.condition}
@@ -410,6 +428,12 @@ func (s *Session) updateBreakpointLocked(got godap.Breakpoint) {
 	}
 }
 
+// checkMapped refuses a line breakpoint outside the session's path map
+// (see [PathMap.checkBreakpoint]).
+func (s *Session) checkMapped(spec api.BreakpointSpec) error {
+	return s.pathMap.checkBreakpoint(spec)
+}
+
 // setBreakpointsRequest is godap.SetBreakpointsRequest without omitempty on
 // breakpoints: clearing a file's breakpoints must send "breakpoints": [],
 // and some adapters (netcoredbg) reject a request without the key.
@@ -440,6 +464,10 @@ func (s *Session) RunUntil(ctx context.Context, c api.Client, spec api.Breakpoin
 	s.mu.Lock()
 	err = s.checkBreakpointCapsLocked(spec)
 	s.mu.Unlock()
+
+	if err == nil {
+		err = s.checkMapped(spec)
+	}
 
 	if err != nil {
 		return api.Snapshot{}, err

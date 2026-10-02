@@ -97,6 +97,12 @@ type Launch struct {
 	// no exit code for it, for launch, attach and test runs alike, and
 	// says why in its end reason.
 	ExitCodeUnknown string
+	// PathMap, when set, is how the adapter's source paths map to the
+	// host's (a debuggee in a container): the session translates every
+	// source path crossing its DAP connection, refuses line breakpoints
+	// outside the map and reads source excerpts only inside its host
+	// directories (see [PathMap]). Nil: paths are the host's.
+	PathMap *PathMap
 }
 
 // Request kinds for [Launch.Request].

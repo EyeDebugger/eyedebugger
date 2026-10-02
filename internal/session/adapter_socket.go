@@ -106,7 +106,7 @@ func (s *Session) startSocketAdapter(ctx context.Context, launch Launch, stderr 
 	s.mu.Lock()
 	s.cmd, s.conn, s.exited = cmd, conn, exited
 	s.launched = launch.Request != RequestAttach
-	s.client = dap.NewClient(conn, conn, dap.Handlers{Event: s.onEvent, Reverse: s.onReverse})
+	s.client = dap.NewClient(conn, conn, dap.Handlers{Event: s.onEvent, Reverse: s.onReverse, Translate: s.translator()})
 	s.mu.Unlock()
 
 	go s.watchAdapter()
