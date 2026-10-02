@@ -25,21 +25,31 @@ const (
 // the oldest ones, or the newest with newest. At least one event is kept. It
 // returns the events kept, in order, and how many were left out.
 func ShapeEvents(events []api.Event, budget int, newest bool) (kept []api.Event, omitted int) {
+	return shapeEvents(events, budget, newest, func(e *api.Event) *api.Event { return e })
+}
+
+// ShapeGroupEvents is [ShapeEvents] for a group's merged events.
+func ShapeGroupEvents(events []api.GroupEvent, budget int, newest bool) (kept []api.GroupEvent, omitted int) {
+	return shapeEvents(events, budget, newest, func(e *api.GroupEvent) *api.Event { return &e.Event })
+}
+
+// shapeEvents is ShapeEvents for items holding an event (event returns it).
+func shapeEvents[T any](events []T, budget int, newest bool, event func(*T) *api.Event) (kept []T, omitted int) {
 	limit := MaxResultBytes
 	if budget > 0 {
 		limit = min(limit, budget*CharsPerToken)
 	}
 
-	out := make([]api.Event, len(events))
+	out := make([]T, len(events))
 	copy(out, events)
 
 	for i := range out {
-		if e := &out[i]; utf8.RuneCountInString(e.Text) > EventTextLimit {
+		if e := event(&out[i]); utf8.RuneCountInString(e.Text) > EventTextLimit {
 			e.Text, e.Truncated = string([]rune(e.Text)[:EventTextLimit]), true
 		}
 	}
 
-	n := fit(out, limit, newest, func(e *api.Event) int { return jsonSize(e) })
+	n := fit(out, limit, newest, func(e *T) int { return jsonSize(e) })
 	if newest {
 		return out[len(out)-n:], len(out) - n
 	}

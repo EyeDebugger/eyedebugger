@@ -27,7 +27,7 @@ func sessionHandlers(m *session.Manager) map[string]handler {
 	all := make(map[string]handler)
 
 	for _, group := range []map[string]handler{
-		lifecycleHandlers(m), execHandlers(m), breakpointHandlers(m), inspectHandlers(m), leaseHandlers(m), containerHandlers(m),
+		lifecycleHandlers(m), execHandlers(m), breakpointHandlers(m), inspectHandlers(m), leaseHandlers(m), containerHandlers(m), groupHandlers(m),
 	} {
 		maps.Copy(all, group)
 	}
@@ -150,6 +150,42 @@ func inspectHandlers(m *session.Manager) map[string]handler {
 			}
 
 			return sess.Events(ctx, p, wait)
+		}),
+	}
+}
+
+func groupHandlers(m *session.Manager) map[string]handler {
+	return map[string]handler{
+		api.MethodGroupWait: withParams(func(ctx context.Context, p api.GroupWaitParams) (any, error) {
+			c, err := api.ParseClient(p.Client)
+			if err != nil {
+				return nil, err
+			}
+
+			res, err := m.GroupWait(ctx, c, p, clampWait(p.Wait))
+			if err != nil {
+				return nil, err
+			}
+
+			return res, nil
+		}),
+		api.MethodGroupEvents: withParams(func(ctx context.Context, p api.GroupEventsParams) (any, error) {
+			c, err := api.ParseClient(p.Client)
+			if err != nil {
+				return nil, err
+			}
+
+			var wait time.Duration
+			if p.Wait > 0 {
+				wait = min(time.Duration(p.Wait), maxWait)
+			}
+
+			res, err := m.GroupEvents(ctx, c, p, wait)
+			if err != nil {
+				return nil, err
+			}
+
+			return res, nil
 		}),
 	}
 }
