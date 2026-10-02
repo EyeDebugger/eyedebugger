@@ -18,6 +18,10 @@ import (
 // startAttach starts a session attached to p.Attach's process, which must
 // be the caller's user's.
 func (m *Manager) startAttach(ctx context.Context, c api.Client, drv Driver, p api.StartParams, policy api.LeasePolicy) (*Session, error) {
+	if p.Attach.Container != nil {
+		return m.startContainerAttach(ctx, c, drv, p, policy)
+	}
+
 	att, ok := drv.(Attacher)
 	if !ok {
 		return nil, api.NewError(api.CodeInvalidRequest, p.Lang+" can't attach to a running process", "use 'eyedbg start'")
@@ -40,6 +44,53 @@ func (m *Manager) startAttach(ctx context.Context, c api.Client, drv Driver, p a
 	launch.Request, launch.PID, launch.Program = RequestAttach, info.PID, processName(info)
 
 	return m.run(ctx, m.create(ctx, c, p, policy, launch, api.ModeAttach), launch, p.Breakpoints, nil)
+}
+
+// startContainerAttach starts a session attached to the process of
+// p.Attach.Container: no host process check (the pid is the container's), the
+// path map checked before the driver copies anything, and one session at a
+// time per container process.
+func (m *Manager) startContainerAttach(ctx context.Context, c api.Client, drv Driver, p api.StartParams, policy api.LeasePolicy) (*Session, error) {
+	ca, ok := drv.(ContainerAttacher)
+	if !ok {
+		return nil, api.NewError(api.CodeInvalidRequest, p.Lang+" can't attach inside a container", "")
+	}
+
+	if err := launchOnly(p.LaunchSpec); err != nil {
+		return nil, err
+	}
+
+	if _, err := NewPathMap(p.Attach.Container.Map); err != nil {
+		return nil, err
+	}
+
+	launch, err := ca.PrepareContainerAttach(ctx, *p.Attach)
+	if err != nil {
+		return nil, err
+	}
+
+	if launch.Container == nil || launch.Container.ID == "" || launch.PID < 1 {
+		return nil, api.NewError(api.CodeInternal, p.Lang+"'s driver returned no container to attach to", "")
+	}
+
+	launch.Request = RequestAttach
+
+	s := m.create(ctx, c, p, policy, launch, api.ModeAttach)
+
+	if err := m.claim(s, launch.Container.ID, launch.PID); err != nil {
+		s.closeRecording()
+
+		return nil, err
+	}
+
+	started, err := m.run(ctx, s, launch, p.Breakpoints, nil)
+	if err != nil {
+		m.release(s)
+
+		return nil, err
+	}
+
+	return started, nil
 }
 
 // launchOnly refuses launch options for a session that doesn't launch.

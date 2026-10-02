@@ -58,6 +58,9 @@ type Manager struct {
 	// lost are the sessions of earlier daemons, read once at start; they
 	// leave only when forgotten.
 	lost map[string]api.SessionInfo
+	// claims maps a container process (see claimKey) to the session that
+	// debugs it.
+	claims map[string]*Session
 }
 
 // NewManager returns a manager. With a Store it reads the sessions earlier
@@ -65,7 +68,7 @@ type Manager struct {
 func NewManager(ctx context.Context, cfg Config) *Manager {
 	m := &Manager{
 		ctx: ctx, drivers: make(map[string]Driver), logger: cfg.Logger, stderr: cfg.Stderr, onLive: cfg.OnLive,
-		store: cfg.Store, sessions: make(map[string]*Session), lost: make(map[string]api.SessionInfo),
+		store: cfg.Store, sessions: make(map[string]*Session), lost: make(map[string]api.SessionInfo), claims: make(map[string]*Session),
 		connectTimeout: cfg.ConnectTimeout,
 	}
 
@@ -152,6 +155,12 @@ func (m *Manager) checkedStart(p api.StartParams) (Driver, api.LeasePolicy, api.
 		return nil, "", p, api.NewError(api.CodeInvalidRequest, "a session either attaches or runs tests, not both", "")
 	}
 
+	if p.Group != "" {
+		if err := api.CheckGroup(p.Group); err != nil {
+			return nil, "", p, err
+		}
+	}
+
 	if p, err = checkStart(p); err != nil {
 		return nil, "", p, err
 	}
@@ -182,6 +191,7 @@ func withAdapter(drv Driver, p api.StartParams) (Driver, error) {
 // create makes a session and starts its recording and event log.
 func (m *Manager) create(ctx context.Context, c api.Client, p api.StartParams, policy api.LeasePolicy, launch Launch, mode string) *Session {
 	s := newSession(m.ctx, m.newID(), p.Lang, mode, launch, m.logger, c, policy) //nolint:contextcheck // The session outlives this request.
+	s.group = p.Group
 	s.excModes = withMode(nil, c.ID, p.Exceptions, false)
 
 	// Recording starts before anything can be logged, so it begins with
@@ -361,6 +371,7 @@ func (m *Manager) record(ctx context.Context, s *Session) {
 // on its own.
 func (m *Manager) watch(s *Session) {
 	s.waitUntil(m.ctx, func() bool { return s.state == api.StateExited })
+	m.release(s)
 	m.saveIfLive(s)
 	m.notify()
 }

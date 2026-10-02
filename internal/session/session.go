@@ -13,6 +13,7 @@ import (
 	"net"
 	"os/exec"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -108,6 +109,7 @@ type Session struct {
 	stops     int // number of stopped events so far
 	stop      api.StopInfo
 	pid       int
+	stoppedAt time.Time // when the program last stopped (applyStopLocked)
 	exitCode  *int
 	endReason string
 	bps       map[string][]*breakpoint // by absolute file path
@@ -142,6 +144,13 @@ type Session struct {
 	// pathMap maps the adapter's source paths to the host's (nil: they are
 	// the host's); the driver's, immutable, so read without mu.
 	pathMap *PathMap
+	// group is the session's group and container the container it debugs a
+	// process of (nil: a host process); both immutable once the session is
+	// shared. claimKey is the container process the manager's claim names
+	// ("": none).
+	group     string
+	container *api.ContainerInfo
+	claimKey  string
 	// excModes are the clients' exception modes other than none, in the
 	// order they were first set.
 	excModes []api.ClientExceptionMode
@@ -215,7 +224,8 @@ func newSession(life context.Context, id, lang, mode string, launch Launch, logg
 		ID:          id,
 		Lang:        lang,
 		mode:        mode,
-		pid:         launch.PID,
+		pid:         hostPID(launch),
+		container:   launch.Container,
 		Program:     launch.Program,
 		CreatedAt:   now,
 		logger:      logger.With(slog.String("session", id)),
@@ -236,6 +246,16 @@ func newSession(life context.Context, id, lang, mode string, launch Launch, logg
 		setByEval:        launch.SetByEval,
 		exitCodeUnknown:  launch.ExitCodeUnknown,
 	}
+}
+
+// hostPID is the pid of launch's process on the host: none for a process in a
+// container, whose pid isn't one.
+func hostPID(launch Launch) int {
+	if launch.Container != nil {
+		return 0
+	}
+
+	return launch.PID
 }
 
 // attachRecorder records the session's control events to w from now on.
@@ -518,7 +538,9 @@ func (s *Session) onEvent(ev godap.EventMessage) {
 			s.endLocked(s.endReasonLocked("the program terminated"))
 		}
 	case *godap.ProcessEvent:
-		s.pid = e.Body.SystemProcessId
+		if s.container == nil { // a container's pids are not the host's
+			s.pid = e.Body.SystemProcessId
+		}
 	case *godap.OutputEvent:
 		s.appendOutputLocked(e.Body.Category, e.Body.Output)
 	case *godap.BreakpointEvent:
@@ -948,11 +970,15 @@ func (s *Session) infoLocked() api.SessionInfo {
 		Recording: s.recPath,
 		Mode:      s.mode,
 		Adapter:   s.adapter,
+		Group:     s.group,
+		Container: cloneContainer(s.container),
 	}
 
 	if s.state == api.StateStopped {
 		stop := s.stop
 		info.Stop = &stop
+		at := s.stoppedAt
+		info.StoppedAt = &at
 	}
 
 	if s.state == api.StateExited {
@@ -960,6 +986,18 @@ func (s *Session) infoLocked() api.SessionInfo {
 	}
 
 	return info
+}
+
+// cloneContainer is a copy of c (nil for nil), so a reader can't change it.
+func cloneContainer(c *api.ContainerInfo) *api.ContainerInfo {
+	if c == nil {
+		return nil
+	}
+
+	cp := *c
+	cp.Map = slices.Clone(c.Map)
+
+	return &cp
 }
 
 // Snapshot returns the session state and the output since the program last
