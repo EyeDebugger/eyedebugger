@@ -52,6 +52,23 @@ type Handlers struct {
 	// waiter without its body). A codec with custom messages registered
 	// decodes them too.
 	Codec *godap.Codec
+	// Translate, when set, rewrites the messages crossing the connection
+	// (e.g. source paths between the host and a container); nil sends and
+	// delivers them as they are.
+	Translate Translator
+}
+
+// Translator rewrites messages in place as they cross the connection. Both
+// methods run on hot paths (Outgoing under the client's write lock,
+// Incoming on its read goroutine): they must not block, lock or do I/O.
+type Translator interface {
+	// Outgoing is called for every request [Client.Do] sends, after its seq
+	// is assigned and before it is encoded.
+	Outgoing(req godap.RequestMessage)
+	// Incoming is called for every response and event that decodes, before
+	// it reaches its waiter or the Event handler; never for reverse
+	// requests or messages that don't decode.
+	Incoming(msg godap.Message)
 }
 
 // Client speaks DAP to one adapter over a byte stream (usually its stdio).
@@ -91,7 +108,9 @@ func (c *Client) Err() error {
 }
 
 // Do sends req (its seq is assigned here) and waits for the matching
-// response. A failed response is returned as a *RequestError.
+// response. A failed response is returned as a *RequestError. With a
+// [Translator], Do may rewrite req's source paths: callers send a request
+// value once and don't reuse it.
 func (c *Client) Do(ctx context.Context, req godap.RequestMessage) (godap.Message, error) {
 	ch := make(chan godap.Message, 1)
 
@@ -105,6 +124,10 @@ func (c *Client) Do(ctx context.Context, req godap.RequestMessage) (godap.Messag
 		c.wmu.Unlock()
 
 		return nil, fmt.Errorf("%s: %w", r.Command, ErrClosed)
+	}
+
+	if c.handlers.Translate != nil {
+		c.handlers.Translate.Outgoing(req)
 	}
 
 	err := godap.WriteProtocolMessage(c.w, req)
@@ -226,6 +249,10 @@ func (c *Client) dispatch(raw []byte) {
 		c.deliverUnknown(raw)
 
 		return
+	}
+
+	if _, reverse := msg.(godap.RequestMessage); !reverse && c.handlers.Translate != nil {
+		c.handlers.Translate.Incoming(msg)
 	}
 
 	switch m := msg.(type) {

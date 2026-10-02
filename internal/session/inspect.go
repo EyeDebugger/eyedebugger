@@ -436,13 +436,20 @@ func truncate(v string) string {
 }
 
 // readSource returns the lines around line (context lines each side), or
-// nil if the file can't be read.
-func readSource(path string, line, around int) []api.SourceLine {
+// nil if the file can't be read. A session with a path map reads only
+// inside the map's host directories ([PathMap.Readable]), so a path the
+// map didn't take (a container's own file) is never read on the host.
+func (s *Session) readSource(path string, line, around int) []api.SourceLine {
 	if path == "" || line < 1 {
 		return nil
 	}
 
-	f, err := os.Open(path)
+	open := os.Open
+	if s.pathMap != nil {
+		open = s.pathMap.open
+	}
+
+	f, err := open(path)
 	if err != nil {
 		return nil
 	}

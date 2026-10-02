@@ -178,6 +178,12 @@ func (s *Session) refuseLocked(items []replaceItem) {
 			continue
 		}
 
+		if err := s.checkMapped(it.spec); err != nil {
+			it.refused = err
+
+			continue
+		}
+
 		key := slotKey{function: it.spec.Function, line: it.spec.Line}
 		if seen[key] {
 			it.refused = api.NewError(api.CodeInvalidRequest,

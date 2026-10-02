@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -531,5 +532,168 @@ func TestReverseReplyAfterClose(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("reply after the stream ended did not return")
+	}
+}
+
+// prefixTranslator rewrites source paths with a prefix each way and records
+// what it saw.
+type prefixTranslator struct {
+	mu   sync.Mutex
+	seqs []int    // seqs of the requests Outgoing saw
+	seen []string // types Incoming saw
+}
+
+func (p *prefixTranslator) Outgoing(req godap.RequestMessage) {
+	p.mu.Lock()
+	p.seqs = append(p.seqs, req.GetRequest().Seq)
+	p.mu.Unlock()
+
+	if r, ok := req.(*godap.SourceRequest); ok && r.Arguments.Source != nil {
+		r.Arguments.Source.Path = "/remote" + r.Arguments.Source.Path
+	}
+}
+
+func (p *prefixTranslator) Incoming(msg godap.Message) {
+	p.mu.Lock()
+	p.seen = append(p.seen, fmt.Sprintf("%T", msg))
+	p.mu.Unlock()
+
+	switch m := msg.(type) {
+	case *godap.StackTraceResponse:
+		for i := range m.Body.StackFrames {
+			if src := m.Body.StackFrames[i].Source; src != nil {
+				src.Path = strings.TrimPrefix(src.Path, "/remote")
+			}
+		}
+	case *godap.OutputEvent:
+		if m.Body.Source != nil {
+			m.Body.Source.Path = strings.TrimPrefix(m.Body.Source.Path, "/remote")
+		}
+	}
+}
+
+func (p *prefixTranslator) record() (seqs []int, seen []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return slices.Clone(p.seqs), slices.Clone(p.seen)
+}
+
+// translatedRoundTrip sends req through c, checks that the adapter got its
+// source path as wire ("" for none), answers it with a stack frame at
+// /remote/src/b.cs and returns the response c delivered.
+func translatedRoundTrip(t *testing.T, c *Client, fa *fakeAdapter, req godap.RequestMessage, wire string) godap.Message {
+	t.Helper()
+
+	done := make(chan godap.Message, 1)
+
+	go func() {
+		msg, err := c.Do(t.Context(), req)
+		if err != nil {
+			t.Errorf("Do: %v", err)
+		}
+
+		done <- msg
+	}()
+
+	got, ok := fa.read().(godap.RequestMessage)
+	if !ok {
+		t.Fatal("the adapter got no request")
+	}
+
+	if r, ok := got.(*godap.SourceRequest); ok && r.Arguments.Source.Path != wire {
+		t.Errorf("adapter got path %q, want %q", r.Arguments.Source.Path, wire)
+	}
+
+	fa.seq++
+	fa.write(&godap.StackTraceResponse{
+		Response: godap.Response{
+			ProtocolMessage: godap.ProtocolMessage{Seq: fa.seq, Type: "response"},
+			RequestSeq:      got.GetRequest().Seq, Success: true, Command: got.GetRequest().Command,
+		},
+		Body: godap.StackTraceResponseBody{StackFrames: []godap.StackFrame{{Id: 1, Source: &godap.Source{Path: "/remote/src/b.cs"}}}},
+	})
+
+	select {
+	case msg := <-done:
+		return msg
+	case <-time.After(5 * time.Second):
+		t.Fatal("no response")
+
+		return nil
+	}
+}
+
+// TestTranslator: Outgoing sees every request with its seq assigned and its
+// rewrite is what goes on the wire; Incoming rewrites responses and events
+// before they are delivered, and never sees a reverse request or a message
+// that doesn't decode.
+func TestTranslator(t *testing.T) {
+	t.Parallel()
+
+	tr := &prefixTranslator{}
+	events := make(chan *godap.OutputEvent, 1)
+	c, fa := pipeClient(t, Handlers{Translate: tr, Event: func(e godap.EventMessage) {
+		if o, ok := e.(*godap.OutputEvent); ok {
+			events <- o
+		}
+	}})
+
+	tests := []struct {
+		name string
+		req  godap.RequestMessage
+		// wire is the source path the adapter must receive ("" for none).
+		wire string
+	}{
+		{"source", &godap.SourceRequest{Request: godap.Request{Command: "source"}, Arguments: godap.SourceArguments{Source: &godap.Source{Path: "/src/a.cs"}}}, "/remote/src/a.cs"},
+		{"stackTrace", &godap.StackTraceRequest{Request: godap.Request{Command: "stackTrace"}}, ""},
+	}
+
+	// In turn, not as subtests: they share the adapter's stream.
+	for _, tt := range tests {
+		msg := translatedRoundTrip(t, c, fa, tt.req, tt.wire)
+
+		// go-dap decodes a response by its command: only the stackTrace
+		// answer carries the frame.
+		st, ok := msg.(*godap.StackTraceResponse)
+		if ok != (tt.name == "stackTrace") || ok && st.Body.StackFrames[0].Source.Path != "/src/b.cs" {
+			t.Errorf("%s: response = %+v, want a stackTrace response's frame at /src/b.cs only for stackTrace", tt.name, msg)
+		}
+	}
+
+	// A reverse request: answered, never translated. A custom event go-dap
+	// can't decode: dropped, never translated. Then an output event is.
+	fa.seq++
+	fa.write(&godap.RunInTerminalRequest{Request: godap.Request{
+		ProtocolMessage: godap.ProtocolMessage{Seq: fa.seq, Type: "request"}, Command: "runInTerminal",
+	}})
+	fa.read()
+
+	fa.seq++
+	fa.write(&godap.Event{ProtocolMessage: godap.ProtocolMessage{Seq: fa.seq, Type: "event"}, Event: "custom"})
+
+	fa.seq++
+	fa.write(&godap.OutputEvent{
+		Event: godap.Event{ProtocolMessage: godap.ProtocolMessage{Seq: fa.seq, Type: "event"}, Event: "output"},
+		Body:  godap.OutputEventBody{Output: "x", Source: &godap.Source{Path: "/remote/src/c.cs"}},
+	})
+
+	select {
+	case o := <-events:
+		if o.Body.Source.Path != "/src/c.cs" {
+			t.Errorf("output event source = %q, want /src/c.cs", o.Body.Source.Path)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("output event not delivered")
+	}
+
+	seqs, seen := tr.record()
+	if !slices.Equal(seqs, []int{1, 2}) {
+		t.Errorf("Outgoing saw seqs %v, want [1 2]", seqs)
+	}
+
+	want := []string{"*dap.SourceResponse", "*dap.StackTraceResponse", "*dap.OutputEvent"}
+	if !slices.Equal(seen, want) {
+		t.Errorf("Incoming saw %v, want %v", seen, want)
 	}
 }
