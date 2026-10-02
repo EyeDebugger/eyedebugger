@@ -118,6 +118,7 @@ func TestComposeRestoreRendering(t *testing.T) {
 		{"mixed, json", "compose_restore_json.golden", members, false, true},
 		{"everything restored", "compose_restore_removed.golden", members[:2], true, false},
 		{"nothing restored", "compose_restore_none.golden", members[2:], false, false},
+		{"nothing in fast mode", "compose_restore_empty.golden", nil, true, false},
 	}
 
 	for _, tt := range tests {
