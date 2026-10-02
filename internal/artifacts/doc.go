@@ -15,4 +15,13 @@
 // replacing anything there (Place). A trace summary's scratch file
 // (ScratchName) lives next to the traces and is removed after
 // ScratchMaxAge if it was left behind.
+//
+// <home>/compose holds docker compose fast mode's files, one directory per
+// project (ProjectDir): an override file, a stable build directory per
+// service (ServiceDir), a staging directory per run (NewStage), and a lock
+// (Lock). Mirror copies a staged build into a service's directory, and the
+// removal helpers (PruneServices, RemoveStage, PruneStages,
+// RemoveProjectDir) delete only grammar-named real directories inside those
+// directories, through an os.Root, so nothing is ever followed out of them
+// (docs/adr/0021).
 package artifacts

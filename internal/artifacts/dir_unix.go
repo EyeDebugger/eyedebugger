@@ -36,7 +36,7 @@ func checkPrivate(dir string, info fs.FileInfo) error {
 // checkOwner refuses dir unless uid (its owner) is me.
 func checkOwner(dir string, uid, me int) error {
 	if uid != me {
-		return fmt.Errorf("%s is owned by uid %d, not by you (uid %d); eyedbg keeps dumps only in a directory you own", dir, uid, me)
+		return fmt.Errorf("%s is owned by uid %d, not by you (uid %d); eyedbg keeps its files only in a directory you own", dir, uid, me)
 	}
 
 	return nil

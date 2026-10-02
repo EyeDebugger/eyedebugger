@@ -26,6 +26,9 @@ const (
 	// Traces holds traces (eyedbg dotnet trace) and the scratch files of
 	// their summaries.
 	Traces = "traces"
+	// Compose holds the files of docker compose fast mode: per project, an
+	// override file, builds and a lock (compose.go, mirror.go).
+	Compose = "compose"
 )
 
 // Retention of eyedbg's own artifacts (Prune), the same for every kind.
@@ -157,7 +160,7 @@ func prepare(dir string) error {
 	}
 
 	if info.Mode()&fs.ModeSymlink != 0 {
-		return errors.New(dir + " is a symlink; eyedbg keeps dumps and traces only in a real directory it owns")
+		return errors.New(dir + " is a symlink; eyedbg keeps its dumps, traces and compose files only in a real directory it owns")
 	}
 
 	if !info.IsDir() {
