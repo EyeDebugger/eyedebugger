@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eyedebugger/eyedebugger/internal/adapters"
 	"github.com/eyedebugger/eyedebugger/internal/api"
 	"github.com/eyedebugger/eyedebugger/internal/artifacts"
 	"github.com/eyedebugger/eyedebugger/internal/container"
@@ -928,5 +929,24 @@ func TestCarryModes(t *testing.T) {
 
 	if d.mode != api.ExceptionsUncaught {
 		t.Errorf("mode = %q, want uncaught", d.mode)
+	}
+}
+
+// TestComposeLaunchHomeWithComma: a home path with a comma can't be recorded in
+// compose's comma-separated file list: refused before anything is created.
+func TestComposeLaunchHomeWithComma(t *testing.T) {
+	w := newLaunchWorld(t)
+
+	home := filepath.Join(t.TempDir(), "a,b")
+	t.Setenv(adapters.EnvHome, home)
+
+	before := w.snap()
+
+	_, errOut := w.run(exitError, "compose", "launch", "producer")
+	expectOutput(t, errOut, "[INVALID_REQUEST]", "comma in its path")
+	w.unchangedSince(t, before)
+
+	if _, err := os.Stat(filepath.Join(home, "compose", worldProject)); !os.IsNotExist(err) {
+		t.Errorf("a project directory was created: %v", err)
 	}
 }
