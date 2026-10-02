@@ -56,10 +56,7 @@ func (d containerDriver) PrepareContainerAttach(ctx context.Context, spec api.At
 		return Launch{}, d.err
 	}
 
-	pid := spec.PID
-	if pid == 0 {
-		pid = 1
-	}
+	pid := max(spec.Container.PID, 1)
 
 	l, err := d.PrepareAttach(ctx, api.AttachSpec{PID: pid})
 	if err != nil {
@@ -95,7 +92,7 @@ func (d containerDriver) PrepareContainerAttach(ctx context.Context, spec api.At
 
 func startContainer(m *Manager, ref string, pid int, p api.StartParams) (*Session, error) {
 	p.Lang = "fake"
-	p.Attach = &api.AttachSpec{PID: pid, Container: &api.ContainerSpec{Ref: ref}}
+	p.Attach = &api.AttachSpec{Container: &api.ContainerSpec{Ref: ref, PID: pid}}
 
 	return m.Start(context.Background(), agentC, p)
 }
@@ -192,19 +189,21 @@ func TestContainerAttachChecksBeforeTheDriver(t *testing.T) {
 	m := newTestManagerWith(t, nil, d)
 
 	tests := []struct {
-		name string
-		p    api.StartParams
-		spec api.ContainerSpec
-		want string
+		name    string
+		p       api.StartParams
+		spec    api.ContainerSpec
+		hostPID int
+		want    string
 	}{
-		{"launch options", api.StartParams{LaunchSpec: api.LaunchSpec{Cwd: "/x"}}, api.ContainerSpec{Ref: "web-1"}, "attaching takes no launch options"},
-		{"bad group", api.StartParams{Group: "Not A Group"}, api.ContainerSpec{Ref: "web-1"}, "invalid group name"},
-		{"relative map local", api.StartParams{}, api.ContainerSpec{Ref: "web-1", Map: []api.PathMapping{{Remote: "/src", Local: "rel"}}}, "invalid path map"},
-		{"relative map remote", api.StartParams{}, api.ContainerSpec{Ref: "web-1", Map: []api.PathMapping{{Remote: "src", Local: t.TempDir()}}}, "invalid path map"},
+		{"launch options", api.StartParams{LaunchSpec: api.LaunchSpec{Cwd: "/x"}}, api.ContainerSpec{Ref: "web-1"}, 0, "attaching takes no launch options"},
+		{"bad group", api.StartParams{Group: "Not A Group"}, api.ContainerSpec{Ref: "web-1"}, 0, "invalid group name"},
+		{"relative map local", api.StartParams{}, api.ContainerSpec{Ref: "web-1", Map: []api.PathMapping{{Remote: "/src", Local: "rel"}}}, 0, "invalid path map"},
+		{"a host pid", api.StartParams{}, api.ContainerSpec{Ref: "web-1"}, 5, "names its process in the container spec"},
+		{"relative map remote", api.StartParams{}, api.ContainerSpec{Ref: "web-1", Map: []api.PathMapping{{Remote: "src", Local: t.TempDir()}}}, 0, "invalid path map"},
 	}
 
 	for _, tt := range tests {
-		tt.p.Lang, tt.p.Attach = "fake", &api.AttachSpec{PID: 1, Container: &tt.spec}
+		tt.p.Lang, tt.p.Attach = "fake", &api.AttachSpec{PID: tt.hostPID, Container: &tt.spec}
 
 		_, err := m.Start(t.Context(), agentC, tt.p)
 		if api.CodeOf(err) != api.CodeInvalidRequest || !strings.Contains(err.Error(), tt.want) {
