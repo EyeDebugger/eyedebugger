@@ -212,6 +212,7 @@ func TestComposeBreakpointAndStopRendering(t *testing.T) {
 
 	launched := memberSession("s-m2n4", "consumer", 0, 0)
 	launched.Mode, launched.State, launched.EndReason = "", api.StateExited, "stopped by agent"
+	launched.Container.Launched = true
 
 	ended := memberSession("s-q8x1", "db", 0, 0)
 	ended.Mode, ended.State, ended.EndReason = api.ModeAttach, api.StateExited, "the debug adapter exited"
@@ -341,6 +342,7 @@ func TestEndedPhrase(t *testing.T) {
 	t.Parallel()
 
 	container := &api.ContainerInfo{Name: "web-1"}
+	launchedIn := &api.ContainerInfo{Name: "web-1", Launched: true}
 
 	tests := []struct {
 		name string
@@ -349,7 +351,8 @@ func TestEndedPhrase(t *testing.T) {
 	}{
 		{"detached from a host process", api.SessionInfo{Mode: api.ModeAttach, PID: 42, EndReason: "detached by agent"}, "detached; pid 42 keeps running"},
 		{"detached from a container", api.SessionInfo{Mode: api.ModeAttach, Container: container, EndReason: "detached by agent"}, "detached; container web-1 keeps running"},
-		{"an app launched in a container", api.SessionInfo{Container: container, EndReason: "stopped by agent"}, "app terminated; container web-1 idles"},
+		{"an app launched in a container", api.SessionInfo{Container: launchedIn, EndReason: "stopped by agent"}, "app terminated; container web-1 idles"},
+		{"a container session that launched nothing", api.SessionInfo{Container: container, EndReason: "stopped by agent"}, "ended"},
 		{"a launched host program", api.SessionInfo{EndReason: "stopped by agent"}, "ended"},
 		{"an attached program that exited", api.SessionInfo{Mode: api.ModeAttach, Container: container, EndReason: "the debug adapter exited"}, "ended"},
 	}

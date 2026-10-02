@@ -29,6 +29,16 @@ func containerSession() api.SessionInfo {
 	return s
 }
 
+// launchedContainerSession is the session of an app launched in a fast-mode
+// container: a launched session whose container pid is the app's.
+func launchedContainerSession() api.SessionInfo {
+	s := containerSession()
+	s.Program = "web (compose myapp, container web-1): dotnet /app/Web.dll"
+	s.Container.PID, s.Container.Launched = 19, true
+
+	return s
+}
+
 func TestContainerRendering(t *testing.T) {
 	t.Parallel()
 
@@ -43,6 +53,16 @@ func TestContainerRendering(t *testing.T) {
 	ended := containerSession()
 	ended.Mode, ended.State, ended.EndReason = api.ModeAttach, api.StateExited, "detached by agent (the program keeps running)"
 	ended.Stop, ended.StoppedAt = nil, nil
+
+	launched := stoppedSnapshot()
+	launched.Session = launchedContainerSession()
+
+	launchedEnded := launchedContainerSession()
+	launchedEnded.State, launchedEnded.EndReason = api.StateExited, "stopped by agent"
+	launchedEnded.Stop, launchedEnded.StoppedAt = nil, nil
+
+	launchedCrashed := launchedEnded
+	launchedCrashed.EndReason = "the debug adapter exited"
 
 	hostGroup := stoppedSnapshot().Session
 	hostGroup.Group = "myapp"
@@ -60,6 +80,15 @@ func TestContainerRendering(t *testing.T) {
 			return writeSnapshot(b, api.Snapshot{Session: bare}, false, renderBase)
 		}},
 		{"detach", "detach_container.golden", func(b *bytes.Buffer) error { return writeEnded(b, ended) }},
+		{"launched snapshot", "snapshot_container_launched.golden", func(b *bytes.Buffer) error { return writeSnapshotAt(b, launched, false, renderBase, renderTime) }},
+		{"launched snapshot json", "snapshot_container_launched_json.golden", func(b *bytes.Buffer) error { return writeSnapshot(b, launched, true, renderBase) }},
+		{"launched stop", "stop_container_launched.golden", func(b *bytes.Buffer) error { return writeEnded(b, launchedEnded) }},
+		{"launched exited by a stop", "snapshot_container_launched_stopped.golden", func(b *bytes.Buffer) error {
+			return writeSnapshot(b, api.Snapshot{Session: launchedEnded}, false, renderBase)
+		}},
+		{"launched exited with its adapter", "snapshot_container_launched_exited.golden", func(b *bytes.Buffer) error {
+			return writeSnapshot(b, api.Snapshot{Session: launchedCrashed}, false, renderBase)
+		}},
 		{"host process in a group", "snapshot_group.golden", func(b *bytes.Buffer) error {
 			return writeSnapshot(b, api.Snapshot{Session: hostGroup}, false, renderBase)
 		}},
