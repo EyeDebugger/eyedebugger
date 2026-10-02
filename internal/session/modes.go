@@ -60,6 +60,10 @@ func (m *Manager) startContainerAttach(ctx context.Context, c api.Client, drv Dr
 		return nil, err
 	}
 
+	if p.Attach.PID != 0 {
+		return nil, api.NewError(api.CodeInvalidRequest, "a container attach names its process in the container spec, not as a host pid", "")
+	}
+
 	if _, err := NewPathMap(p.Attach.Container.Map); err != nil {
 		return nil, err
 	}
