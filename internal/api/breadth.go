@@ -22,8 +22,8 @@ const (
 
 // AttachSpec names the running process to attach to.
 type AttachSpec struct {
-	// PID is the process id: the host's, or with Container the container's
-	// (0 there means 1).
+	// PID is the host's process id. With Container it must be 0: the
+	// container's own process id is [ContainerSpec.PID].
 	PID int `json:"pid"`
 	// Container, when set, puts the process in a container (see
 	// [MethodContainerAttach], the only way a daemon accepts it).

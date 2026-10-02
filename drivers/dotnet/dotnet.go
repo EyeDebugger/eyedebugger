@@ -18,6 +18,7 @@ import (
 
 	"github.com/eyedebugger/eyedebugger/internal/adapters"
 	"github.com/eyedebugger/eyedebugger/internal/api"
+	"github.com/eyedebugger/eyedebugger/internal/container"
 	"github.com/eyedebugger/eyedebugger/internal/session"
 )
 
@@ -92,10 +93,18 @@ type driverEnv struct {
 	goos, goarch  string
 	find          func(m *adapters.Manifest) (adapters.Location, error)
 	resolveDotnet func(ctx context.Context, m *adapters.Manifest) (adapters.DotnetRuntime, error)
+	// engine is the docker engine a container attach talks to; installedFor
+	// finds an adapter installed for another platform (both: container.go).
+	engine       func(api.ContainerEngine) (container.Engine, error)
+	installedFor func(m *adapters.Manifest, platform string) (dir, entry string, err error)
 }
 
 func systemDriverEnv() driverEnv {
-	return driverEnv{goos: runtime.GOOS, goarch: runtime.GOARCH, find: adapters.Find, resolveDotnet: adapters.ResolveDotnet}
+	return driverEnv{
+		goos: runtime.GOOS, goarch: runtime.GOARCH, find: adapters.Find, resolveDotnet: adapters.ResolveDotnet,
+		engine:       func(e api.ContainerEngine) (container.Engine, error) { return container.NewEngine(e.Host, e.Context) },
+		installedFor: adapters.InstalledFor,
+	}
 }
 
 // New returns the .NET driver with the manifests of the default registry
@@ -331,16 +340,8 @@ func (d *Driver) launchWith(ctx context.Context, m *adapters.Manifest) (session.
 	}
 
 	launch.AdapterEnv = adapters.Environ(m)
-	launch.AdapterID = m.Adapter.ID
-	launch.AdapterName = m.Name
-	// Both adapters' exception filters (docs/adr/0010, 0017).
-	launch.ExceptionFilters = map[api.ExceptionMode][]string{
-		api.ExceptionsAll:      {"all"},
-		api.ExceptionsUncaught: {"user-unhandled"},
-	}
-	launch.SideEffects = SideEffects
 	launch.AttachHint = attachHint
-	launch.ExitCodeUnknown = ExitCodeUnknown(m.Name, d.env.goos)
+	d.applySettings(&launch, m, d.env.goos)
 
 	if m.Name == SharpDbg {
 		launch.PauseUnsupported = sharpdbgPauseHint
@@ -348,6 +349,21 @@ func (d *Driver) launchWith(ctx context.Context, m *adapters.Manifest) (session.
 	}
 
 	return launch, nil
+}
+
+// applySettings sets what every .NET session with adapter m, running on
+// goos, shares: its id and name, the exception filters of both adapters
+// (docs/adr/0010, 0017), the side-effect check and whether its exit codes
+// can be trusted.
+func (*Driver) applySettings(launch *session.Launch, m *adapters.Manifest, goos string) {
+	launch.AdapterID = m.Adapter.ID
+	launch.AdapterName = m.Name
+	launch.ExceptionFilters = map[api.ExceptionMode][]string{
+		api.ExceptionsAll:      {"all"},
+		api.ExceptionsUncaught: {"user-unhandled"},
+	}
+	launch.SideEffects = SideEffects
+	launch.ExitCodeUnknown = ExitCodeUnknown(m.Name, goos)
 }
 
 // installHint says how to get native adapter m: "run 'eyedbg adapters
