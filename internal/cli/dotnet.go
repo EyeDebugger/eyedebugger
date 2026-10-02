@@ -495,6 +495,10 @@ func resolveSessionTarget(ctx context.Context, snap api.Snapshot, lookup lookupF
 	orPID := "or pass --pid N (see 'eyedbg dotnet ps')"
 
 	switch {
+	case s.Container != nil:
+		return dotnetTarget{}, api.NewError(api.CodeInvalidRequest,
+			fmt.Sprintf("session %s debugs a program in container %s; 'eyedbg dotnet' inspects host processes only", s.ID, s.Container.Name),
+			"pick a session of a host process with -s ID, "+orPID)
 	case s.Lang != dotnet.Language:
 		return dotnetTarget{}, api.NewError(api.CodeNotDotnet, fmt.Sprintf("session %s debugs %s, not .NET", s.ID, s.Lang),
 			"pick a dotnet session with -s ID, "+orPID)
