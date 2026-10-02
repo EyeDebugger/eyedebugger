@@ -600,8 +600,9 @@ func TestContainerClaimsAttachThenLaunch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Any attach of the container, whichever pid, keeps a launch out.
-	for _, ref := range []string{"web-1", containerA} {
+	// Any attach of the container, whichever pid, keeps a launch out: by a
+	// name or id the early check matches, and by one only the full id catches.
+	for _, ref := range []string{"web-1", containerA, "alias"} {
 		_, err = launchIn(m, ref, api.StartParams{}, api.ContainerLaunchSpec{})
 		if api.CodeOf(err) != api.CodeInvalidRequest || !strings.Contains(err.Error(), "already debugged") {
 			t.Errorf("launch by %q over attaches: %v, want INVALID_REQUEST", ref, err)
@@ -724,5 +725,81 @@ func TestContainerLaunchGroupMember(t *testing.T) {
 
 	if g := s.Info().Group; g != "app" {
 		t.Errorf("group = %q", g)
+	}
+}
+
+// TestManagerEndsReleaseTheirClaims: stop, detach and stop-all release the
+// claim themselves, not only through the watch that follows an exit (sessions
+// here have no watch, so nothing else could).
+func TestManagerEndsReleaseTheirClaims(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		mode string
+		end  func(m *Manager, s *Session) error
+	}{
+		{"stop", "", func(m *Manager, s *Session) error { _, err := m.Stop(t.Context(), agentC, s.ID); return err }},
+		{"detach", api.ModeAttach, func(m *Manager, s *Session) error { _, err := m.Detach(t.Context(), agentC, s.ID); return err }},
+		{"stop all", "", func(m *Manager, _ *Session) error { m.StopAll(t.Context()); return nil }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := newTestManagerWith(t, nil, newLauncherDriver())
+			s := newSession(m.ctx, "s-probe", "fake", tt.mode, Launch{}, slog.New(slog.DiscardHandler), agentC, api.LeaseFree)
+			m.add(s)
+
+			if err := m.claimLaunch(s, containerA); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := tt.end(m, s); err != nil {
+				t.Fatal(err)
+			}
+
+			if n := claimCount(m); n != 0 {
+				t.Errorf("%d claims after %s, want none", n, tt.name)
+			}
+		})
+	}
+}
+
+// TestLiveClaimOn: the early check names the live holder of a container by
+// its name or an id prefix of 12 or more characters, and nobody else.
+func TestLiveClaimOn(t *testing.T) {
+	t.Parallel()
+
+	m := newTestManagerWith(t, nil, newLauncherDriver())
+	holder := newSession(m.ctx, "s-held", "fake", "", Launch{
+		Container: &api.ContainerInfo{ID: containerA, Name: "web-1", Launched: true},
+	}, slog.New(slog.DiscardHandler), agentC, api.LeaseFree)
+
+	if err := m.claimLaunch(holder, containerA); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, ref := range []string{"web-1", containerA, containerA[:12], containerA[:40]} {
+		if got := m.liveClaimOn(ref); got != holder {
+			t.Errorf("liveClaimOn(%q) = %v, want the holder", ref, got)
+		}
+	}
+
+	// Another name, a too-short prefix and another container's id: not it.
+	for _, ref := range []string{"web-2", containerA[:11], containerB, "alias"} {
+		if got := m.liveClaimOn(ref); got != nil {
+			t.Errorf("liveClaimOn(%q) = session %s, want none", ref, got.ID)
+		}
+	}
+
+	// An ended holder whose claim isn't released yet is not in the way.
+	holder.mu.Lock()
+	holder.setStateLocked(api.StateExited)
+	holder.mu.Unlock()
+
+	if got := m.liveClaimOn("web-1"); got != nil {
+		t.Errorf("liveClaimOn after the holder ended = session %s, want none", got.ID)
 	}
 }
