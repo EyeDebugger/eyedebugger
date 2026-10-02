@@ -1,0 +1,14 @@
+group myapp: launched 2 of 3 service(s)
+  producer  s-k3f9  launched  built in 2.1s -> recreated -> launched; container myapp-producer-1; its healthcheck fails after 18s of a stop
+  consumer  s-m2n4  launched  built in 2.1s -> recreated -> launched; container myapp-consumer-1; its healthcheck fails after 18s of a stop
+  db        -       skipped   its entrypoint isn't exec-form 'dotnet X.dll'
+path map: /src=/work/app
+breakpoint Producer/Program.cs:6:
+  producer  bp 1 Producer/Program.cs:6 verified
+  consumer  bp 1 Producer/Program.cs:6 pending: module not loaded
+override: /home/me/.eyedbg/compose/myapp/override.yml
+build log: /home/me/.eyedbg/compose/myapp/build.log
+note: recreated with this shell's compose environment (variables and --env-file files); whatever the old containers wrote outside volumes is gone.
+note: in fast mode a service's app runs only while its eyedbg session runs it: 'eyedbg stop' (or 'compose stop') kills the app and leaves the container idle and, after its healthcheck's interval, unhealthy, until the next 'eyedbg compose launch' or 'eyedbg compose restore'. Its output is in 'eyedbg output -s ID' and 'eyedbg compose events --kind output', not in 'docker compose logs'.
+undo with: eyedbg compose restore producer consumer
+next: eyedbg compose wait -g myapp  |  eyedbg compose bp add FILE:LINE -g myapp  |  eyedbg compose events --kind output -g myapp  |  eyedbg compose stop -g myapp

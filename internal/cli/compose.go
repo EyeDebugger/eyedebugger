@@ -40,11 +40,13 @@ type composeDeps struct {
 	ps func(ctx context.Context, host, dockerContext string, o container.ComposeOptions) ([]container.ComposeService, error)
 	// now is the time stops are measured against.
 	now func() time.Time
+	// stack is what 'compose launch' and 'compose restore' reach besides.
+	stack stackDeps
 }
 
 // defaultComposeDeps are the real docker and the real clock.
 func defaultComposeDeps() composeDeps {
-	return composeDeps{ps: composePS, now: time.Now}
+	return composeDeps{ps: composePS, now: time.Now, stack: defaultStackDeps()}
 }
 
 // composePS runs docker compose ps through the docker the engine names.
@@ -115,6 +117,8 @@ func newComposeCommand(info version.Info, g *globals, deps composeDeps) *cobra.C
 		newComposeEventsCommand(info, g),
 		newComposeBreakpointCommand(info, g),
 		newComposeStopCommand(info, g),
+		newComposeLaunchCommand(info, g, deps),
+		newComposeRestoreCommand(info, g, deps),
 	)
 
 	return cmd

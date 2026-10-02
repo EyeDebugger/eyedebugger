@@ -1,0 +1,6 @@
+group myapp: restored 2 of 4 service(s)
+  producer  restored  recreated as built; ended 1 session (s-k3f9)
+  consumer  restored  recreated as built
+  db        skipped   not in fast mode
+  api       failed    docker compose up failed: container myapp-producer-1 is unhealthy [ATTACH_FAILED] (see 'docker compose ps')
+note: recreated as built, with this shell's compose environment (variables and --env-file files); whatever the old containers wrote outside volumes is gone.
