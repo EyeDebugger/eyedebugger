@@ -141,20 +141,12 @@ func (i Info) UnhealthyAfter() time.Duration {
 // Inspect reads container ref (an id or a name) with one docker inspect.
 // A missing container is INVALID_REQUEST, any other failure ATTACH_FAILED.
 func (e Engine) Inspect(ctx context.Context, ref string) (Info, error) {
-	if err := ValidateRef(ref); err != nil {
+	out, err := e.inspectOne(ctx, ref, inspectTemplate)
+	if err != nil {
 		return Info{}, err
 	}
 
-	res, fail := e.run(ctx, QueryTimeout, nil, e.Args("inspect", "--type", "container", "--format", inspectTemplate, "--", ref))
-	if fail != nil {
-		if strings.Contains(strings.ToLower(fail.stderr), "no such") {
-			return Info{}, api.NewError(api.CodeInvalidRequest, "no container "+show(ref, 80), "list containers with 'docker ps'")
-		}
-
-		return Info{}, dockerError(fail)
-	}
-
-	info, err := parseInspect(res.stdout)
+	info, err := parseInspect(out)
 	if err != nil {
 		return Info{}, api.NewError(api.CodeAttachFailed, "unexpected answer from docker inspect: "+err.Error(),
 			"eyedbg reads a fixed set of fields; this docker may differ from the ones it was verified with (docker 24 to 26)")
