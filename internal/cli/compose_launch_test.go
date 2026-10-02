@@ -12,8 +12,7 @@ import (
 
 	"github.com/eyedebugger/eyedebugger/drivers/dotnet"
 	"github.com/eyedebugger/eyedebugger/internal/api"
-	"github.com/eyedebugger/eyedebugger/internal/artifacts"
-	"github.com/eyedebugger/eyedebugger/internal/container"
+	"github.com/eyedebugger/eyedebugger/internal/container/containertest"
 )
 
 // TestComposeLaunchCycle: the whole life of a stack in fast mode, through the
@@ -44,20 +43,84 @@ func (w *launchWorld) enter(t *testing.T) {
 		"recreated with this shell's compose environment", "app runs only while its eyedbg session runs it",
 		"undo with: eyedbg compose restore consumer consumer2 producer", "next: eyedbg compose wait -g myapp")
 
-	// One build per distinct project (consumer and consumer2 share one).
+	w.checkPublishes(t)
+	w.checkEntryRecreate(t)
+
+	w.checkOverride(t, "consumer", "consumer2", "producer")
+	w.checkEntryLaunches(t, oldIDs)
+	w.checkEntrySessions(t)
+
+	out, _ = w.run(0, "compose", "bp", "ls")
+	expectOutput(t, out, "producer.txt:3")
+}
+
+// checkEntryLaunches: each launch followed the mirror and the override, in the
+// recreated container (not the old one), with the path map.
+func (w *launchWorld) checkEntryLaunches(t *testing.T, oldIDs map[string]string) {
+	t.Helper()
+
+	launches := w.launched()
+	if len(launches) != 3 {
+		t.Fatalf("%d launches", len(launches))
+	}
+
+	for i := range launches {
+		l := &launches[i]
+		if l.marker == "" || !l.override || l.spec.Ref == oldIDs[l.spec.Service] || l.spec.Ref != w.docker.idOf(l.spec.Service) ||
+			l.spec.Project != worldProject || len(l.spec.Map) != 1 || l.spec.Map[0] != (api.PathMapping{Remote: "/src", Local: w.dir}) {
+			t.Errorf("launch %+v (old id %s)", l, oldIDs[l.spec.Service])
+		}
+	}
+}
+
+// checkEntrySessions: shared builds share a marker, the staging directory is
+// gone, and every service has a launched session of the group.
+func (w *launchWorld) checkEntrySessions(t *testing.T) {
+	t.Helper()
+
+	if w.marker("consumer") == "" || w.marker("consumer") != w.marker("consumer2") || w.marker("producer") == w.marker("consumer") {
+		t.Errorf("markers: consumer %q consumer2 %q producer %q", w.marker("consumer"), w.marker("consumer2"), w.marker("producer"))
+	}
+
+	if stages := w.stageDirs(); len(stages) != 0 {
+		t.Errorf("staging directories left: %v", stages)
+	}
+
+	sessions := w.sessions()
+	for service := range sessions {
+		if s := sessions[service]; s.Group != worldProject || s.Container == nil || !s.Container.Launched || s.Container.Service != service {
+			t.Errorf("session of %s = %+v", service, s)
+		}
+	}
+
+	if len(sessions) != 3 {
+		t.Errorf("%d sessions, want 3", len(sessions))
+	}
+}
+
+// checkPublishes: one build per distinct project (consumer and consumer2 share
+// one), into the run's staging directory, with eyedbg's own artifacts path.
+func (w *launchWorld) checkPublishes(t *testing.T) {
+	t.Helper()
+
 	if got := w.publishedProjects(); !slices.Equal(got, []string{"Consumer.csproj", "Producer.csproj"}) {
 		t.Errorf("published %v", got)
 	}
 
-	for _, p := range w.publishes {
-		if p.spec.Host != "dotnet-fake" || p.spec.Root != w.dir || !strings.HasPrefix(p.spec.Out, filepath.Join(w.home, "compose", worldProject, "stage-")) ||
-			p.spec.Artifacts != filepath.Join(w.home, "compose", worldProject, "artifacts") {
-			t.Errorf("publish spec = %+v", p.spec)
+	for i := range w.publishes {
+		spec := w.publishes[i].spec
+		if spec.Host != "dotnet-fake" || spec.Root != w.dir || !strings.HasPrefix(spec.Out, filepath.Join(w.home, "compose", worldProject, "stage-")) ||
+			spec.Artifacts != filepath.Join(w.home, "compose", worldProject, "artifacts") {
+			t.Errorf("publish spec = %+v", spec)
 		}
 	}
+}
 
-	// One recreate, for the three services only, from the containers' own
-	// files, with the override last and no --wait.
+// checkEntryRecreate: one recreate, for the three services only, from the
+// containers' own files, with the override last and no --wait.
+func (w *launchWorld) checkEntryRecreate(t *testing.T) {
+	t.Helper()
+
 	ups := w.docker.upCalls()
 	if len(ups) != 1 {
 		t.Fatalf("%d compose up calls, want 1", len(ups))
@@ -69,42 +132,6 @@ func (w *launchWorld) enter(t *testing.T) {
 		!slices.Equal(up.ref.Files, []string{filepath.Join(w.dir, "compose.yml"), filepath.Join(w.dir, "compose.override.yml")}) {
 		t.Errorf("compose up = %+v", up)
 	}
-
-	w.checkOverride(t, "consumer", "consumer2", "producer")
-
-	// Each launch followed the mirror and the override, in the recreated
-	// container, with the path map and the startup breakpoint's session.
-	if len(w.launched()) != 3 {
-		t.Fatalf("%d launches", len(w.launched()))
-	}
-
-	for _, l := range w.launched() {
-		if l.marker == "" || !l.override || l.spec.Ref == oldIDs[l.spec.Service] || l.spec.Ref != w.docker.idOf(l.spec.Service) ||
-			l.spec.Project != worldProject || len(l.spec.Map) != 1 || l.spec.Map[0] != (api.PathMapping{Remote: "/src", Local: w.dir}) {
-			t.Errorf("launch %+v (old id %s)", l, oldIDs[l.spec.Service])
-		}
-	}
-
-	if w.marker("consumer") == "" || w.marker("consumer") != w.marker("consumer2") || w.marker("producer") == w.marker("consumer") {
-		t.Errorf("markers: consumer %q consumer2 %q producer %q", w.marker("consumer"), w.marker("consumer2"), w.marker("producer"))
-	}
-
-	if stages := w.stageDirs(); len(stages) != 0 {
-		t.Errorf("staging directories left: %v", stages)
-	}
-
-	for service, s := range w.sessions() {
-		if s.Group != worldProject || s.Container == nil || !s.Container.Launched || s.Container.Service != service {
-			t.Errorf("session of %s = %+v", service, s)
-		}
-	}
-
-	if got := len(w.sessions()); got != 3 {
-		t.Errorf("%d sessions, want 3", got)
-	}
-
-	out, _ = w.run(0, "compose", "bp", "ls")
-	expectOutput(t, out, "producer.txt:3")
 }
 
 // checkOverride checks the override file: a fragment for exactly these
@@ -117,16 +144,39 @@ func (w *launchWorld) checkOverride(t *testing.T, services ...string) {
 		t.Fatalf("the override has fragments for %v, want %v", got, services)
 	}
 
-	for name, frag := range doc.Services {
-		dll := strings.ToUpper(name[:1]) + strings.TrimRight(name[1:], "2") + ".dll"
-		project := strings.TrimSuffix(dll, ".dll") + "/" + strings.TrimSuffix(dll, ".dll") + ".csproj"
+	for name := range doc.Services {
+		w.checkFragment(t, name, doc)
+	}
+}
 
-		if !slices.Equal(frag.Entrypoint, []string{"tail", "-f", "/dev/null"}) || len(frag.Command) != 0 || !frag.Init ||
-			len(frag.Volumes) != 1 || frag.Volumes[0].Source != w.serviceDir(name) || frag.Volumes[0].Target != "/app" || !frag.Volumes[0].ReadOnly ||
-			frag.Labels["dev.izzat.eyedbg.fast.version"] != "1" || frag.Labels["dev.izzat.eyedbg.fast.override"] != w.override() ||
-			frag.Labels["dev.izzat.eyedbg.fast.dll"] != dll || frag.Labels["dev.izzat.eyedbg.fast.workdir"] != "/app" ||
-			frag.Labels["dev.izzat.eyedbg.fast.project"] != project || len(frag.Labels) != 5 {
-			t.Errorf("fragment of %s = %+v (want dll %s, project %s)", name, frag, dll, project)
+// checkFragment checks one service's fragment of the override: only the idle
+// entrypoint, no command, init, the read-only mount and eyedbg's five labels.
+func (w *launchWorld) checkFragment(t *testing.T, name string, doc overrideFile) {
+	t.Helper()
+
+	frag := doc.Services[name]
+	dll := strings.ToUpper(name[:1]) + strings.TrimRight(name[1:], "2") + ".dll"
+	project := strings.TrimSuffix(dll, ".dll") + "/" + strings.TrimSuffix(dll, ".dll") + ".csproj"
+
+	if !slices.Equal(frag.Entrypoint, []string{"tail", "-f", "/dev/null"}) || len(frag.Command) != 0 || !frag.Init {
+		t.Errorf("fragment of %s idles wrongly: %+v", name, frag)
+	}
+
+	if len(frag.Volumes) != 1 || frag.Volumes[0].Source != w.serviceDir(name) || frag.Volumes[0].Target != "/app" || !frag.Volumes[0].ReadOnly {
+		t.Errorf("fragment of %s mounts wrongly: %+v", name, frag.Volumes)
+	}
+
+	labels := map[string]string{
+		"dev.izzat.eyedbg.fast.version": "1", "dev.izzat.eyedbg.fast.override": w.override(), "dev.izzat.eyedbg.fast.dll": dll,
+		"dev.izzat.eyedbg.fast.workdir": "/app", "dev.izzat.eyedbg.fast.project": project,
+	}
+	if len(frag.Labels) != len(labels) {
+		t.Errorf("fragment of %s has labels %v", name, frag.Labels)
+	}
+
+	for k, v := range labels {
+		if frag.Labels[k] != v {
+			t.Errorf("fragment of %s: label %s = %q, want %q", name, k, frag.Labels[k], v)
 		}
 	}
 }
@@ -227,8 +277,9 @@ func (w *launchWorld) everything(t *testing.T) {
 		t.Errorf("compose up ran again: %d calls", len(w.docker.upCalls()))
 	}
 
-	for service, s := range w.sessions() {
-		if s.ID == before[service].ID {
+	after := w.sessions()
+	for service := range after {
+		if after[service].ID == before[service].ID {
 			t.Errorf("%s was not relaunched", service)
 		}
 	}
@@ -238,6 +289,13 @@ func (w *launchWorld) everything(t *testing.T) {
 // and directory gone, the others kept), then the rest (everything of
 // eyedbg's is removed), then nothing is left to restore.
 func (w *launchWorld) restore(t *testing.T) {
+	t.Helper()
+
+	w.restoreOne(t)
+	w.restoreRest(t)
+}
+
+func (w *launchWorld) restoreOne(t *testing.T) {
 	t.Helper()
 
 	producer := w.sessions()["producer"].ID
@@ -274,8 +332,12 @@ func (w *launchWorld) restore(t *testing.T) {
 	if w.marker("consumer") == "" {
 		t.Error("consumer's build was removed")
 	}
+}
 
-	out, _ = w.run(0, "compose", "restore")
+func (w *launchWorld) restoreRest(t *testing.T) {
+	t.Helper()
+
+	out, _ := w.run(0, "compose", "restore")
 	expectOutput(t, out, "restored 2 of 2 service(s)", "consumer", "consumer2", "eyedbg's files for this project were removed")
 
 	if w.projectDirExists() {
@@ -298,7 +360,107 @@ func (w *launchWorld) restore(t *testing.T) {
 	if len(w.docker.upCalls()) != 3 {
 		t.Errorf("%d compose up calls, want 3", len(w.docker.upCalls()))
 	}
+}
 
-	_ = artifacts.Compose
-	_ = container.OverrideName
+// TestComposeLaunchHelp: the commands' flags and the promises their help makes.
+func TestComposeLaunchHelp(t *testing.T) {
+	t.Parallel()
+
+	root := newEyedbgCommand(testInfo, defaultComposeDeps())
+
+	launch, _, err := root.Find([]string{"compose", "launch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, f := range []string{"file", "project-name", "project-directory", "dotnet-project", "env-file", "bp", "exceptions", "lease-policy", "no-record", "no-build", "stop-on-entry"} {
+		if launch.Flags().Lookup(f) == nil {
+			t.Errorf("compose launch has no --%s", f)
+		}
+	}
+
+	// The path map is fixed by the build; the override is eyedbg's own.
+	for _, f := range []string{"map", "out", "adapter", "timeout"} {
+		if launch.Flags().Lookup(f) != nil {
+			t.Errorf("compose launch has --%s", f)
+		}
+	}
+
+	for _, want := range []string{
+		"RECREATES", "SAME container", "DOWN", "docker compose logs", "read-only", "command: or image CMD", "service_healthy",
+		"A compile error therefore changes nothing", "compose restore", "--no-build", "chiseled", "never reads", "no --map",
+	} {
+		if !strings.Contains(launch.Long, want) {
+			t.Errorf("compose launch's help lacks %q", want)
+		}
+	}
+
+	restore, _, err := root.Find([]string{"compose", "restore"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, f := range []string{"file", "project-name", "project-directory", "env-file"} {
+		if restore.Flags().Lookup(f) == nil {
+			t.Errorf("compose restore has no --%s", f)
+		}
+	}
+
+	for _, want := range []string{"force-recreate", "--wait", "Dependents", "not in fast mode", "nothing is launched"} {
+		if !strings.Contains(restore.Long, want) {
+			t.Errorf("compose restore's help lacks %q", want)
+		}
+	}
+}
+
+// TestComposeLaunchRealEngine: through the real docker wrapper over a fake
+// docker CLI, what reaches docker is exactly what the contract says, in this
+// order: inspect, the probe, the list of fast containers, then one compose up
+// for the named service only.
+func TestComposeLaunchRealEngine(t *testing.T) {
+	w := newLaunchWorld(t)
+
+	producer := w.docker.byService("producer").fi
+	configFiles := strings.Join(producer.ConfigFiles, ",")
+
+	inspect := `["` + producer.ID + `","/` + producer.Name + `","` + producer.Image + `","linux",true,false,false,"Producer.dll",false,"/app","` + worldProject +
+		`","producer","` + w.dir + `","` + configFiles + `",null,null,null,null,null]`
+
+	calls := filepath.Join(t.TempDir(), "calls")
+	w.engine = containertest.Engine(t, containertest.Scenario{Calls: calls, Rules: []containertest.Rule{
+		{Match: []string{"inspect", "--type", "container"}, Stdout: inspect},
+		{Match: []string{"exec"}, Stdout: "tail (GNU coreutils) 9.4\n"},
+		{Match: []string{"ps", "--all"}},
+		{Match: []string{"compose"}, Exit: 1, Stderr: "service producer: bind source missing"},
+	}})
+
+	envFile := filepath.Join(w.dir, "prod.env")
+
+	_, errOut := w.run(exitCodeOf(api.CodeAttachFailed), "compose", "launch", "producer", "--env-file", envFile)
+	expectOutput(t, errOut, "[ATTACH_FAILED]", "bind source missing", "eyedbg compose restore producer")
+
+	var subs []string
+
+	argvs := containertest.ReadCalls(t, calls)
+	for _, argv := range argvs {
+		subs = append(subs, argv[0])
+	}
+
+	// A failed recreate prunes nothing and reads nothing back.
+	if want := []string{"inspect", "exec", "ps", "compose"}; !slices.Equal(subs, want) {
+		t.Fatalf("docker ran %v, want %v", subs, want)
+	}
+
+	if got, want := argvs[1], []string{"exec", producer.ID, "tail", "--version"}; !slices.Equal(got, want) {
+		t.Errorf("probe = %q, want %q", got, want)
+	}
+
+	want := []string{
+		"compose", "--project-name=" + worldProject, "--project-directory=" + w.dir,
+		"--file=" + producer.ConfigFiles[0], "--file=" + producer.ConfigFiles[1], "--file=" + w.override(), "--env-file=" + envFile,
+		"up", "--detach", "--no-deps", "--force-recreate", "--no-build", "producer",
+	}
+	if got := argvs[3]; !slices.Equal(got, want) {
+		t.Errorf("compose up = %q\nwant         %q", got, want)
+	}
 }

@@ -538,6 +538,10 @@ func (r *launchRun) up(ctx context.Context, entering []*launchSvc) {
 // service must have exactly one, running, in fast mode with this project's
 // override.
 func (r *launchRun) refresh(ctx context.Context, entering []*launchSvc) {
+	if !slices.ContainsFunc(entering, func(s *launchSvc) bool { return s.live() && s.recreated }) {
+		return
+	}
+
 	fast, err := r.docker.FastContainers(ctx, r.project)
 
 	for _, s := range entering {
