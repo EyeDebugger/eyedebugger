@@ -121,6 +121,8 @@ func (m *Manager) Start(ctx context.Context, c api.Client, p api.StartParams) (*
 	defer cancel()
 
 	switch {
+	case p.ContainerLaunch != nil:
+		return m.startContainerLaunch(ctx, c, drv, p, policy)
 	case p.Attach != nil:
 		return m.startAttach(ctx, c, drv, p, policy)
 	case p.Test != nil:
@@ -153,6 +155,10 @@ func (m *Manager) checkedStart(p api.StartParams) (Driver, api.LeasePolicy, api.
 
 	if p.Attach != nil && p.Test != nil {
 		return nil, "", p, api.NewError(api.CodeInvalidRequest, "a session either attaches or runs tests, not both", "")
+	}
+
+	if p.ContainerLaunch != nil && (p.Attach != nil || p.Test != nil) {
+		return nil, "", p, api.NewError(api.CodeInvalidRequest, "a session either launches in a container, attaches or runs tests, not several", "")
 	}
 
 	if p.Group != "" {
@@ -562,6 +568,8 @@ func (m *Manager) stop(ctx context.Context, c api.Client, s *Session) (api.Sessi
 		return api.SessionInfo{}, err
 	}
 
+	m.release(s)
+
 	if m.removeSession(s) {
 		m.forget(ctx, s.ID)
 		m.logger.InfoContext(ctx, "session stopped", slog.String("session", s.ID))
@@ -582,6 +590,7 @@ func (m *Manager) Detach(ctx context.Context, c api.Client, id string) (api.Sess
 		return api.SessionInfo{}, err
 	}
 
+	m.release(s)
 	m.remove(s.ID)
 	m.forget(ctx, s.ID)
 	m.logger.InfoContext(ctx, "session detached", slog.String("session", s.ID))
@@ -604,6 +613,7 @@ func (m *Manager) StopAll(ctx context.Context) int {
 
 	for _, s := range all {
 		s.terminate(ctx, "", s.endedBy(""))
+		m.release(s)
 		m.forget(ctx, s.ID)
 	}
 

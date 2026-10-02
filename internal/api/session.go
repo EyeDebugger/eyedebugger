@@ -92,6 +92,10 @@ type StartParams struct {
 	Attach *AttachSpec `json:"attach,omitempty"`
 	// Test debugs a test run of the project (see [TestSpec]).
 	Test *TestSpec `json:"test,omitempty"`
+	// ContainerLaunch launches the app of a fast-mode container inside it;
+	// the launch fields must then be empty. The daemon accepts it only from
+	// [MethodContainerLaunch], never from [MethodSessionStart].
+	ContainerLaunch *ContainerLaunchSpec `json:"containerLaunch,omitempty"`
 	// Adapter chooses the debug adapter by name, for a language whose
 	// driver has more than one (dotnet: netcoredbg or sharpdbg); empty
 	// means the driver's default.

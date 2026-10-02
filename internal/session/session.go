@@ -146,7 +146,8 @@ type Session struct {
 	pathMap *PathMap
 	// group is the session's group and container the container it debugs a
 	// process of (nil: a host process); both immutable once the session is
-	// shared. claimKey is the container process the manager's claim names
+	// shared, but a launched container app's PID (set from the adapter's
+	// process event, under mu). claimKey is the container process the manager's claim names
 	// ("": none).
 	group     string
 	container *api.ContainerInfo
@@ -225,7 +226,7 @@ func newSession(life context.Context, id, lang, mode string, launch Launch, logg
 		Lang:        lang,
 		mode:        mode,
 		pid:         hostPID(launch),
-		container:   launch.Container,
+		container:   cloneContainer(launch.Container),
 		Program:     launch.Program,
 		CreatedAt:   now,
 		logger:      logger.With(slog.String("session", id)),
@@ -538,8 +539,13 @@ func (s *Session) onEvent(ev godap.EventMessage) {
 			s.endLocked(s.endReasonLocked("the program terminated"))
 		}
 	case *godap.ProcessEvent:
-		if s.container == nil { // a container's pids are not the host's
+		switch {
+		case s.container == nil:
 			s.pid = e.Body.SystemProcessId
+		case s.container.Launched:
+			// A container's pids are not the host's: this one is the app's, as
+			// the container numbers it.
+			s.container.PID = e.Body.SystemProcessId
 		}
 	case *godap.OutputEvent:
 		s.appendOutputLocked(e.Body.Category, e.Body.Output)

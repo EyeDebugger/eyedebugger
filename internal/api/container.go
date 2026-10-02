@@ -11,6 +11,12 @@ import "strings"
 // attach to a host process; an unknown method fails with UNKNOWN_METHOD.
 const MethodContainerAttach = "container.attach"
 
+// MethodContainerLaunch launches the app of one or more fast-mode containers
+// under the debugger, inside each container, one session each (docs/adr/0021,
+// D1). Like [MethodContainerAttach] it never travels through
+// [MethodSessionStart].
+const MethodContainerLaunch = "container.launch"
+
 // MessageOutsidePathMap ends the message of the INVALID_REQUEST for a line
 // breakpoint whose file is outside a container session's path map. The
 // compose commands read it as "not for this member", not as a failure.
@@ -72,6 +78,28 @@ type ContainerInfo struct {
 	// UnhealthyAfter is how long a stop must last before the container's own
 	// healthcheck says unhealthy; omitted without a healthcheck.
 	UnhealthyAfter Duration `json:"unhealthyAfter,omitempty"`
+	// Launched is set when the session launched the app in the container
+	// (fast mode, [MethodContainerLaunch]) instead of attaching to a process
+	// that was already there: the app lives and dies with the session, and
+	// PID is its process id inside the container once it has started.
+	Launched bool `json:"launched,omitempty"`
+}
+
+// ContainerLaunchSpec names the fast-mode container to launch the app in. What
+// runs (the assembly, the directory) is read from eyedbg's own labels on the
+// container by the daemon, never taken from a request.
+type ContainerLaunchSpec struct {
+	Engine ContainerEngine `json:"engine,omitzero"`
+	// Ref is the container's id (12 to 64 hex digits) or name.
+	Ref string `json:"ref"`
+	// Service and Project are the member's compose names, for the result.
+	Service string `json:"service,omitempty"`
+	Project string `json:"project,omitempty"`
+	// Map is the path map ([PathMapping]); empty means the default, if the
+	// container has one.
+	Map []PathMapping `json:"map,omitempty"`
+	// StopOnEntry stops the app before its first line runs.
+	StopOnEntry bool `json:"stopOnEntry,omitempty"`
 }
 
 // ContainerAttachParams are the params of [MethodContainerAttach]: attach to
@@ -94,6 +122,23 @@ type ContainerAttachParams struct {
 	Wait Duration `json:"wait,omitempty"`
 }
 
+// ContainerLaunchParams are the params of [MethodContainerLaunch]: launch in
+// every member, each as its own session of Group, with the same breakpoints,
+// exception mode, lease policy and adapter.
+type ContainerLaunchParams struct {
+	DumpSpec
+
+	Client      string                `json:"client,omitempty"`
+	Lang        string                `json:"lang"`
+	Group       string                `json:"group,omitempty"`
+	Members     []ContainerLaunchSpec `json:"members"`
+	Breakpoints []BreakpointSpec      `json:"breakpoints,omitempty"`
+	Exceptions  ExceptionMode         `json:"exceptions,omitempty"`
+	LeasePolicy LeasePolicy           `json:"leasePolicy,omitempty"`
+	NoRecord    bool                  `json:"noRecord,omitempty"`
+	Adapter     string                `json:"adapter,omitempty"`
+}
+
 // ContainerMemberResult is one member's outcome: exactly one of Session,
 // Error and Skipped is set.
 type ContainerMemberResult struct {
@@ -108,6 +153,12 @@ type ContainerMemberResult struct {
 // ContainerAttachResult is the result of [MethodContainerAttach]: the
 // members in the order of the request.
 type ContainerAttachResult struct {
+	Members []ContainerMemberResult `json:"members"`
+}
+
+// ContainerLaunchResult is the result of [MethodContainerLaunch]: the
+// members in the order of the request; each has a Session or an Error.
+type ContainerLaunchResult struct {
 	Members []ContainerMemberResult `json:"members"`
 }
 
