@@ -96,6 +96,9 @@ type StartParams struct {
 	// driver has more than one (dotnet: netcoredbg or sharpdbg); empty
 	// means the driver's default.
 	Adapter string `json:"adapter,omitempty"`
+	// Group labels the session as a member of a group (a compose project);
+	// see [CheckGroup]. Empty: none.
+	Group string `json:"group,omitempty"`
 }
 
 // SessionRef names a session, and the client acting on it.
@@ -157,6 +160,15 @@ type SessionInfo struct {
 	// netcoredbg); empty until a test run's host is attached, and in
 	// records of older daemons.
 	Adapter string `json:"adapter,omitempty"`
+	// Group is the session's group, if it has one.
+	Group string `json:"group,omitempty"`
+	// Container describes the container the session debugs a process of;
+	// nil for a host process. Such a session has no PID: it is not a host
+	// process.
+	Container *ContainerInfo `json:"container,omitempty"`
+	// StoppedAt is when the program stopped; set only while the session is
+	// stopped.
+	StoppedAt *time.Time `json:"stoppedAt,omitempty"`
 }
 
 // Session modes ([SessionInfo.Mode]).

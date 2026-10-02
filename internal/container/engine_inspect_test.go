@@ -1,0 +1,136 @@
+// Copyright The EyeDebugger Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package container_test
+
+import (
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/eyedebugger/eyedebugger/internal/api"
+	"github.com/eyedebugger/eyedebugger/internal/container/containertest"
+)
+
+const inspectOut = `["` + fullID + `","/web-1","sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210","dotnet",` +
+	`true,false,false,null,[5000000000,3000000000,3,false],"my-app","web","/home/me/app",""]`
+
+func TestInspectViaDocker(t *testing.T) {
+	t.Parallel()
+
+	calls := filepath.Join(t.TempDir(), "calls")
+	e := containertest.Engine(t, containertest.Scenario{Calls: calls, Rules: []containertest.Rule{
+		{Match: []string{"inspect", "--type", "container", "--format"}, Stdout: inspectOut},
+	}})
+	e.Host = "tcp://h:1"
+
+	info, err := e.Inspect(t.Context(), "web-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.ID != fullID || info.Name != "web-1" || info.Service != "web" || info.UnhealthyAfter().Seconds() != 18 {
+		t.Errorf("info = %+v", info)
+	}
+
+	got := containertest.ReadCalls(t, calls)
+	if len(got) != 1 {
+		t.Fatalf("%d docker calls, want 1: %q", len(got), got)
+	}
+
+	argv := got[0]
+	if len(argv) != 8 || argv[0] != "--host=tcp://h:1" || !slices.Equal(argv[1:5], []string{"inspect", "--type", "container", "--format"}) {
+		t.Fatalf("argv = %q", argv)
+	}
+
+	if want := []string{"--", "web-1"}; !slices.Equal(argv[len(argv)-2:], want) {
+		t.Errorf("argv ends %q, want %q", argv[len(argv)-2:], want)
+	}
+
+	for _, banned := range []string{"Env", "Cmd", "Args", "Entrypoint"} {
+		if strings.Contains(argv[5], banned) {
+			t.Errorf("the template names %s", banned)
+		}
+	}
+}
+
+func TestInspectErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		rule     containertest.Rule
+		ref      string
+		wantCode api.Code
+		wantMsg  string
+	}{
+		{"no such container", containertest.Rule{Match: []string{"inspect"}, Exit: 1, Stderr: "Error: No such container: web"}, "web", api.CodeInvalidRequest, "no container"},
+		{"daemon down", containertest.Rule{Match: []string{"inspect"}, Exit: 1, Stderr: "Cannot connect to the Docker daemon"}, "web", api.CodeAttachFailed, "Cannot connect"},
+		{"garbage", containertest.Rule{Match: []string{"inspect"}, Stdout: "hello"}, "web", api.CodeAttachFailed, "unexpected answer"},
+		{"injected ref", containertest.Rule{Match: []string{"inspect"}, Stdout: inspectOut}, "--privileged", api.CodeInvalidRequest, "invalid container"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			calls := filepath.Join(t.TempDir(), "calls")
+			e := containertest.Engine(t, containertest.Scenario{Calls: calls, Rules: []containertest.Rule{tt.rule}})
+
+			_, err := e.Inspect(t.Context(), tt.ref)
+			if api.CodeOf(err) != tt.wantCode || !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("err = %v (%s), want %s containing %q", err, api.CodeOf(err), tt.wantCode, tt.wantMsg)
+			}
+
+			if tt.name == "injected ref" && len(containertest.ReadCalls(t, calls)) != 0 {
+				t.Error("docker ran for an invalid reference")
+			}
+		})
+	}
+}
+
+func TestImagePlatform(t *testing.T) {
+	t.Parallel()
+
+	const image = "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+
+	tests := []struct {
+		out, goos, arch, variant string
+		bad                      bool
+	}{
+		{out: "linux/arm64/\n", goos: "linux", arch: "arm64"},
+		{out: "linux/arm/v7\n", goos: "linux", arch: "arm", variant: "v7"},
+		{out: "windows/amd64/\n", goos: "windows", arch: "amd64"},
+		{out: "linux/amd64\n", bad: true},
+		{out: "Linux/amd64/\n", bad: true},
+		{out: "linux/amd64/\nextra", bad: true},
+		{out: "", bad: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(strings.TrimSpace(tt.out), func(t *testing.T) {
+			t.Parallel()
+
+			e := containertest.Engine(t, containertest.Scenario{Rules: []containertest.Rule{{Match: []string{"image", "inspect", "--format"}, Stdout: tt.out}}})
+
+			goos, arch, variant, err := e.ImagePlatform(t.Context(), image)
+			if tt.bad {
+				if err == nil {
+					t.Errorf("ImagePlatform(%q) accepted", tt.out)
+				}
+
+				return
+			}
+
+			if err != nil || goos != tt.goos || arch != tt.arch || variant != tt.variant {
+				t.Errorf("ImagePlatform(%q) = %q %q %q, %v", tt.out, goos, arch, variant, err)
+			}
+		})
+	}
+
+	e := containertest.Engine(t, containertest.Scenario{})
+	if _, _, _, err := e.ImagePlatform(t.Context(), "--format"); err == nil {
+		t.Error("ImagePlatform accepted a flag as the image")
+	}
+}
