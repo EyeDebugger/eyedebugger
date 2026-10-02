@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
@@ -319,4 +320,102 @@ func TestSessionStartRefusesContainerLaunch(t *testing.T) {
 	if d.prepared.Load() != 0 {
 		t.Error("the driver ran for a session.start that carried a container launch")
 	}
+}
+
+// TestStartMembersBoundsConcurrency: at most maxConcurrentAttaches members
+// start at once, however many there are, and every member answers in its own
+// place; a member that never got a slot before the request ended answers with
+// that. synctest makes "no fifth one is running" a fact, not a hope: once
+// every goroutine is blocked, exactly four are inside start.
+func TestStartMembersBoundsConcurrency(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		const members = 10
+
+		var (
+			inside  atomic.Int32
+			mostIn  atomic.Int32
+			release = make(chan struct{})
+		)
+
+		done := make(chan []api.ContainerMemberResult, 1)
+
+		go func() {
+			done <- startMembers(t.Context(), members,
+				func(i int) (string, string) { return "s" + strconv.Itoa(i), "c" + strconv.Itoa(i) },
+				func(i int) api.ContainerMemberResult {
+					n := inside.Add(1)
+					mostIn.Store(max(mostIn.Load(), n))
+					<-release
+					inside.Add(-1)
+
+					return api.ContainerMemberResult{Service: "s" + strconv.Itoa(i)}
+				})
+		}()
+
+		synctest.Wait() // everything that can start has, and is blocked
+
+		if n := inside.Load(); n != maxConcurrentAttaches {
+			t.Fatalf("%d members inside start with everything blocked, want exactly %d", n, maxConcurrentAttaches)
+		}
+
+		close(release)
+
+		results := <-done
+		if len(results) != members || mostIn.Load() != maxConcurrentAttaches {
+			t.Fatalf("%d results, at most %d at once, want %d and %d", len(results), mostIn.Load(), members, maxConcurrentAttaches)
+		}
+
+		for i, r := range results {
+			if r.Service != "s"+strconv.Itoa(i) {
+				t.Errorf("result %d is for %q: results are in member order", i, r.Service)
+			}
+		}
+	})
+}
+
+// TestStartMembersAnswersForMembersThatNeverStarted: with the request over,
+// members still waiting for a slot answer with the context's error, in place.
+func TestStartMembersAnswersForMembersThatNeverStarted(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		release := make(chan struct{})
+		done := make(chan []api.ContainerMemberResult, 1)
+
+		go func() {
+			done <- startMembers(ctx, 6,
+				func(i int) (string, string) { return "s" + strconv.Itoa(i), "c" + strconv.Itoa(i) },
+				func(int) api.ContainerMemberResult {
+					<-release
+
+					return api.ContainerMemberResult{}
+				})
+		}()
+
+		synctest.Wait()
+		cancel()
+		synctest.Wait()
+		close(release)
+
+		results := <-done
+
+		failed := 0
+
+		for i, r := range results {
+			if r.Error != nil {
+				failed++
+
+				if r.Service != "s"+strconv.Itoa(i) || r.Container != "c"+strconv.Itoa(i) {
+					t.Errorf("result %d names %q/%q, want its own member", i, r.Service, r.Container)
+				}
+			}
+		}
+
+		if failed != 6-maxConcurrentAttaches {
+			t.Errorf("%d members answered with the cancellation, want %d (those without a slot)", failed, 6-maxConcurrentAttaches)
+		}
+	})
 }
