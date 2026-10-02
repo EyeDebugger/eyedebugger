@@ -351,7 +351,7 @@ func openBuildLog(path string) (*os.File, error) {
 		return nil, api.NewError(api.CodeInvalidRequest, path+" is not a regular file", "delete it: eyedbg keeps only its own files in this directory")
 	}
 
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:gosec // The path is eyedbg's own directory's build.log, checked just above.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open the build log: %w", err)
 	}
