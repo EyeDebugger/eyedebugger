@@ -244,6 +244,10 @@ func snapshotHeader(snap api.Snapshot) string {
 		lang += ", " + s.Adapter
 	}
 
+	if what := containerHeader(s); what != "" {
+		lang += "; " + what
+	}
+
 	fmt.Fprintf(&b, "session %s (%s) %s", s.ID, lang, s.State)
 
 	switch s.State {
@@ -275,6 +279,27 @@ func snapshotHeader(snap api.Snapshot) string {
 	}
 
 	return b.String()
+}
+
+// containerHeader says which service and container a session debugs, and
+// its group: "service web, container web-1, group myapp"; empty for a host
+// process outside any group.
+func containerHeader(s api.SessionInfo) string {
+	var parts []string
+
+	if c := s.Container; c != nil {
+		if c.Service != "" {
+			parts = append(parts, "service "+c.Service)
+		}
+
+		parts = append(parts, "container "+c.Name)
+	}
+
+	if s.Group != "" {
+		parts = append(parts, "group "+s.Group)
+	}
+
+	return strings.Join(parts, ", ")
 }
 
 // lostNote explains lost sessions under the sessions table.

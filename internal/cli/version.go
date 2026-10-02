@@ -53,7 +53,8 @@ run through the .NET side helper — which may still be missing at run time, HEL
 "dotnet.dump": 'eyedbg dotnet dump', 'eyedbg dotnet heap' and 'eyedbg dotnet threads', through the
 same helper; "dotnet.trace": 'eyedbg dotnet trace', through the same helper; "adapter.select":
 start, attach and test take --adapter, dotnet sessions can use SharpDbg, and sessions report their
-adapter).`, binName),
+adapter; "container": 'eyedbg attach --container' and sessions that report their container and
+group).`, binName),
 		Example: fmt.Sprintf("  %[1]s version\n  %[1]s version --json", binName),
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -73,7 +74,7 @@ func writeVersion(w io.Writer, name string, info version.Info, asJSON bool) erro
 			GoVersion: info.GoVersion,
 			Platform:  info.Platform,
 			Protocol:  api.ProtocolVersion,
-			Features:  []string{dapCommandName, "presence", "lease.request", "dap.collab", "dotnet.helper", "dotnet.dump", "dotnet.trace", "adapter.select", "dap.launch", "dap.terminal"},
+			Features:  []string{dapCommandName, "presence", "lease.request", "dap.collab", "dotnet.helper", "dotnet.dump", "dotnet.trace", "adapter.select", "dap.launch", "dap.terminal", "container"},
 		}
 		if err := json.NewEncoder(w).Encode(out); err != nil {
 			return fmt.Errorf("write version: %w", err)
