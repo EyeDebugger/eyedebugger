@@ -98,6 +98,9 @@ type stackRun struct {
 	// upFailed is set when a recreate failed: the state of that service is
 	// uncertain, so nothing of eyedbg's is pruned (docs/adr/0021, D18).
 	upFailed bool
+	// keepProject keeps the project directory although no service is in fast
+	// mode: a build failed, and its log is in it.
+	keepProject bool
 }
 
 // newStackRun opens the run: the docker of the caller's engine.
@@ -176,11 +179,11 @@ func (r *stackRun) prune(ctx context.Context) bool {
 		keep[c.Service] = true
 	}
 
-	if len(keep) == 0 {
+	artifacts.PruneServices(r.projectDir, keep)
+
+	if len(keep) == 0 && !r.keepProject {
 		return artifacts.RemoveProjectDir(r.root, r.project) == nil
 	}
-
-	artifacts.PruneServices(r.projectDir, keep)
 
 	return false
 }
