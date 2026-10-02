@@ -17,7 +17,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -29,12 +28,41 @@ const maxDownload = 1 << 30
 // entry's path, and is a no-op when that already exists. Nothing is left
 // behind on failure.
 func Install(ctx context.Context, client *http.Client, m *Manifest) (string, error) {
-	dir, err := InstallDir(m)
+	return InstallFor(ctx, client, m, HostPlatform())
+}
+
+// InstallFor is Install for platform ("os/arch"), which need not be the
+// host's: for a program that runs elsewhere (an adapter put into a Linux
+// container). The host's platform installs where Install does, any other
+// into InstallDirFor's directory, and the entry has ".exe" only for a
+// Windows target. A platform m has no download for is [NoRelease].
+func InstallFor(ctx context.Context, client *http.Client, m *Manifest, platform string) (string, error) {
+	dir, err := InstallDirFor(m, platform)
 	if err != nil {
 		return "", err
 	}
 
-	return install(ctx, client, m, runtime.GOOS+"/"+runtime.GOARCH, dir)
+	return install(ctx, client, m, platform, dir)
+}
+
+// InstalledFor finds m's pinned install for platform ("os/arch"): its
+// directory and its entry. Only that install counts: never m's environment
+// variable or PATH, which name programs for the host. ErrNotInstalled (in
+// the chain) when it is not there.
+func InstalledFor(m *Manifest, platform string) (dir, entry string, err error) {
+	dir, err = InstallDirFor(m, platform)
+	if err != nil {
+		return "", "", err
+	}
+
+	goos, _, _ := strings.Cut(platform, "/")
+	entry = installedEntryFor(m, dir, goos)
+
+	if info, err := os.Stat(entry); err != nil || !info.Mode().IsRegular() {
+		return "", "", fmt.Errorf("%s %s for %s: %w", m.Name, m.Version, platform, ErrNotInstalled)
+	}
+
+	return dir, entry, nil
 }
 
 // NoRelease is the error for a platform m has no download for.
@@ -63,7 +91,7 @@ func install(ctx context.Context, client *http.Client, m *Manifest, platform, di
 		return "", fmt.Errorf("%s names an absolute adapter.entry; there is nothing to install", m.Name)
 	}
 
-	entry := installedEntry(m, dir)
+	entry := installedEntryFor(m, dir, goos)
 	if _, err := os.Stat(entry); err == nil {
 		return entry, nil
 	}
