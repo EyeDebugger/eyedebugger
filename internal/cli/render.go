@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
 )
@@ -19,6 +20,12 @@ import (
 // when they are under it. --json output is the API value plus "schema".
 
 func writeSnapshot(w io.Writer, snap api.Snapshot, asJSON bool, base string) error {
+	return writeSnapshotAt(w, snap, asJSON, base, time.Now())
+}
+
+// writeSnapshotAt is writeSnapshot with the time "now" for how long a
+// container session has been stopped (tests pass a fixed one).
+func writeSnapshotAt(w io.Writer, snap api.Snapshot, asJSON bool, base string, now time.Time) error {
 	if asJSON {
 		return writeJSON(w, struct {
 			Schema       int `json:"schema"`
@@ -28,10 +35,14 @@ func writeSnapshot(w io.Writer, snap api.Snapshot, asJSON bool, base string) err
 
 	var b strings.Builder
 
-	b.WriteString(snapshotHeader(snap) + "\n")
+	b.WriteString(snapshotHeader(snap, now) + "\n")
 
 	if st := snap.Session.Stop; st != nil && len(st.Breakpoints) > 0 && snap.Session.State == api.StateStopped {
 		b.WriteString("  stopped for " + stopBreakpoints(st.Breakpoints) + "\n")
+	}
+
+	for _, note := range longStopNotes(&snap.Session, now) {
+		b.WriteString("  note: " + note + "\n")
 	}
 
 	writeSharing(&b, snap.Session)
@@ -233,8 +244,9 @@ func stopBreakpoints(bps []api.StopBreakpoint) string {
 	return noun + strings.Join(parts, ", ")
 }
 
-// snapshotHeader is the first line: session, state and why.
-func snapshotHeader(snap api.Snapshot) string {
+// snapshotHeader is the first line: session, state and why; for a container
+// session stopped at now, also for how long.
+func snapshotHeader(snap api.Snapshot, now time.Time) string {
 	s := snap.Session
 
 	var b strings.Builder
@@ -260,6 +272,10 @@ func snapshotHeader(snap api.Snapshot) string {
 			}
 
 			fmt.Fprintf(&b, ", thread %d", s.Stop.ThreadID)
+		}
+
+		if d, ok := stoppedFor(&s, now); ok {
+			fmt.Fprintf(&b, " (stopped %s)", d)
 		}
 	case api.StateExited:
 		if s.ExitCode != nil {
@@ -306,6 +322,12 @@ func containerHeader(s api.SessionInfo) string {
 const lostNote = "(lost: eyedbgd exited while it was live; 'eyedbg sessions --json' has its recording; 'eyedbg stop -s ID' forgets it)\n"
 
 func writeSessions(w io.Writer, list []api.SessionInfo, asJSON bool) error {
+	return writeSessionsAt(w, list, asJSON, time.Now())
+}
+
+// writeSessionsAt is writeSessions with the time "now" for how long a
+// container session has been stopped.
+func writeSessionsAt(w io.Writer, list []api.SessionInfo, asJSON bool, now time.Time) error {
 	if asJSON {
 		if list == nil {
 			list = []api.SessionInfo{}
@@ -333,14 +355,7 @@ func writeSessions(w io.Writer, list []api.SessionInfo, asJSON bool) error {
 		s := &list[i]
 		lost = lost || s.State == api.StateLost
 
-		state := string(s.State)
-		if s.State == api.StateStopped && s.Stop != nil {
-			state += " (" + s.Stop.Reason + ")"
-		}
-
-		if s.State == api.StateExited && s.ExitCode != nil {
-			state += fmt.Sprintf(" (code %d)", *s.ExitCode)
-		}
+		state := sessionStateText(s, now)
 
 		holder := "-"
 		if s.Lease != nil && s.Lease.Holder != "" {
@@ -367,6 +382,27 @@ func writeSessions(w io.Writer, list []api.SessionInfo, asJSON bool) error {
 	}
 
 	return writeText(w, b.String())
+}
+
+// sessionStateText is the STATE column: the state, with the stop reason (and
+// for a container session how long it has been stopped) or the exit code.
+func sessionStateText(s *api.SessionInfo, now time.Time) string {
+	state := string(s.State)
+
+	if s.State == api.StateStopped && s.Stop != nil {
+		state += " (" + s.Stop.Reason
+		if d, ok := stoppedFor(s, now); ok {
+			state += ", " + d.String()
+		}
+
+		state += ")"
+	}
+
+	if s.State == api.StateExited && s.ExitCode != nil {
+		state += fmt.Sprintf(" (code %d)", *s.ExitCode)
+	}
+
+	return state
 }
 
 // connectedClients lists the clients with an editor connection open,

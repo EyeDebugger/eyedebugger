@@ -51,10 +51,10 @@ func TestContainerRendering(t *testing.T) {
 		name, golden string
 		render       func(*bytes.Buffer) error
 	}{
-		{"snapshot", "snapshot_container.golden", func(b *bytes.Buffer) error { return writeSnapshot(b, snap, false, renderBase) }},
+		{"snapshot", "snapshot_container.golden", func(b *bytes.Buffer) error { return writeSnapshotAt(b, snap, false, renderBase, renderTime) }},
 		{"snapshot json", "snapshot_container_json.golden", func(b *bytes.Buffer) error { return writeSnapshot(b, snap, true, renderBase) }},
 		{"sessions", "sessions_container.golden", func(b *bytes.Buffer) error {
-			return writeSessions(b, []api.SessionInfo{stoppedSnapshot().Session, containerSession(), bare}, false)
+			return writeSessionsAt(b, []api.SessionInfo{stoppedSnapshot().Session, containerSession(), bare}, false, renderTime)
 		}},
 		{"running without compose names", "snapshot_container_bare.golden", func(b *bytes.Buffer) error {
 			return writeSnapshot(b, api.Snapshot{Session: bare}, false, renderBase)

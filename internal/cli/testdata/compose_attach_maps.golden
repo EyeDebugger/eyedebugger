@@ -1,0 +1,16 @@
+group myapp: attached to 2 of 4 service(s)
+  web       s-k3f9  attached  container myapp-web-1; its healthcheck fails after 18s of a stop
+  consumer  s-m2n4  attached  container myapp-consumer-1
+  db        -       skipped   pid 1 runs postgres
+  api       -       failed    container myapp-api-1 is not running [ATTACH_FAILED] (start it first)
+path maps:
+  web: /src=/work/app
+  consumer: /app=/work/other
+breakpoint Producer/Program.cs:42:
+  web       bp 1 Producer/Program.cs:42 verified
+  consumer  bp 2 Producer/Program.cs:44 (requested line 42) pending: module not loaded
+breakpoint Orders.cs:9:
+  web       skipped: its file is outside this service's path map
+  consumer  failed: container myapp-api-1 is not running [ATTACH_FAILED] (start it first)
+note: a breakpoint hit stops the whole service: its HTTP callers time out, docker's healthcheck turns the container unhealthy after about retries x interval + timeout (shown per service above), and a Kafka consumer leaves its group after max.poll.interval.ms (5 minutes by default). Keep stops short; 'eyedbg compose wait' shows how long each has been stopped.
+next: eyedbg compose wait -g myapp  |  eyedbg compose bp add FILE:LINE -g myapp  |  eyedbg compose stop -g myapp

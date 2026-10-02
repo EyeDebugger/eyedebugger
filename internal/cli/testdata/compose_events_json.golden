@@ -1,0 +1,1 @@
+{"schema":1,"events":[{"sessionId":"s-k3f9","service":"web","event":{"seq":3,"time":"0001-01-01T00:00:00Z","kind":"stopped","stop":{"reason":"breakpoint","threadId":4}}}],"cursor":"s-k3f9:3"}

@@ -1,4 +1,5 @@
-session s-k3f9 (dotnet, netcoredbg; service web, container web-1, group myapp) stopped: breakpoint, thread 4242
+session s-k3f9 (dotnet, netcoredbg; service web, container web-1, group myapp) stopped: breakpoint, thread 4242 (stopped 45s)
+  note: stopped 45s, past the 18s docker's healthcheck allows: container web-1 is unhealthy by now, and its service is down until it continues
   at Program.<Main>$() Program.cs:4
     3 | {
   > 4 |     total += i;

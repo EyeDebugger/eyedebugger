@@ -1,0 +1,3 @@
+group myapp: no other member stopped within 30s (wait again, or 'eyedbg pause -s ID' one)
+already stopped (before this wait):
+  consumer (s-m2n4)  pause  stopped 12s

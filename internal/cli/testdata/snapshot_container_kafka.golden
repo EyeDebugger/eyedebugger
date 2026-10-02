@@ -1,0 +1,7 @@
+session s-k3f9 (dotnet, netcoredbg; service web, container myapp-web-1, group myapp) stopped: breakpoint, thread 4242 (stopped 5m20s)
+  note: stopped 5m20s, past the 18s docker's healthcheck allows: container myapp-web-1 is unhealthy by now, and its service is down until it continues
+  note: stopped 5m20s: a Kafka consumer in this service leaves its group after max.poll.interval.ms (5 minutes by default) and rejoins when it continues
+  at Program.<Main>$() Program.cs:4
+    3 | {
+  > 4 |     total += i;
+    5 |     Console.WriteLine(total);

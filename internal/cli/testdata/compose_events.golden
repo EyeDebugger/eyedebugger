@@ -1,0 +1,4 @@
+web  3  stopped: breakpoint, thread 4
+consumer  2  output (stdout): tick 5
+s-q8x1  9  exited with code 1
+next: eyedbg compose events -g myapp --since s-k3f9:3,s-m2n4:2,s-q8x1:9  (4 more)

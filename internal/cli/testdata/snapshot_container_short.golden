@@ -1,0 +1,5 @@
+session s-k3f9 (dotnet, netcoredbg; service web, container myapp-web-1, group myapp) stopped: breakpoint, thread 4242 (stopped 5s)
+  at Program.<Main>$() Program.cs:4
+    3 | {
+  > 4 |     total += i;
+    5 |     Console.WriteLine(total);

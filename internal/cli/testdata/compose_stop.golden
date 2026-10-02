@@ -1,0 +1,4 @@
+web       s-k3f9  detached; container myapp-web-1 keeps running
+consumer  s-m2n4  app terminated; container myapp-consumer-1 idles
+db        s-q8x1  ended
+s-z0z0    s-z0z0  failed: the lease is held by human:ijat [LEASE_HELD] (ask for it)

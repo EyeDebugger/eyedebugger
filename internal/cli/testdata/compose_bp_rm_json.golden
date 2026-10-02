@@ -1,0 +1,1 @@
+{"schema":1,"group":"myapp","members":[{"service":"web","sessionId":"s-k3f9","removed":2,"kept":1},{"service":"consumer","sessionId":"s-m2n4","removed":0,"kept":0},{"sessionId":"s-q8x1","removed":0,"kept":0,"error":{"code":"LEASE_HELD","message":"the lease is held by human:ijat","hint":"ask for it"}}]}

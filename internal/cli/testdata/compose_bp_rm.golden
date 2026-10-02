@@ -1,0 +1,3 @@
+web       s-k3f9  removed 2 breakpoint(s); 1 of other clients kept (--force removes them)
+consumer  s-m2n4  removed 0 breakpoint(s)
+s-q8x1    s-q8x1  failed: the lease is held by human:ijat [LEASE_HELD] (ask for it)

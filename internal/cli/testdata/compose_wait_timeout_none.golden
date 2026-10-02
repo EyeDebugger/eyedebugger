@@ -1,0 +1,1 @@
+group myapp: nothing stopped within 30s; every member is still running (wait again, or 'eyedbg pause -s ID' one)
