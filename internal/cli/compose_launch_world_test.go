@@ -65,8 +65,10 @@ type fakeStack struct {
 	probeErr   map[string]error
 	adapterErr map[string]error
 	listErr    error
-	// onUp runs inside a 'compose up' before it takes effect.
-	onUp func(c upCall)
+	// onUp runs inside a 'compose up' before it takes effect; afterUp after
+	// the containers were recreated.
+	onUp    func(c upCall)
+	afterUp func()
 }
 
 func (f *fakeStack) recordf(format string, args ...any) {
@@ -275,6 +277,10 @@ func (f *fakeStack) ComposeUp(_ context.Context, ref container.ProjectRef, overr
 		f.ctrs[next.fi.ID] = &next
 	}
 
+	if f.afterUp != nil {
+		f.afterUp()
+	}
+
 	return nil
 }
 
@@ -326,6 +332,25 @@ func (f *fakeStack) findLocked(service string) *fakeCtr {
 	}
 
 	return nil
+}
+
+// enterFast puts service's container in fast mode as if an earlier launch had,
+// under override (an absolute path): a state a test starts from.
+func (f *fakeStack) enterFast(service, override, project string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	c := f.findLocked(service)
+	if c == nil {
+		f.t.Fatalf("no container for %s", service)
+	}
+
+	c.fi.DLL = ""
+	c.fi.Fast = &container.FastLabels{
+		Version: container.FastVersion, Override: override, DLL: c.asBuilt.DLL, WorkDir: c.asBuilt.WorkDir,
+		Project: project, ProjectPath: filepath.Join(f.dir, filepath.FromSlash(project)),
+	}
+	c.fi.ConfigFiles = append(slices.Clone(c.asBuilt.ConfigFiles), override)
 }
 
 // publishCall is one 'dotnet publish' of the fake.
@@ -380,6 +405,13 @@ type launchRecord struct {
 func newLaunchWorld(t *testing.T) *launchWorld {
 	t.Helper()
 
+	return newWorld(t, true)
+}
+
+// newWorld builds the stack; with serve, the daemon runs in the process.
+func newWorld(t *testing.T, serve bool) *launchWorld {
+	t.Helper()
+
 	p := isolate(t)
 	t.Setenv(envDockerHost, "")
 	t.Setenv(envDockerContext, "")
@@ -413,7 +445,9 @@ func newLaunchWorld(t *testing.T) *launchWorld {
 	db := w.docker.byService("db")
 	db.fi.DLL, db.asBuilt.DLL = "", ""
 
-	serveWithDrivers(t, p, &launchDriver{w: w})
+	if serve {
+		serveWithDrivers(t, p, &launchDriver{w: w})
+	}
 
 	return w
 }

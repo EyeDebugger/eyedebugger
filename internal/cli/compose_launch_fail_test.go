@@ -404,6 +404,11 @@ func TestComposeLaunchStaysInItsSelection(t *testing.T) {
 		t.Error("consumer's session ended")
 	}
 
+	// And its build stays: only what no container refers to is pruned.
+	if w.marker("consumer") == "" {
+		t.Error("consumer's build directory was pruned")
+	}
+
 	// The override holds both, and the second recreate's files exclude it.
 	w.checkOverride(t, "consumer", "producer")
 
@@ -657,4 +662,271 @@ func rowOf(out, service string) []string {
 	}
 
 	return nil
+}
+
+// TestComposeLaunchFirstBuildFails: a compile error on the first launch leaves
+// the log to read (the project directory stays although no service is in fast
+// mode), and nothing else; restore tidies it.
+func TestComposeLaunchFirstBuildFails(t *testing.T) {
+	w := newLaunchWorld(t)
+	w.publishErr["Producer.csproj"] = api.NewError(api.CodeBuildFailed, "dotnet publish failed", "see the build log")
+
+	before := w.snap()
+
+	_, errOut := w.run(exitCodeOf(api.CodeBuildFailed), "compose", "launch", "producer")
+	expectOutput(t, errOut, "[BUILD_FAILED]")
+	w.unchangedSince(t, before)
+
+	log, err := os.ReadFile(filepath.Join(w.home, "compose", worldProject, "build.log"))
+	if err != nil || !strings.Contains(string(log), "CS1002") {
+		t.Errorf("the build log is gone or empty: %q, %v", log, err)
+	}
+
+	if _, err := os.Stat(w.serviceDir("producer")); !os.IsNotExist(err) {
+		t.Errorf("a service directory exists for a service that never built: %v", err)
+	}
+
+	w.run(exitError, "compose", "restore")
+
+	if w.projectDirExists() {
+		t.Error("restore left eyedbg's project directory although nothing is in fast mode")
+	}
+}
+
+// TestComposeLaunchBuildLogNotRegular: eyedbg writes only files of its own: a
+// build.log that is a symlink is not written through.
+func TestComposeLaunchBuildLogNotRegular(t *testing.T) {
+	w := newLaunchWorld(t)
+
+	root, err := artifacts.Dir(artifacts.Compose)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir, err := artifacts.ProjectDir(root, worldProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	victim := filepath.Join(t.TempDir(), "precious.txt")
+	if err := os.WriteFile(victim, []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(victim, filepath.Join(dir, "build.log")); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+
+	before := w.snap()
+
+	_, errOut := w.run(exitError, "compose", "launch", "producer")
+	expectOutput(t, errOut, "[INVALID_REQUEST]", "is not a regular file")
+	w.unchangedSince(t, before)
+
+	if got, err := os.ReadFile(victim); err != nil || string(got) != "keep me" {
+		t.Errorf("the file the link pointed to was written: %q, %v", got, err)
+	}
+}
+
+// TestComposeLaunchPruneNeedsTheList: when docker's list of fast-mode
+// containers can't be read, nothing of eyedbg's is deleted.
+func TestComposeLaunchPruneNeedsTheList(t *testing.T) {
+	w := newLaunchWorld(t)
+	w.enterNamed("producer")
+
+	w.docker.listErr = api.NewError(api.CodeAttachFailed, "docker ps failed", "")
+
+	// The recreate-free relaunch reads nothing; the prune can't list: the
+	// directories stay.
+	w.run(0, "compose", "launch", "producer")
+
+	for _, p := range []string{w.override(), w.serviceDir("producer")} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("deleted although the list could not be read: %v", err)
+		}
+	}
+
+	// Restore can't list either: it fails and removes nothing.
+	_, errOut := w.run(exitCodeOf(api.CodeAttachFailed), "compose", "restore")
+	expectOutput(t, errOut, "docker ps failed")
+
+	if _, err := os.Stat(w.serviceDir("producer")); err != nil {
+		t.Errorf("deleted although the list could not be read: %v", err)
+	}
+}
+
+// TestComposeRestoreWithoutDaemon: no daemon means no sessions to end, not a
+// failure; and what eyedbg keeps for the project is removed.
+func TestComposeRestoreWithoutDaemon(t *testing.T) {
+	w := newWorld(t, false)
+
+	root, err := artifacts.Dir(artifacts.Compose)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir, err := artifacts.ProjectDir(root, worldProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "services", "producer"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	w.docker.enterFast("producer", w.override(), "Producer/Producer.csproj")
+
+	out, _ := w.run(0, "compose", "restore")
+	expectOutput(t, out, "restored 1 of 1 service(s)", "producer")
+
+	if strings.Contains(out, "ended") {
+		t.Errorf("no daemon, yet sessions were ended:\n%s", out)
+	}
+
+	if w.projectDirExists() {
+		t.Error("eyedbg's project directory is still there")
+	}
+}
+
+// TestComposeLaunchReentersOutdatedFast: a container in fast mode with another
+// override (a moved home, an older file) is recreated like an as-built one,
+// from its own files without the old override.
+func TestComposeLaunchReentersOutdatedFast(t *testing.T) {
+	w := newLaunchWorld(t)
+
+	old := filepath.Join(w.dir, "old-override.yml")
+	w.docker.enterFast("producer", old, "Producer/Producer.csproj")
+
+	out, _ := w.run(0, "compose", "launch", "producer")
+	expectOutput(t, out, "recreated -> launched")
+
+	ups := w.docker.upCalls()
+	if len(ups) != 1 || slices.Contains(ups[0].ref.Files, old) || len(ups[0].ref.Files) != 2 || ups[0].override != w.override() {
+		t.Errorf("compose up = %+v", ups)
+	}
+}
+
+// TestComposeLaunchGroupsByFiles: services created from different compose
+// files are recreated by separate 'compose up' calls, each with its own files.
+func TestComposeLaunchGroupsByFiles(t *testing.T) {
+	w := newLaunchWorld(t)
+
+	only := []string{filepath.Join(w.dir, "compose.yml")}
+
+	for _, c := range []*fakeCtr{w.docker.byService("producer")} {
+		c.fi.ConfigFiles, c.asBuilt.ConfigFiles = only, only
+	}
+
+	w.run(0, "compose", "launch", "producer", "consumer")
+
+	ups := w.docker.upCalls()
+	if len(ups) != 2 {
+		t.Fatalf("%d compose up calls, want 2: %+v", len(ups), ups)
+	}
+
+	byService := map[string][]string{}
+	for i := range ups {
+		for _, s := range ups[i].services {
+			byService[s] = ups[i].ref.Files
+		}
+	}
+
+	if !slices.Equal(byService["producer"], only) || len(byService["consumer"]) != 2 {
+		t.Errorf("files by service: %v", byService)
+	}
+}
+
+// TestComposeLaunchLaunchFails: a launch the daemon refuses leaves the
+// service down, and the output says so and how to try again.
+func TestComposeLaunchLaunchFails(t *testing.T) {
+	w := newLaunchWorld(t)
+	w.launchErr["producer"] = api.NewError(api.CodeAttachFailed, "container myapp-producer-1 already runs a .NET process", "docker restart myapp-producer-1")
+
+	out, _ := w.run(0, "compose", "launch", "producer", "consumer")
+	expectOutput(t, out, "launched 1 of 2 service(s)", "already runs a .NET process", "down: producer", "'eyedbg compose launch producer' tries again")
+	expectOutput(t, out, "undo with: eyedbg compose restore consumer")
+
+	if strings.Contains(out, "restore consumer producer") {
+		t.Errorf("the failed service is offered for restore as if it ran:\n%s", out)
+	}
+}
+
+// TestComposeLaunchRecreatedNotRunning: a container that doesn't come up
+// running in fast mode is a failure, not a launch.
+func TestComposeLaunchRecreatedNotRunning(t *testing.T) {
+	w := newLaunchWorld(t)
+
+	w.docker.afterUp = func() {
+		for _, c := range w.docker.ctrs {
+			if c.fi.Service == "producer" && c.fi.Fast != nil {
+				c.fi.Running = false
+			}
+		}
+	}
+
+	out, errOut := w.run(exitCodeOf(api.CodeAttachFailed), "compose", "launch", "producer")
+	expectOutput(t, out, "launched 0 of 1", "isn't running in fast mode after the recreate", "down: producer")
+	expectOutput(t, errOut, "[ATTACH_FAILED]")
+
+	if len(w.launched()) != 0 {
+		t.Errorf("launched %v", w.launchedServices())
+	}
+}
+
+// TestCarriedSpec: what of a session's breakpoints comes over to the next one.
+func TestCarriedSpec(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   api.Breakpoint
+		want api.BreakpointSpec
+		ok   bool
+	}{
+		{"line: the requested line, not where the adapter put it", api.Breakpoint{File: "/a/b.cs", RequestedLine: 10, Line: 12}, api.BreakpointSpec{File: "/a/b.cs", Line: 10}, true},
+		{"no requested line: the line", api.Breakpoint{File: "/a/b.cs", Line: 12}, api.BreakpointSpec{File: "/a/b.cs", Line: 12}, true},
+		{"condition, hit condition, log message, anchor", api.Breakpoint{
+			File: "/a/b.cs", RequestedLine: 3, Condition: "x > 1", HitCondition: ">=2", LogMessage: "x={x}", Anchor: "var x",
+		}, api.BreakpointSpec{File: "/a/b.cs", Line: 3, Condition: "x > 1", HitCondition: ">=2", LogMessage: "x={x}", Anchor: "var x"}, true},
+		{"function", api.Breakpoint{Function: "App.Run", Condition: "n > 0"}, api.BreakpointSpec{Function: "App.Run", Condition: "n > 0"}, true},
+		{"temporary (run-until)", api.Breakpoint{File: "/a/b.cs", RequestedLine: 3, Temporary: true}, api.BreakpointSpec{}, false},
+		{"the editor's", api.Breakpoint{File: "/a/b.cs", RequestedLine: 3, Editor: true}, api.BreakpointSpec{}, false},
+		{"no line at all", api.Breakpoint{File: "/a/b.cs"}, api.BreakpointSpec{}, false},
+		{"no file", api.Breakpoint{RequestedLine: 3}, api.BreakpointSpec{}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := carriedSpec(&tt.in)
+			if ok != tt.ok || got != tt.want {
+				t.Errorf("carriedSpec = %+v, %v; want %+v, %v", got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+// TestCarryModes: the exception mode that stops at the most is carried.
+func TestCarryModes(t *testing.T) {
+	t.Parallel()
+
+	var c carry
+
+	for _, m := range []api.ExceptionMode{api.ExceptionsNone, api.ExceptionsUncaught, api.ExceptionsAll, api.ExceptionsUncaught, ""} {
+		c.addMode(m)
+	}
+
+	if c.mode != api.ExceptionsAll {
+		t.Errorf("mode = %q, want all", c.mode)
+	}
+
+	var d carry
+
+	d.addMode(api.ExceptionsNone)
+	d.addMode(api.ExceptionsUncaught)
+
+	if d.mode != api.ExceptionsUncaught {
+		t.Errorf("mode = %q, want uncaught", d.mode)
+	}
 }

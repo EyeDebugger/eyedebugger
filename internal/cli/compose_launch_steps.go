@@ -307,8 +307,8 @@ func (r *launchRun) build(ctx context.Context) {
 
 	r.buildLog = filepath.Join(r.projectDir, "build.log")
 
-	if r.log, err = os.OpenFile(r.buildLog, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600); err != nil {
-		r.failLive(fmt.Errorf("open the build log: %w", err))
+	if r.log, err = openBuildLog(r.buildLog); err != nil {
+		r.failLive(err)
 
 		return
 	}
@@ -325,6 +325,12 @@ func (r *launchRun) build(ctx context.Context) {
 
 		elapsed := time.Since(started)
 
+		if err != nil {
+			// The log stays for the user to read, even if no service is in fast
+			// mode.
+			r.keepProject = true
+		}
+
 		for _, s := range group {
 			if err != nil {
 				r.fail(s, err)
@@ -335,6 +341,22 @@ func (r *launchRun) build(ctx context.Context) {
 			s.out, s.built = out, elapsed
 		}
 	}
+}
+
+// openBuildLog creates the build log, 0600, in eyedbg's project directory. A
+// build.log that is not a regular file (a symlink, a directory) is never
+// written through: eyedbg writes only files of its own.
+func openBuildLog(path string) (*os.File, error) {
+	if info, err := os.Lstat(path); err == nil && !info.Mode().IsRegular() {
+		return nil, api.NewError(api.CodeInvalidRequest, path+" is not a regular file", "delete it: eyedbg keeps only its own files in this directory")
+	}
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:gosec // The path is eyedbg's own directory's build.log, checked just above.
+	if err != nil {
+		return nil, fmt.Errorf("open the build log: %w", err)
+	}
+
+	return f, nil
 }
 
 // buildGroups are the live services grouped by what they build (the same
