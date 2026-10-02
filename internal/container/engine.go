@@ -184,6 +184,7 @@ func (e Engine) run(ctx context.Context, timeout time.Duration, stdin io.Reader,
 		cmd = e.Command(ctx, argv)
 	} else {
 		cmd = exec.CommandContext(ctx, e.Docker, argv...) //nolint:gosec // Docker is $EYEDBG_DOCKER or PATH's docker; every argument is checked against a grammar first.
+		cmd.Env = withoutEngineVars(os.Environ())
 	}
 
 	out := &capWriter{limit: maxStdout, cancel: cancel}
@@ -205,6 +206,18 @@ func (e Engine) run(ctx context.Context, timeout time.Duration, stdin io.Reader,
 	default:
 		return res, nil
 	}
+}
+
+// withoutEngineVars is env without DOCKER_HOST and DOCKER_CONTEXT: the
+// engine is whatever the request named (as --host or --context), never what
+// the environment eyedbgd happened to be started in says, which may be a
+// different shell's.
+func withoutEngineVars(env []string) []string {
+	return slices.DeleteFunc(slices.Clone(env), func(kv string) bool {
+		name, _, _ := strings.Cut(kv, "=")
+
+		return strings.EqualFold(name, "DOCKER_HOST") || strings.EqualFold(name, "DOCKER_CONTEXT")
+	})
 }
 
 // exitErr is err without the executable's path.
