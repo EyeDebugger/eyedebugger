@@ -473,6 +473,39 @@ func TestContainerLaunchClaimFreedAfterAFailedStart(t *testing.T) {
 	}
 }
 
+// managerWithLive is a manager over d that reports its live-session count on
+// the returned channel: the manager's watch reports it after it released an
+// ended session's claim.
+func managerWithLive(t *testing.T, d Driver) (m *Manager, live <-chan int) {
+	t.Helper()
+
+	ch := make(chan int, 64)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	m = NewManager(ctx, Config{Drivers: []Driver{d}, Logger: slog.New(slog.DiscardHandler), Stderr: io.Discard, OnLive: func(n int) {
+		select {
+		case ch <- n:
+		default:
+		}
+	}})
+	t.Cleanup(func() {
+		m.StopAll(context.Background())
+		cancel()
+	})
+
+	return m, ch
+}
+
+// awaitReleased returns once s ended and the manager's watch released its
+// claim.
+func awaitReleased(live <-chan int, s *Session) {
+	for n := range live {
+		if n == 0 && s.Info().State == api.StateExited {
+			return
+		}
+	}
+}
+
 // TestContainerLaunchClaimFreedByExit: a session that ended on its own (the
 // app exited) frees its container: the manager's watch releases the claim, and
 // a launch right after the exit never sees a stale one.
@@ -482,31 +515,14 @@ func TestContainerLaunchClaimFreedByExit(t *testing.T) {
 	d := newLauncherDriver()
 	d.hang = false // the app runs its five lines and exits
 
-	live := make(chan int, 64)
-	ctx, cancel := context.WithCancel(context.Background())
-
-	m := NewManager(ctx, Config{Drivers: []Driver{d}, Logger: slog.New(slog.DiscardHandler), Stderr: io.Discard, OnLive: func(n int) {
-		select {
-		case live <- n:
-		default:
-		}
-	}})
-	t.Cleanup(func() {
-		m.StopAll(context.Background())
-		cancel()
-	})
+	m, live := managerWithLive(t, d)
 
 	s, err := launchIn(m, "web-1", api.StartParams{}, api.ContainerLaunchSpec{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// The watch reports the live count after it released the claim.
-	for n := range live {
-		if n == 0 && s.Info().State == api.StateExited {
-			break
-		}
-	}
+	awaitReleased(live, s)
 
 	if n := claimCount(m); n != 0 {
 		t.Errorf("%d claims after the app exited, want none", n)
@@ -514,6 +530,40 @@ func TestContainerLaunchClaimFreedByExit(t *testing.T) {
 
 	if _, err := launchIn(m, "web-1", api.StartParams{}, api.ContainerLaunchSpec{}); err != nil {
 		t.Errorf("a launch after the first ended: %v", err)
+	}
+}
+
+// TestContainerLaunchAdapterLost: when the container goes away under a
+// session (docker compose stop ends the exec, with no terminated event) or its
+// docker client dies, the session ends as "the debug adapter exited", keeps
+// its launched container info, and frees the container.
+func TestContainerLaunchAdapterLost(t *testing.T) {
+	t.Parallel()
+
+	m, live := managerWithLive(t, newLauncherDriver())
+	s := mustLaunchIn(t, m, api.StartParams{})
+
+	s.mu.Lock()
+	cmd := s.cmd
+	s.mu.Unlock()
+
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+
+	awaitReleased(live, s)
+
+	info := s.Info()
+	if info.State != api.StateExited || info.EndReason != "the debug adapter exited" || info.Container == nil || !info.Container.Launched {
+		t.Errorf("info = %+v, want exited with the adapter's end reason and a launched container", info)
+	}
+
+	if n := claimCount(m); n != 0 {
+		t.Errorf("%d claims after the adapter was lost, want none", n)
+	}
+
+	if _, err := launchIn(m, "web-1", api.StartParams{}, api.ContainerLaunchSpec{}); err != nil {
+		t.Errorf("a launch after the adapter was lost: %v", err)
 	}
 }
 
