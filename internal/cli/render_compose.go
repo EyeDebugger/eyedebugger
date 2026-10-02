@@ -526,6 +526,10 @@ type bpListMember struct {
 // writeComposeBpList renders the result of 'compose bp ls'.
 func writeComposeBpList(w io.Writer, group string, members []bpListMember, asJSON bool, base string) error {
 	if asJSON {
+		// A member with no breakpoints is an empty array, not null; the
+		// caller's members are not changed.
+		members = slices.Clone(members)
+
 		for i := range members {
 			if members[i].Breakpoints == nil {
 				members[i].Breakpoints = []api.Breakpoint{}
