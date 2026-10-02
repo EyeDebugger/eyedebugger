@@ -106,6 +106,12 @@ func ValidateSpec(spec *api.ContainerSpec) error {
 	return nil
 }
 
+// ValidateLaunchSpec checks every name of spec that could reach a docker
+// invocation or a result, as [ValidateSpec] does for an attach.
+func ValidateLaunchSpec(spec *api.ContainerLaunchSpec) error {
+	return ValidateSpec(&api.ContainerSpec{Engine: spec.Engine, Ref: spec.Ref, Service: spec.Service, Project: spec.Project})
+}
+
 // validVersion reports whether v can name the adapter's directory in a
 // container.
 func validVersion(v string) bool {
