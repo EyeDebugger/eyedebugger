@@ -790,109 +790,15 @@ func TestResolveProject(t *testing.T) {
 	}
 }
 
-func fastServicesEngine(t *testing.T, r containertest.Rule) (eng container.Engine, calls string) {
+// fastPSEngine is an engine whose docker ps answers with r, and the file its
+// calls are recorded in.
+func fastPSEngine(t *testing.T, r containertest.Rule) (eng container.Engine, calls string) {
 	t.Helper()
 
 	calls = filepath.Join(t.TempDir(), "calls")
 	r.Match = []string{"ps"}
 
 	return containertest.Engine(t, containertest.Scenario{Calls: calls, Rules: []containertest.Rule{r}}), calls
-}
-
-func TestFastServicesAnswers(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name   string
-		stdout string
-		want   []string
-	}{
-		{"two", "web\nworker\n", []string{"web", "worker"}},
-		{"duplicates collapse", "web\nworker\nweb\n", []string{"web", "worker"}},
-		{"none", "", nil},
-		{"crlf", "web\r\nworker\r\n", []string{"web", "worker"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			e, calls := fastServicesEngine(t, containertest.Rule{Stdout: tt.stdout})
-			e.Context = "remote"
-
-			got, err := e.FastServices(t.Context(), "my-app")
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			var names []string
-			for s := range got {
-				names = append(names, s)
-			}
-
-			slices.Sort(names)
-
-			if !slices.Equal(names, tt.want) {
-				t.Errorf("got %v, want %v", names, tt.want)
-			}
-
-			want := []string{
-				"--context=remote", "ps", "--all", "--filter=label=com.docker.compose.project=my-app",
-				"--filter=label=dev.izzat.eyedbg.fast.override", `--format={{.Label "com.docker.compose.service"}}`,
-			}
-
-			if argv := containertest.ReadCalls(t, calls)[0]; !slices.Equal(argv, want) {
-				t.Errorf("argv = %q\nwant   %q", argv, want)
-			}
-		})
-	}
-}
-
-// TestFastServicesBadAnswers: a partial answer must never come back, since
-// the caller deletes the directories of services not in it.
-func TestFastServicesBadAnswers(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name   string
-		stdout string
-		exit   int
-	}{
-		{name: "blank line", stdout: "web\n\nworker\n"},
-		{name: "not a service name", stdout: "web\n--rm\n"},
-		{name: "a name with a space", stdout: "web app\n"},
-		{name: "control character", stdout: "we\x01b\n"},
-		{name: "docker fails", exit: 1},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			e, _ := fastServicesEngine(t, containertest.Rule{Stdout: tt.stdout, Exit: tt.exit, Stderr: "boom"})
-
-			got, err := e.FastServices(t.Context(), "my-app")
-			if err == nil || got != nil {
-				t.Errorf("got %v, %v; want an error and no map", got, err)
-			}
-		})
-	}
-}
-
-func TestFastServicesChecksProjectNames(t *testing.T) {
-	t.Parallel()
-
-	e, calls := fastServicesEngine(t, containertest.Rule{})
-
-	for _, p := range []string{"", "My App", "a,b", "--x", "UP", "a=b"} {
-		if _, err := e.FastServices(t.Context(), p); api.CodeOf(err) != api.CodeInvalidRequest {
-			t.Errorf("project %q: err = %v", p, err)
-		}
-	}
-
-	if n := len(containertest.ReadCalls(t, calls)); n != 0 {
-		t.Errorf("docker ran %d times for invalid projects", n)
-	}
 }
 
 func TestFastContainersAnswers(t *testing.T) {
@@ -914,7 +820,7 @@ func TestFastContainersAnswers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			e, calls := fastServicesEngine(t, containertest.Rule{Stdout: tt.stdout})
+			e, calls := fastPSEngine(t, containertest.Rule{Stdout: tt.stdout})
 			e.Context = "remote"
 
 			got, err := e.FastContainers(t.Context(), "my-app")
@@ -962,7 +868,7 @@ func TestFastContainersBadAnswers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			e, _ := fastServicesEngine(t, containertest.Rule{Stdout: tt.stdout, Exit: tt.exit, Stderr: "boom"})
+			e, _ := fastPSEngine(t, containertest.Rule{Stdout: tt.stdout, Exit: tt.exit, Stderr: "boom"})
 
 			got, err := e.FastContainers(t.Context(), "my-app")
 			if err == nil || got != nil {
@@ -975,7 +881,7 @@ func TestFastContainersBadAnswers(t *testing.T) {
 func TestFastContainersChecksProjectNames(t *testing.T) {
 	t.Parallel()
 
-	e, calls := fastServicesEngine(t, containertest.Rule{})
+	e, calls := fastPSEngine(t, containertest.Rule{})
 
 	for _, p := range []string{"", "My App", "a,b", "--x"} {
 		if _, err := e.FastContainers(t.Context(), p); api.CodeOf(err) != api.CodeInvalidRequest {
