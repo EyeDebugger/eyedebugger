@@ -405,14 +405,20 @@ the copy can already run code in that container). The copy survives a restart bu
   project, the stop → mirror → launch order on a rebuild, a build failure leaving sessions untouched,
   `LEASE_HELD` excluding a service, `--no-build` cases, a `compose up` failure pruning nothing,
   `restore` of a mixed set; goldens and help tests.
-* The docker e2e (fixture `testdata/apps/dotnet/compose`): as-built `Build` is `release`;
-  `compose launch --bp <startup>` stops at the startup line with the copy's host file and an
-  excerpt; the inherited `environment:` and `env_file:` values are visible; `Build` is `debug`;
-  output appears in `compose events --kind output` and not in the container's `docker logs`; an
-  edited `Tag` shows after a re-run in the **same container id** with the carried breakpoint;
-  `eyedbg stop` leaves the container running with no `dotnet` in `docker top`; `compose restore`
-  removes every fast label and `<home>/compose/<project>`; five consecutive clean runs on macOS
-  Docker Desktop and the Linux test VM, and the two ubuntu CI entries.
+* The docker e2e (`internal/e2e`, `TestComposeLaunch`, behind `EYEDBG_E2E_DOCKER=1`, fixture
+  `testdata/apps/dotnet/compose`; it needs the .NET SDK on the host for the Debug publish): the
+  as-built Release container's log says `build=release` and holds the inherited `environment:` and
+  `env_file:` values (a Release frame can't evaluate `Build`), `compose attach` and `compose stop`
+  leave it running; `compose launch --bp <startup>` recreates both containers and stops the
+  producer at the startup line with the copy's host file and an excerpt; after one `next`,
+  `startupEnv` is `compose/file` (the inherited values) and `Build` is `debug`; output appears in
+  `compose events --kind output` and not in the container's `docker logs`; an edited `Tag` shows
+  after a re-run in the **same container id**, not recreated, with the carried breakpoint listed;
+  `eyedbg stop` leaves the container running with no `dotnet` in `docker top`; `compose launch
+  --no-build` relaunches the last build; `compose restore` removes every fast label,
+  `<home>/compose/<project>` and eyedbg's override, and the services run as built again; no `bin`
+  or `obj` appears in the project copy; five consecutive clean runs on macOS Docker Desktop and the
+  Linux test VM, and the two ubuntu CI entries.
 
 ## Pros and Cons of the Options
 

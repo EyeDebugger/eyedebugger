@@ -318,10 +318,15 @@ other fields (`Command`, `Ports`, …) are never stored or shown.
 * `internal/daemon` and `internal/cli` tests with an in-process daemon: `container.attach` with a
   failing member, `group.wait` and `group.events` ordering, cursor and no-skip rules, goldens for
   every new text and JSON shape, and the help-tree tests.
-* The docker e2e (`internal/e2e`, `EYEDBG_E2E_DOCKER=1`, fixture `testdata/apps/dotnet/compose`):
-  as-built attach to both services, a stop with the frame in the host file and a source excerpt,
-  `compose wait`/`events`/`stop`, containers still running afterwards, five consecutive clean runs
-  on macOS Docker Desktop and on the Linux test VM, and the CI entries.
+* The docker e2e (`internal/e2e`, `TestComposeAttach`, behind `EYEDBG_E2E_DOCKER=1`, fixture
+  `testdata/apps/dotnet/compose`, Debug images so line breakpoints bind): `compose attach` to both
+  services (the path map is `/src` = the copy, the producer's `unhealthyAfter` is 18 s, the
+  consumer, a non-root service, has none), `compose bp add`, a stop in each service with the frame
+  in the host file and a source excerpt, `compose events` listing both stops with their session ids
+  and a cursor naming both, `compose stop` leaving both containers running and no session behind,
+  then `attach dotnet --container` with a stop and a `detach` that leaves the app running; five
+  consecutive clean runs on macOS Docker Desktop and on the Linux test VM, and the two ubuntu CI
+  entries.
 
 ## Pros and Cons of the Options
 
