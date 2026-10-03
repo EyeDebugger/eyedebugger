@@ -599,11 +599,17 @@ func TestLaunchTerminalCanceled(t *testing.T) {
 // expectTerminalRefused checks that the adapter of s, whose start failed
 // with its terminal, reported nothing but the refusal it was answered
 // with. A failed launch kills the adapter's process tree first thing
-// (Manager.fail), so it may be gone before it reports even that.
+// (Manager.fail), so it may be gone before it reports even that. The kill
+// is asynchronous: under load the adapter can still answer the teardown's
+// disconnect before it dies, and it then notes that, which is no failure.
 func expectTerminalRefused(t *testing.T, s *Session) {
 	t.Helper()
 
 	for _, got := range outputs(s) {
+		if strings.HasPrefix(got, "fake: disconnect terminateDebuggee=") {
+			continue
+		}
+
 		if !strings.HasPrefix(got, "fake: runInTerminal failed: eyedbg: ") {
 			t.Errorf("adapter output %q, want only the failure it was answered with", got)
 		}
