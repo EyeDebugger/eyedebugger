@@ -37,7 +37,9 @@ type fastContainer struct {
 	// version, dll, workdir are the fast labels ("" version: "1", "" dll:
 	// Web.dll, "" workdir: /app).
 	version, dll, workdir string
-	composeDir            string
+	// composeDir and composeFiles are compose's project.working_dir and
+	// project.config_files labels.
+	composeDir, composeFiles string
 	// health is the healthcheck array of the plain inspect, or "null".
 	health string
 	// top is docker top's answer; topExit and topStderr make it fail; a
@@ -79,7 +81,7 @@ func (c fastContainer) fastJSON() string {
 
 	vals := []any{
 		testContainerID, "/web-1", testImageID, "linux", !c.stopped, c.paused, c.restarting, dllEntry, false, workdir,
-		"my-app", "web", compose, "", fast(version), override, fast(dll), fast(workdir), nil,
+		"my-app", "web", compose, c.composeFiles, fast(version), override, fast(dll), fast(workdir), nil,
 	}
 
 	out, err := json.Marshal(vals)
@@ -102,7 +104,7 @@ func orDefault(s, def string) string {
 // matches answers.
 func (c fastContainer) rules() []containertest.Rule {
 	health := orDefault(c.health, "null")
-	plain := fmt.Sprintf(`[%q,"/web-1",%q,"tail",true,false,false,true,%s,"my-app","web","","fast"]`, testContainerID, testImageID, health)
+	plain := fmt.Sprintf(`[%q,"/web-1",%q,"tail",true,false,false,true,%s,"my-app","web","","fast",""]`, testContainerID, testImageID, health)
 
 	probe := []string{"exec", testContainerID, "/" + testAdapterDir + "/netcoredbg", "--version"}
 
@@ -203,7 +205,7 @@ func TestPrepareContainerLaunch(t *testing.T) {
 	t.Parallel()
 
 	src := t.TempDir()
-	c := fastContainer{composeDir: src, health: `[5000000000,3000000000,3,false]`}
+	c := fastContainer{composeDir: src, composeFiles: writeComposeFile(t, src), health: `[5000000000,3000000000,3,false]`}
 	r := newLaunchRig(t, c)
 
 	spec := launchSpec()
@@ -337,6 +339,31 @@ func TestPrepareContainerLaunchPathMap(t *testing.T) {
 
 		if launch.PathMap == nil || len(launch.Container.Map) != 0 {
 			t.Errorf("map = %+v, want an empty one (line breakpoints refused with a hint)", launch.Container.Map)
+		}
+	})
+
+	// The default map needs the container's compose files to be in the directory
+	// its label names: a hostile image's label alone maps nothing.
+	t.Run("none when the compose files don't corroborate the directory", func(t *testing.T) {
+		t.Parallel()
+
+		hostile := t.TempDir()
+		other := t.TempDir()
+
+		for name, c := range map[string]fastContainer{
+			"no files label":           {composeDir: hostile},
+			"files elsewhere":          {composeDir: hostile, composeFiles: writeComposeFile(t, other)},
+			"a file that is gone":      {composeDir: hostile, composeFiles: filepath.Join(hostile, "compose.yaml")},
+			"a directory that is gone": {composeDir: filepath.Join(hostile, "gone"), composeFiles: writeComposeFile(t, other)},
+		} {
+			launch, err := newLaunchRig(t, c).d.PrepareContainerLaunch(t.Context(), launchSpec())
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+
+			if launch.PathMap == nil || len(launch.Container.Map) != 0 {
+				t.Errorf("%s: map = %+v, want an empty one", name, launch.Container.Map)
+			}
 		}
 	})
 

@@ -31,7 +31,7 @@ type inspected struct {
 	running, paused, restarting bool
 	init                        bool
 	health                      string // the healthcheck's JSON array, or "null"
-	workingDir                  string
+	workingDir, configFiles     string // compose's project.working_dir and project.config_files labels
 	fast                        string
 	image                       string // docker image inspect's answer
 	missing                     bool   // docker inspect says there is no such container
@@ -46,8 +46,8 @@ func (c inspected) rules(adapterOK bool) []containertest.Rule {
 		return []containertest.Rule{{Match: []string{"inspect"}, Exit: 1, Stderr: "Error: No such container: web-1"}}
 	}
 
-	out := fmt.Sprintf(`[%q,"/web-1",%q,%q,%t,%t,%t,%t,%s,"my-app","web",%q,%q]`,
-		testContainerID, testImageID, c.path, c.running, c.paused, c.restarting, c.init, c.health, c.workingDir, c.fast)
+	out := fmt.Sprintf(`[%q,"/web-1",%q,%q,%t,%t,%t,%t,%s,"my-app","web",%q,%q,%q]`,
+		testContainerID, testImageID, c.path, c.running, c.paused, c.restarting, c.init, c.health, c.workingDir, c.fast, c.configFiles)
 
 	rules := []containertest.Rule{
 		{Match: []string{"inspect", "--type", "container"}, Stdout: out},
@@ -138,7 +138,7 @@ func TestPrepareContainerAttach(t *testing.T) {
 	src := t.TempDir()
 	c := runningContainer()
 	c.health = `[5000000000,3000000000,3,false]`
-	c.workingDir = src
+	c.workingDir, c.configFiles = src, writeComposeFile(t, src)
 
 	r := newContainerRig(t, c)
 
@@ -228,17 +228,87 @@ func TestPrepareContainerAttachPidAndMap(t *testing.T) {
 	}
 }
 
-func TestPrepareContainerAttachDefaultMapNeedsAnExistingDirectory(t *testing.T) {
+// writeComposeFile makes dir/compose.yaml and returns its path.
+func writeComposeFile(t *testing.T, dir string) string {
+	t.Helper()
+
+	file := filepath.Join(dir, "compose.yaml")
+	if err := os.WriteFile(file, []byte("services: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return file
+}
+
+// The default map needs the working_dir label to be an existing directory that
+// holds a compose file the files label names: an image can set both labels on
+// a container started with plain 'docker run', so the label alone (a directory
+// the image author picked, such as the user's home) maps nothing.
+func TestPrepareContainerAttachDefaultMapNeedsCorroboration(t *testing.T) {
 	t.Parallel()
 
-	for _, wd := range []string{filepath.Join(t.TempDir(), "gone"), "relative/dir", string(filepath.Separator)} {
-		c := runningContainer()
-		c.workingDir = wd
+	good := t.TempDir()
+	goodFile := writeComposeFile(t, good)
 
-		launch, err := newContainerRig(t, c).d.PrepareContainerAttach(t.Context(), attachSpec(api.ContainerSpec{}))
-		if err != nil || len(launch.Container.Map) != 0 {
-			t.Errorf("working_dir %q: map %+v, %v; want none", wd, launch.Container.Map, err)
-		}
+	hostile := t.TempDir() // the directory a hostile image's label picks
+	if err := os.WriteFile(filepath.Join(hostile, "id_rsa"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name, workingDir, configFiles string
+		mapped                        bool
+	}{
+		{"compose's labels agree", good, goodFile, true},
+		{"the hostile label: a directory with no compose file in it", hostile, "", false},
+		{"the hostile label with a file list that isn't there", hostile, filepath.Join(hostile, "compose.yaml"), false},
+		{"the hostile label with a file list that isn't compose's", hostile, filepath.Join(hostile, "id_rsa"), false},
+		{"the hostile label with another directory's compose file", hostile, goodFile, false},
+		{"a directory that is gone", filepath.Join(t.TempDir(), "gone"), goodFile, false},
+		{"a relative directory", "relative/dir", goodFile, false},
+		{"the root", string(filepath.Separator), goodFile, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			c := runningContainer()
+			c.workingDir, c.configFiles = tt.workingDir, tt.configFiles
+
+			launch, err := newContainerRig(t, c).d.PrepareContainerAttach(t.Context(), attachSpec(api.ContainerSpec{}))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if mapped := len(launch.Container.Map) != 0; mapped != tt.mapped {
+				t.Errorf("map %+v; want a default map: %v", launch.Container.Map, tt.mapped)
+			}
+
+			if !tt.mapped && launch.PathMap == nil {
+				t.Error("an empty map is still a map: line breakpoints must be refused with its hint, not sent unmapped")
+			}
+		})
+	}
+}
+
+// An explicit --map is the user's own and needs no corroboration.
+func TestPrepareContainerAttachExplicitMapIgnoresLabels(t *testing.T) {
+	t.Parallel()
+
+	local := t.TempDir()
+
+	c := runningContainer()
+	c.workingDir = t.TempDir() // a label no compose file backs
+
+	launch, err := newContainerRig(t, c).d.PrepareContainerAttach(t.Context(),
+		attachSpec(api.ContainerSpec{Map: []api.PathMapping{{Remote: "/app", Local: local}}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(launch.Container.Map) != 1 || launch.Container.Map[0].Remote != "/app" {
+		t.Errorf("map = %+v, want the one asked for", launch.Container.Map)
 	}
 }
 

@@ -49,7 +49,7 @@ func TestInspectTemplateSelectsOnlyWhatIsRead(t *testing.T) {
 func inspectJSON(mod func(f []string)) []byte {
 	f := []string{
 		`"` + testID + `"`, `"/web-1"`, `"` + testImage + `"`, `"dotnet"`, `true`, `false`, `false`, `null`, `null`,
-		`"my-app"`, `"web"`, `"/home/me/app"`, `""`,
+		`"my-app"`, `"web"`, `"/home/me/app"`, `""`, `""`,
 	}
 	if mod != nil {
 		mod(f)
@@ -70,6 +70,12 @@ func stateCases() []inspectCase {
 		{"init", func(f []string) { f[7] = "true" }, func(i Info) string { return wrongIf(!i.Init, "Init false") }},
 		{"paused and restarting", func(f []string) { f[5], f[6] = "true", "true" }, func(i Info) string {
 			return wrongIf(!i.Paused || !i.Restarting, "Paused or Restarting false")
+		}},
+		{"config files", func(f []string) { f[13] = `"/p/compose.yaml,/p/override.yaml"` }, func(i Info) string {
+			return wrongIf(i.configFiles != "/p/compose.yaml,/p/override.yaml", "files label not kept")
+		}},
+		{"config files failing their grammar are dropped", func(f []string) { f[13] = `"/p/compose.yaml,relative.yaml"` }, func(i Info) string {
+			return wrongIf(i.configFiles != "", "a bad files label was kept")
 		}},
 		{"fast mode", func(f []string) { f[12] = `"/x/override.yml"` }, func(i Info) string { return wrongIf(!i.FastMode, "FastMode false") }},
 	}
@@ -104,8 +110,8 @@ func labelCases() []inspectCase {
 		{"missing labels", func(f []string) { f[9], f[10], f[11] = `""`, `""`, `""` }, func(i Info) string {
 			return wrongIf(i.Project != "" || i.Service != "" || i.WorkingDir != "", "labels from nowhere")
 		}},
-		{"null labels (docker 26 for a missing key)", func(f []string) { f[9], f[10], f[11], f[12] = `null`, `null`, `null`, `null` }, func(i Info) string {
-			return wrongIf(i.Project != "" || i.Service != "" || i.WorkingDir != "" || i.FastMode, "labels from nowhere")
+		{"null labels (docker 26 for a missing key)", func(f []string) { f[9], f[10], f[11], f[12], f[13] = `null`, `null`, `null`, `null`, `null` }, func(i Info) string {
+			return wrongIf(i.Project != "" || i.Service != "" || i.WorkingDir != "" || i.FastMode || i.configFiles != "", "labels from nowhere")
 		}},
 	}
 }

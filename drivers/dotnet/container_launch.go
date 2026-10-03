@@ -210,10 +210,16 @@ func containerLaunchArguments(workDir, dll string, stopOnEntry bool) map[string]
 }
 
 // launchPathMap is the session's path map: the one asked for, else the default,
-// /src for the compose project's directory (an empty map when there is none,
-// which refuses line breakpoints with a hint to pass --map).
+// /src for the compose project's directory when the container's compose files
+// corroborate it (an empty map when they don't, which refuses line breakpoints
+// with a hint to pass --map).
 func launchPathMap(spec api.ContainerLaunchSpec, fi container.FastInfo) (*session.PathMap, error) {
-	return containerPathMap(&api.ContainerSpec{Map: spec.Map}, container.Info{WorkingDir: fi.ComposeDir})
+	dir, err := container.CorroborateComposeDir(fi.ComposeDir, fi.ConfigFiles)
+	if err != nil {
+		dir = ""
+	}
+
+	return containerPathMap(&api.ContainerSpec{Map: spec.Map}, container.Info{SourceDir: dir})
 }
 
 // containerAppProgram describes the launched app for status: never its
