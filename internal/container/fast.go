@@ -590,44 +590,6 @@ func within(root, p string) bool {
 	return strings.HasPrefix(p, prefix)
 }
 
-// FastServices lists the services of compose project (a name) that have a
-// container, in any state, carrying eyedbg's fast-mode override label, with
-// one docker ps -a. Every line must be a service name: anything else fails,
-// so the caller never deletes on a partial answer.
-func (e Engine) FastServices(ctx context.Context, project string) (map[string]bool, error) {
-	if err := api.CheckGroup(project); err != nil {
-		return nil, err
-	}
-
-	argv := e.Args("ps", "--all",
-		"--filter=label="+labelProject+"="+project, "--filter=label="+labelFastMode,
-		`--format={{.Label "`+labelService+`"}}`)
-
-	res, fail := e.run(ctx, QueryTimeout, nil, argv)
-	if fail != nil {
-		return nil, dockerError(fail)
-	}
-
-	services := map[string]bool{}
-
-	out := strings.TrimRight(string(res.stdout), "\r\n")
-	if out == "" {
-		return services, nil
-	}
-
-	for line := range strings.SplitSeq(out, "\n") {
-		line = strings.TrimSuffix(line, "\r")
-		if ValidateService(line) != nil {
-			return nil, api.NewError(api.CodeAttachFailed, "unexpected answer from docker ps: "+show(line, 60),
-				"eyedbg reads a fixed set of fields; this docker may differ from the ones it was verified with (docker 24 to 26)")
-		}
-
-		services[line] = true
-	}
-
-	return services, nil
-}
-
 // FastContainer is a container, in any state, of a compose project that
 // carries eyedbg's fast-mode override label.
 type FastContainer struct {
