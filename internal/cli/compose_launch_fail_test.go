@@ -974,28 +974,28 @@ func TestComposeLaunchHomeWithComma(t *testing.T) {
 func TestComposeLaunchRefusesUncorroboratedLabels(t *testing.T) {
 	tests := []struct {
 		name string
-		edit func(t *testing.T, w *launchWorld, c *fakeCtr)
+		edit func(w *launchWorld, c *fakeCtr)
 	}{
-		{"a directory with no compose file in it", func(t *testing.T, _ *launchWorld, c *fakeCtr) {
-			c.fi.ComposeDir = realDirWith(t, "id_rsa")
+		{"a directory with no compose file in it", func(w *launchWorld, c *fakeCtr) {
+			c.fi.ComposeDir = realDirWith(w.t, "id_rsa")
 		}},
-		{"a file list naming a file that isn't compose's", func(t *testing.T, _ *launchWorld, c *fakeCtr) {
-			c.fi.ComposeDir = realDirWith(t, ".bashrc")
+		{"a file list naming a file that isn't compose's", func(w *launchWorld, c *fakeCtr) {
+			c.fi.ComposeDir = realDirWith(w.t, ".bashrc")
 			c.fi.ConfigFiles = []string{filepath.Join(c.fi.ComposeDir, ".bashrc")}
 		}},
-		{"a file list naming a compose file elsewhere", func(t *testing.T, w *launchWorld, c *fakeCtr) {
-			c.fi.ComposeDir = realDirWith(t, "x")
+		{"a file list naming a compose file elsewhere", func(w *launchWorld, c *fakeCtr) {
+			c.fi.ComposeDir = realDirWith(w.t, "x")
 			c.fi.ConfigFiles = []string{filepath.Join(w.dir, "compose.yml")}
 		}},
-		{"a directory that is not on this machine", func(t *testing.T, _ *launchWorld, c *fakeCtr) {
-			c.fi.ComposeDir = filepath.Join(realDirWith(t, "x"), "gone")
+		{"a directory that is not on this machine", func(w *launchWorld, c *fakeCtr) {
+			c.fi.ComposeDir = filepath.Join(realDirWith(w.t, "x"), "gone")
 		}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := newLaunchWorld(t)
-			tt.edit(t, w, w.docker.byService("producer"))
+			tt.edit(w, w.docker.byService("producer"))
 
 			before := w.snap()
 

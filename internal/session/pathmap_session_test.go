@@ -288,10 +288,7 @@ func TestPathMapSessionReadsOnlySourceFiles(t *testing.T) {
 	r := newMappedRig(t)
 	app := filepath.Join(r.root, "app")
 
-	data, err := os.ReadFile(r.main)
-	if err != nil {
-		t.Fatal(err)
-	}
+	data := []byte(strings.Repeat("a line\n", 10))
 
 	tests := []struct {
 		name string
