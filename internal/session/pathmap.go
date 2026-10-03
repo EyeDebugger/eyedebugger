@@ -24,6 +24,28 @@ const (
 	maxRemotePath   = 1024
 )
 
+// sourceExtensions are the file name endings, compared in any case, of the
+// host files a session with a path map reads for a snapshot's source lines:
+// C#, Visual Basic and F# sources, Razor and XAML, and what generators emit
+// ("Foo.razor.g.cs" ends in .cs). The adapter runs in the container and names
+// the files it reports, and a container's labels (which pick the default map's
+// host directory) are not trusted, so a hostile adapter naming "id_rsa" or
+// ".env" below a mapped directory gets nothing (docs/adr/0020, D5).
+const sourceExtensions = ".cs .csx .vb .fs .fsi .fsx .razor .cshtml .xaml"
+
+// isSourceName reports whether name ends in one of [sourceExtensions].
+func isSourceName(name string) bool {
+	lower := strings.ToLower(name)
+
+	for ext := range strings.FieldsSeq(sourceExtensions) {
+		if strings.HasSuffix(lower, ext) && len(lower) > len(ext) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // PathMap maps source paths between the host and a debuggee that names its
 // sources by another file system's paths (a container: docs/adr/0020, D5).
 // Each pair maps a remote directory (an absolute, clean POSIX path) to a
@@ -245,8 +267,9 @@ func (m *PathMap) ToLocal(remote string) (string, bool) {
 }
 
 // Readable reports whether local, with its symlinks resolved, lies inside
-// one of the map's host directories: the only host paths a session with a
-// map reads.
+// one of the map's host directories and names a source file (its resolved
+// name ends in one of [sourceExtensions]): the only host paths a session with
+// a map reads.
 func (m *PathMap) Readable(local string) bool {
 	_, _, ok := m.resolve(local)
 
@@ -254,10 +277,15 @@ func (m *PathMap) Readable(local string) bool {
 }
 
 // resolve returns local with its symlinks resolved, below the longest host
-// directory that holds it: that directory and the relative path.
+// directory that holds it: that directory and the relative path. A file that
+// isn't a source file by name (after the symlinks) doesn't resolve.
 func (m *PathMap) resolve(local string) (root, rel string, ok bool) {
 	resolved, err := filepath.EvalSymlinks(local)
 	if err != nil {
+		return "", "", false
+	}
+
+	if !isSourceName(filepath.Base(resolved)) {
 		return "", "", false
 	}
 

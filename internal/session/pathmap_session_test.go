@@ -275,3 +275,70 @@ func TestPathMapSessionReadsOnlyInside(t *testing.T) {
 		})
 	}
 }
+
+// A frame the map takes, inside the map's directory, still gets no source
+// excerpt when its file isn't a source file by name: a hostile adapter may
+// name anything under a mapped directory (a container's labels pick the
+// default map's), and snapshots go into an agent's context. A link named like
+// source to such a file is refused too, since the file read is the link's
+// target; the endings are matched in any case.
+func TestPathMapSessionReadsOnlySourceFiles(t *testing.T) {
+	t.Parallel()
+
+	r := newMappedRig(t)
+	app := filepath.Join(r.root, "app")
+
+	data, err := os.ReadFile(r.main)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		file string
+		want bool
+	}{
+		{"source", "main.cs", true},
+		{"source in capitals", "Upper.CS", true},
+		{"generated source", "Page.razor.g.cs", true},
+		{"private key", "id_rsa", false},
+		{"pem", "server.pem", false},
+		{"env file", ".env", false},
+		{"json settings", "appsettings.json", false},
+		{"ending only", ".cs", false},
+	}
+
+	for _, tt := range tests {
+		if err := os.WriteFile(filepath.Join(app, tt.file), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	link := filepath.Join(app, "link.cs")
+	hasLink := os.Symlink(filepath.Join(app, "id_rsa"), link) == nil
+
+	if hasLink {
+		tests = append(tests, struct {
+			name string
+			file string
+			want bool
+		}{"source-named link to a private key", "link.cs", false})
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := r.mustStart(t, "/src/app/"+tt.file)
+			snap := s.Snapshot(t.Context(), api.DumpSpec{})
+
+			if snap.Frame == nil || snap.Frame.File != filepath.Join(app, tt.file) {
+				t.Fatalf("frame = %+v, want it at %s", snap.Frame, filepath.Join(app, tt.file))
+			}
+
+			if read := snap.Source != nil; read != tt.want {
+				t.Errorf("source = %+v; want an excerpt: %v", snap.Source, tt.want)
+			}
+		})
+	}
+}

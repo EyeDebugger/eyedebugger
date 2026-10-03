@@ -275,7 +275,12 @@ func TestPathMapReadable(t *testing.T) {
 		{"missing", filepath.Join(app, "gone.cs"), false},
 		{"dot-dot out", filepath.Join(app, "sub") + string(filepath.Separator) + filepath.Join("..", "..", "secret", "key.txt"), false},
 		{"relative", filepath.Join("sub", "a.cs"), false},
+		{"inside, not source", filepath.Join(app, "sub", "id_rsa"), false},
+		{"inside, source in capitals", filepath.Join(app, "sub", "B.CSHTML"), true},
 	}
+
+	write(filepath.Join(app, "sub", "id_rsa"), "inside")
+	write(filepath.Join(app, "sub", "B.CSHTML"), "inside")
 
 	links := []struct {
 		name, at, to string
