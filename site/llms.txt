@@ -119,6 +119,16 @@ Java and Kotlin, Ruby, PHP, and a process on another machine. Use that platform'
 those. A JSON adapter manifest can add a language eyedbg doesn't bundle, no Go code needed: see
 [docs/adapter-manifests.md](https://github.com/EyeDebugger/eyedebugger/blob/main/docs/adapter-manifests.md).
 
+**Containers and docker compose (.NET, in the release after 0.2.1).** `eyedbg attach dotnet
+--container NAME` debugs a .NET process in a running Linux docker container, and `eyedbg compose
+attach|launch|wait|bp|stop` a whole compose stack as one group, with no change to your Dockerfile
+or compose files. In verified runs, line breakpoints did not bind when attached to a Release
+image; `eyedbg compose launch` builds Debug on your machine and launches the app under the
+debugger in its container (it recreates the containers it names, the service runs only while its
+session does, and `eyedbg compose restore` undoes it). Verified on Linux containers with Docker
+Desktop on macOS and docker.io on Linux; not on Windows hosts, podman or remote engines. See
+`eyedbg help compose`.
+
 ## Docs
 
 - [SKILL.md](https://raw.githubusercontent.com/EyeDebugger/eyedebugger/main/skill/eyedbg/SKILL.md):
