@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Debugging .NET services in docker containers (ADR 0020). `eyedbg attach dotnet --container NAME
+  [--pid N] [--map REMOTE=LOCAL]... [--group NAME]` attaches to a .NET process in a running Linux
+  container: eyedbg streams its pinned netcoredbg for the image's architecture into the container
+  (`docker cp`, `/.eyedbg-netcoredbg-<version>/`, on every attach) and runs it with `docker exec -i`
+  as the container's own user. Install that build once with the new `eyedbg adapters install
+  netcoredbg --platform linux/arm64` (or `linux/amd64`), which fetches another platform's download
+  into `<data dir>/_platform/` and never runs it on the host. Source paths are mapped between the
+  container and the host at the DAP client (default `/src` = the compose project's directory;
+  `--map` replaces it), so breakpoints, frames and source excerpts use host paths, and eyedbg reads
+  only files under the mapped directories. eyedbg never reads a container's environment, command
+  or arguments, nor `docker compose config`.
+- `eyedbg compose attach|wait|events|bp|stop` (ADR 0020): every running .NET service of a compose
+  stack as one group of sessions (the group is the compose project), a breakpoint in all of them,
+  `compose wait` for whichever stops first, the members' events merged into one stream, and one stop.
+  Snapshots of a stopped container session say how long it has been stopped and when its healthcheck
+  or a Kafka consumer's `max.poll.interval.ms` is affected. No compose file is read or edited:
+  eyedbg's only compose call here is `docker compose ps`.
+- `eyedbg compose launch` and `eyedbg compose restore`, "fast mode" (ADR 0021): `launch` builds the
+  service's project in Debug on the host (`dotnet publish -c Debug`), recreates the service's
+  container once with an override eyedbg writes under its home (an idle entrypoint, the build mounted
+  read-only at the container's own working directory; the compose files are never edited) and
+  launches the app inside it under the debugger, with the container's own environment, user and
+  working directory. Line breakpoints bind, startup code can be stopped in (`--bp`,
+  `--stop-on-entry`), and re-running it after an edit rebuilds and relaunches in the same container,
+  carrying the breakpoints over. `restore` recreates the services from the user's own compose files.
+  Be aware: entering fast mode recreates the named containers (writes outside volumes are lost), and
+  a fast-mode service runs only while its eyedbg session runs its app (`stop` leaves it idle and
+  unhealthy; its output is in `eyedbg output` and `compose events --kind output`, not `docker
+  compose logs`). Services with a `command:` or CMD, a non-exec-form entrypoint or no `tail` in the
+  image are refused, with the reason.
+- New daemon methods `container.attach`, `container.launch`, `group.wait` and `group.events`; sessions
+  report `group`, `container` and `stoppedAt` (additive). `version --json` lists the features
+  `container` and `compose-launch`. No `ProtocolVersion` or JSON `schema` change; an older daemon
+  answers `VERSION_MISMATCH` with the `eyedbg daemon stop` hint.
+- Verified on Linux containers, with Docker Desktop 24.0.7 on macOS (arm64) and docker.io 26.1.5 on
+  Debian (amd64). Unverified and unsupported: Windows hosts, podman, rootless docker, remote
+  engines, emulated architectures, Alpine and other musl images. In verified runs, line breakpoints
+  did not bind when attached to an image's Release build (pause and stacks work); launching
+  (`compose launch`) is the way.
+
 ## [0.2.1] - 2026-09-29
 
 ### Added
