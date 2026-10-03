@@ -202,10 +202,14 @@ app crash ends the session with the exit code (unknown on Linux: `ExitCodeUnknow
 policy doesn't apply because pid 1 idles.
 
 **D10 One app per container; stray guard.** The session manager keeps one **claim** per full
-container id, taken under its lock before the driver runs and released when the start fails or the
-session ends: a launch that finds any claim, or an attach that finds a launch claim, is refused,
+container id, taken under its lock before the adapter starts and released when the start fails or
+the session ends: a launch that finds any claim, or an attach that finds a launch claim, is refused,
 naming the session; a container holds either one launch or any number of attaches with distinct pids.
-Then `docker top <id> -o pid,stat,comm` (names only, never command lines): a non-zombie process
+The full id is only known once the driver has inspected the container (a reference may be a name
+or a short id), so the claim is two steps: an early check of the live claims by the reference
+(container name, or an id prefix of at least 12 characters) before the driver runs, which spares
+the inspect, the `docker top` and the copy, and the authoritative claim by full id after the driver
+and before the adapter starts, which catches every other spelling. Then `docker top <id> -o pid,stat,comm` (names only, never command lines): a non-zombie process
 named exactly `dotnet` is an earlier app — for instance one whose netcoredbg never saw EOF — and
 the launch is refused after up to 5 s of re-checking (a stopped app may still be exiting), with the
 hint `docker restart NAME`, which keeps fast mode and kills only that container's processes. A failing
