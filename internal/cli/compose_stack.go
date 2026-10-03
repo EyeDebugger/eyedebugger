@@ -118,6 +118,64 @@ func newStackRun(cmd *cobra.Command, info version.Info, g *globals, deps compose
 	return r, nil
 }
 
+// corroborateProject checks the compose project directory a container's
+// labels name before anything is built in it, recreated from it or mapped to
+// it, and sets fi.ComposeDir to it with its symlinks resolved. An image's own
+// LABELs are copied onto every container made from it, so a container started
+// by plain 'docker run' can carry any compose labels: the directory must hold
+// a compose file the container's files label names (docs/adr/0021, D14), and,
+// when the command line says where the project is (--project-directory, else
+// the directory of the first -f file; compose's own rule), it must be that
+// directory. Without either flag compose found the project from the current
+// directory, which eyedbg doesn't second-guess.
+func corroborateProject(fi *container.FastInfo, opts container.ComposeOptions) error {
+	dir, err := container.CorroborateComposeDir(fi.ComposeDir, fi.ConfigFiles)
+	if err != nil {
+		return api.NewError(api.CodeInvalidRequest, "container "+fi.Name+"'s compose labels don't check out: "+err.Error(),
+			"fast mode builds in and recreates from the project directory its container's compose labels name, only when its compose files are there; "+
+				"an image's own labels can say anything, so a container made by plain 'docker run' is refused")
+	}
+
+	if want := flagProjectDir(opts); want != "" && !sameDir(want, dir) {
+		return api.NewError(api.CodeInvalidRequest, "container "+fi.Name+"'s compose project directory is "+dir+", not the "+want+" the command line names",
+			"name the project as it was created ('docker compose ps' with the same -f and --project-directory finds the container), or recreate the container with 'docker compose up -d --force-recreate'")
+	}
+
+	fi.ComposeDir = dir
+
+	return nil
+}
+
+// flagProjectDir is the project directory the compose flags name: --project-
+// directory, else the directory of the first -f file (stdin, "-", names none);
+// "" when they name none.
+func flagProjectDir(opts container.ComposeOptions) string {
+	switch {
+	case opts.ProjectDirectory != "":
+		return opts.ProjectDirectory
+	case len(opts.Files) > 0 && opts.Files[0] != "-":
+		return filepath.Dir(opts.Files[0])
+	default:
+		return ""
+	}
+}
+
+// sameDir reports whether a and b are the same directory (the same file, so a
+// symlink or a letter case on Windows doesn't matter).
+func sameDir(a, b string) bool {
+	ia, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+
+	ib, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+
+	return os.SameFile(ia, ib)
+}
+
 // engineSpec is the engine members of a daemon call name.
 func (r *stackRun) engineSpec() api.ContainerEngine {
 	return api.ContainerEngine{Host: r.host, Context: r.dockerContext}

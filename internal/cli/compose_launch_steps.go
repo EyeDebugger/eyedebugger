@@ -112,6 +112,15 @@ func (r *launchRun) checkKind(s *launchSvc) error {
 	case fi.ComposeDir == "" || !filepath.IsAbs(fi.ComposeDir):
 		return api.NewError(api.CodeInvalidRequest, "container "+fi.Name+" doesn't record its compose project directory",
 			"fast mode needs a container created by 'docker compose up' from compose files")
+	}
+
+	// Its labels name the directory the build runs in: believe them only when
+	// compose's files are really there.
+	if err := corroborateProject(fi, r.req.opts); err != nil {
+		return err
+	}
+
+	switch {
 	case fi.Fast != nil && fi.Fast.Version != container.FastVersion:
 		return api.NewError(api.CodeInvalidRequest, "container "+fi.Name+" is in fast mode of another eyedbg (label version "+fi.Fast.Version+")",
 			"'eyedbg compose restore "+fi.Service+"' with the eyedbg that made it, or 'docker compose up -d --force-recreate "+fi.Service+"'")
@@ -141,9 +150,6 @@ func (r *launchRun) checkAsBuilt(s *launchSvc) error {
 			"eyedbg never reads a container's arguments: they may hold secrets")
 	case fi.WorkDirErr != nil:
 		return api.NewError(api.CodeInvalidRequest, fi.WorkDirErr.Error(), "")
-	case len(fi.ConfigFiles) == 0:
-		return api.NewError(api.CodeInvalidRequest, "container "+fi.Name+" doesn't record its compose files",
-			"fast mode recreates a container from the files it was created from")
 	}
 
 	s.entry, s.dll, s.appDir = true, fi.DLL, fi.WorkDir

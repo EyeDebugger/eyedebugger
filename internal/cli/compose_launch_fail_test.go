@@ -549,7 +549,7 @@ func TestComposeLaunchChecks(t *testing.T) {
 		{"a working directory fast mode can't use", func(w *launchWorld) {
 			w.docker.byService("producer").fi.WorkDirErr = errors.New("the container's working directory /usr/app can't hold the build")
 		}, api.CodeInvalidRequest, "working directory /usr/app", false},
-		{"no compose files recorded", func(w *launchWorld) { w.docker.byService("producer").fi.ConfigFiles = nil }, api.CodeInvalidRequest, "doesn't record its compose files", false},
+		{"no compose files recorded", func(w *launchWorld) { w.docker.byService("producer").fi.ConfigFiles = nil }, api.CodeInvalidRequest, "compose labels don't check out", false},
 		{"fast mode of another version", func(w *launchWorld) {
 			w.docker.byService("producer").fi.Fast = &container.FastLabels{Version: "2", Override: "/x/override.yml"}
 		}, api.CodeInvalidRequest, "another eyedbg", false},
@@ -621,7 +621,21 @@ func TestComposeLaunchTwoContainers(t *testing.T) {
 // directory (the build maps /src to it): one that disagrees is refused.
 func TestComposeLaunchSharedComposeDir(t *testing.T) {
 	w := newLaunchWorld(t)
-	w.docker.byService("producer").fi.ComposeDir = t.TempDir()
+
+	// Another directory that really holds the files its container names: only
+	// the sharing is wrong.
+	other, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	file := filepath.Join(other, "compose.yml")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	producer := w.docker.byService("producer")
+	producer.fi.ComposeDir, producer.fi.ConfigFiles = other, []string{file}
 
 	out, _ := w.run(0, "compose", "launch", "consumer", "producer")
 	expectOutput(t, out, "launched 1 of 2 service(s)", "its compose project directory is")
@@ -948,5 +962,113 @@ func TestComposeLaunchHomeWithComma(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(home, "compose", worldProject)); !os.IsNotExist(err) {
 		t.Errorf("a project directory was created: %v", err)
+	}
+}
+
+// TestComposeLaunchRefusesUncorroboratedLabels: an image's own LABELs are
+// copied onto a container started by plain 'docker run', so the compose labels
+// of a container are believed only when its compose files are in the project
+// directory they name. A hostile label naming another directory (the user's
+// home, say) must not be built in, recreated from or mapped: the service is
+// refused, and nothing changes.
+func TestComposeLaunchRefusesUncorroboratedLabels(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(t *testing.T, w *launchWorld, c *fakeCtr)
+	}{
+		{"a directory with no compose file in it", func(t *testing.T, _ *launchWorld, c *fakeCtr) {
+			c.fi.ComposeDir = realDirWith(t, "id_rsa")
+		}},
+		{"a file list naming a file that isn't compose's", func(t *testing.T, _ *launchWorld, c *fakeCtr) {
+			c.fi.ComposeDir = realDirWith(t, ".bashrc")
+			c.fi.ConfigFiles = []string{filepath.Join(c.fi.ComposeDir, ".bashrc")}
+		}},
+		{"a file list naming a compose file elsewhere", func(t *testing.T, w *launchWorld, c *fakeCtr) {
+			c.fi.ComposeDir = realDirWith(t, "x")
+			c.fi.ConfigFiles = []string{filepath.Join(w.dir, "compose.yml")}
+		}},
+		{"a directory that is not on this machine", func(t *testing.T, _ *launchWorld, c *fakeCtr) {
+			c.fi.ComposeDir = filepath.Join(realDirWith(t, "x"), "gone")
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newLaunchWorld(t)
+			tt.edit(t, w, w.docker.byService("producer"))
+
+			before := w.snap()
+
+			_, errOut := w.run(exitCodeOf(api.CodeInvalidRequest), "compose", "launch", "producer")
+			expectOutput(t, errOut, "[INVALID_REQUEST]", "compose labels don't check out")
+			w.unchangedSince(t, before)
+
+			if n := len(w.publishedProjects()); n != 0 {
+				t.Errorf("a refused service was built: %v", w.publishedProjects())
+			}
+
+			if ups := w.docker.upCalls(); len(ups) != 0 {
+				t.Errorf("a refused service was recreated: %+v", ups)
+			}
+		})
+	}
+}
+
+// realDirWith is a new directory (symlinks resolved) holding empty files.
+func realDirWith(t *testing.T, names ...string) string {
+	t.Helper()
+
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(dir, n), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	return dir
+}
+
+// TestComposeLaunchProjectDirectoryFlags: when --project-directory (or the
+// first -f file's directory) says where the project is, the container's label
+// must name that directory; the labels agreeing with the flags launch.
+func TestComposeLaunchProjectDirectoryFlags(t *testing.T) {
+	tests := []struct {
+		name  string
+		flags func(w *launchWorld) []string
+		ok    bool
+	}{
+		{"--project-directory agrees", func(w *launchWorld) []string { return []string{"--project-directory", w.dir} }, true},
+		{"-f agrees: its directory is the project's", func(w *launchWorld) []string { return []string{"-f", filepath.Join(w.dir, "compose.yml")} }, true},
+		{"no flags", func(*launchWorld) []string { return nil }, true},
+		{"--project-directory names another directory", func(*launchWorld) []string { return []string{"--project-directory", realDirWith(t)} }, false},
+		{"-f in another directory", func(*launchWorld) []string { return []string{"-f", filepath.Join(realDirWith(t), "compose.yml")} }, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newLaunchWorld(t)
+			args := append([]string{"compose", "launch", "producer"}, tt.flags(w)...)
+
+			if tt.ok {
+				out, _ := w.run(0, args...)
+				expectOutput(t, out, "launched 1 of 1 service(s)")
+
+				return
+			}
+
+			before := w.snap()
+
+			_, errOut := w.run(exitCodeOf(api.CodeInvalidRequest), args...)
+			expectOutput(t, errOut, "[INVALID_REQUEST]", "the command line names")
+			w.unchangedSince(t, before)
+
+			if n := len(w.publishedProjects()); n != 0 {
+				t.Errorf("a refused service was built: %v", w.publishedProjects())
+			}
+		})
 	}
 }
