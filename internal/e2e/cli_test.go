@@ -164,7 +164,15 @@ type result struct {
 func (h *harness) runEnv(overrides map[string]string, args ...string) result {
 	h.t.Helper()
 
-	ctx, cancel := context.WithTimeout(context.Background(), procTimeout)
+	return h.runLimited(procTimeout, overrides, args...)
+}
+
+// runLimited is runEnv with its own bound instead of procTimeout, for the
+// commands that build or recreate containers (the docker e2e).
+func (h *harness) runLimited(limit time.Duration, overrides map[string]string, args ...string) result {
+	h.t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, h.eyedbg, args...) //nolint:gosec // The path is what binariesFor just built; args are test-controlled.
