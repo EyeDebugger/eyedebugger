@@ -7,8 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 
 	"github.com/eyedebugger/eyedebugger/internal/adapters"
@@ -228,19 +226,19 @@ func (d *Driver) containerAdapter(m *adapters.Manifest, platform string) (contai
 	return container.Adapter{Name: m.Name, Version: m.Version, Dir: dir, Entry: m.Adapter.Entry, ProbeArgs: probe}, nil
 }
 
-// containerPathMap is the session's path map: the one asked for, else the
-// default, /src for the compose project's directory (an empty map when there
-// is none, which refuses line breakpoints with a hint to pass --map).
+// containerPathMap is the session's path map: the one asked for (trusted: the
+// user wrote it), else the default, /src for the compose project's directory
+// when the container's compose files corroborate it (info.SourceDir: the
+// working_dir label alone may come from an image, docs/adr/0020 D5); else an
+// empty map, which refuses line breakpoints with a hint to pass --map.
 func containerPathMap(cs *api.ContainerSpec, info container.Info) (*session.PathMap, error) {
 	if len(cs.Map) > 0 {
 		return session.NewPathMap(cs.Map)
 	}
 
-	if dir := info.WorkingDir; dir != "" && filepath.IsAbs(dir) && filepath.Dir(dir) != dir {
-		if st, err := os.Stat(dir); err == nil && st.IsDir() {
-			if pm, err := session.NewPathMap([]api.PathMapping{{Remote: defaultMapRemote, Local: dir}}); err == nil {
-				return pm, nil
-			}
+	if dir := info.SourceDir; dir != "" {
+		if pm, err := session.NewPathMap([]api.PathMapping{{Remote: defaultMapRemote, Local: dir}}); err == nil {
+			return pm, nil
 		}
 	}
 

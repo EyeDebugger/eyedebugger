@@ -15,7 +15,7 @@ import (
 )
 
 const inspectOut = `["` + fullID + `","/web-1","sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210","dotnet",` +
-	`true,false,false,null,[5000000000,3000000000,3,false],"my-app","web","/home/me/app",""]`
+	`true,false,false,null,[5000000000,3000000000,3,false],"my-app","web","/home/me/app","",""]`
 
 func TestInspectViaDocker(t *testing.T) {
 	t.Parallel()
@@ -53,6 +53,55 @@ func TestInspectViaDocker(t *testing.T) {
 		if strings.Contains(argv[5], banned) {
 			t.Errorf("the template names %s", banned)
 		}
+	}
+}
+
+// TestInspectSourceDir: the project directory a label names becomes the
+// container's SourceDir only when its config_files label names a compose file
+// inside it. A hostile image's LABELs can set both labels, so the files must
+// really be on this machine, in that directory.
+func TestInspectSourceDir(t *testing.T) {
+	t.Parallel()
+
+	proj := realDir(t)
+	elsewhere := realDir(t)
+
+	writeFile(t, filepath.Join(proj, "compose.yaml"))
+	writeFile(t, filepath.Join(elsewhere, "compose.yaml"))
+
+	tests := []struct {
+		name, workingDir, files string
+		want                    string
+	}{
+		{"compose made it from files there", proj, filepath.Join(proj, "compose.yaml"), proj},
+		{"the label names a directory with no such file", proj, filepath.Join(proj, "missing.yaml"), ""},
+		{"the files are in another directory", proj, filepath.Join(elsewhere, "compose.yaml"), ""},
+		{"no files label", proj, "", ""},
+		{"no directory label", "", filepath.Join(proj, "compose.yaml"), ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			out := `["` + fullID + `","/web-1","sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210","dotnet",` +
+				`true,false,false,null,null,"my-app","web",` + jsonString(tt.workingDir) + `,"",` + jsonString(tt.files) + `]`
+
+			e := containertest.Engine(t, containertest.Scenario{Rules: []containertest.Rule{{Match: []string{"inspect"}, Stdout: out}}})
+
+			info, err := e.Inspect(t.Context(), "web-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if info.SourceDir != tt.want {
+				t.Errorf("SourceDir = %q, want %q", info.SourceDir, tt.want)
+			}
+
+			if info.WorkingDir != tt.workingDir {
+				t.Errorf("WorkingDir = %q, want the label as it is, %q", info.WorkingDir, tt.workingDir)
+			}
+		})
 	}
 }
 

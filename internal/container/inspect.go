@@ -31,7 +31,7 @@ const (
 //	id, name, image id, path (the executable of pid 1), running, paused,
 //	restarting, init, healthcheck [interval ns, timeout ns, retries, test is
 //	NONE] or null, compose project, compose service, compose working dir,
-//	eyedbg's fast-mode label (13 values)
+//	eyedbg's fast-mode label, compose config files (14 values)
 //
 // It never names the environment, the command, the entrypoint's arguments
 // or a healthcheck's command: docker doesn't send them. Docker's template
@@ -43,13 +43,14 @@ const inspectTemplate = `[{{json .Id}},{{json .Name}},{{json .Image}},{{json .Pa
 	`{{with index .Config "Healthcheck"}}[{{json (index . "Interval")}},{{json (index . "Timeout")}},{{json (index . "Retries")}},` +
 	`{{with index . "Test"}}{{eq (index . 0) "NONE"}}{{else}}false{{end}}]{{else}}null{{end}},` +
 	`{{json (index .Config.Labels "` + labelProject + `")}},{{json (index .Config.Labels "` + labelService + `")}},` +
-	`{{json (index .Config.Labels "` + labelWorkingDir + `")}},{{json (index .Config.Labels "` + labelFastMode + `")}}]`
+	`{{json (index .Config.Labels "` + labelWorkingDir + `")}},{{json (index .Config.Labels "` + labelFastMode + `")}},` +
+	`{{json (index .Config.Labels "` + labelConfigFiles + `")}}]`
 
 // imageTemplate selects an image's os, architecture and variant.
 const imageTemplate = `{{.Os}}/{{.Architecture}}/{{.Variant}}`
 
 // inspectFields is how many values inspectTemplate emits.
-const inspectFields = 13
+const inspectFields = 14
 
 // maxLabel bounds a label value that is kept.
 const maxLabel = 4096
@@ -105,6 +106,14 @@ type Info struct {
 	// Project, Service and WorkingDir are the compose labels; empty when the
 	// container has none, or one that fails its grammar.
 	Project, Service, WorkingDir string
+	// SourceDir is WorkingDir, with its symlinks resolved, when the
+	// container's compose files corroborate it ([CorroborateComposeDir]: a
+	// label alone may come from an image); "" when they don't, or when
+	// Info didn't come from [Engine.Inspect].
+	SourceDir string
+	// configFiles is the compose files label as read, "" when absent or
+	// failing its grammar.
+	configFiles string
 	// FastMode: the container carries eyedbg's fast-mode label.
 	FastMode bool
 }
@@ -151,6 +160,8 @@ func (e Engine) Inspect(ctx context.Context, ref string) (Info, error) {
 		return Info{}, api.NewError(api.CodeAttachFailed, "unexpected answer from docker inspect: "+err.Error(),
 			"eyedbg reads a fixed set of fields; this docker may differ from the ones it was verified with (docker 24 to 26)")
 	}
+
+	info.SourceDir = composeSourceDir(info.WorkingDir, info.configFiles)
 
 	return info, nil
 }
@@ -221,12 +232,12 @@ func parseInspect(out []byte) (Info, error) {
 		init                   *bool
 		health                 []json.RawMessage
 		project, service, wdir string
-		fastMode               string
+		fastMode, configFiles  string
 	)
 
 	dst := []any{
 		&i.ID, &i.Name, &i.Image, &i.Path, &i.Running, &i.Paused, &i.Restarting, &init, &health,
-		&project, &service, &wdir, &fastMode,
+		&project, &service, &wdir, &fastMode, &configFiles,
 	}
 
 	for n, d := range dst {
@@ -257,6 +268,10 @@ func parseInspect(out []byte) (Info, error) {
 
 	if wdir != "" && len(wdir) <= maxLabel && !strings.ContainsFunc(wdir, unicode.IsControl) {
 		i.WorkingDir = wdir
+	}
+
+	if _, err := splitConfigFiles(configFiles); err == nil {
+		i.configFiles = configFiles
 	}
 
 	i.FastMode = fastMode != ""
