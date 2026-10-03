@@ -313,7 +313,10 @@ services running.
 
 --map REMOTE=LOCAL (repeatable) maps a directory in the containers to a host directory, so breakpoints by host path
 and the frames and source excerpts of a stop use host paths. Without it each service maps /src to the compose project
-directory (the Visual Studio Dockerfile template builds in /src); --map replaces that default for every service. A
+directory (the Visual Studio Dockerfile template builds in /src) when the service's container lists a compose file
+that lies in that directory (an image's own labels can claim any directory; a label nothing corroborates maps
+nothing); --map replaces that default for every service. Source excerpts are read only from files named like source
+(.cs .csx .vb .fs .fsi .fsx .razor .cshtml .xaml) below a mapped directory. A
 line breakpoint outside a service's map is skipped for it, never sent. --bp adds the breakpoint to every attached
 service, in order; the output says what each did with it ("verified", "pending" when its module isn't loaded or has no
 such line, or skipped).

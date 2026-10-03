@@ -159,8 +159,13 @@ unmappable path passes unchanged; an incoming unmappable path stays a container 
 read** (so a frame in the container's runtime or NuGet cache gets no source excerpt, even if a host
 file exists at that very path). `..` segments, `\`, NUL and control characters, and on a Windows host
 `:` and volume escapes are unmappable. The default map, when `--map` is absent and the container
-carries compose's `working_dir` label naming an existing directory, is `/src` = that directory (the
-Visual Studio template's `COPY . .`); `--map` replaces it. A test enumerates go-dap's message types
+carries compose's `working_dir` label naming an existing directory that holds a compose file
+(`.yml`/`.yaml`, a regular file, symlinks resolved) listed in its `config_files` label, is `/src` =
+that directory (the Visual Studio template's `COPY . .`); `--map` replaces it and is trusted as typed.
+An image's own `LABEL`s are copied onto every container made from it, so a container started with
+plain `docker run` can carry any `com.docker.compose.*` value: without the corroboration the label
+alone would let an image choose which host directory eyedbg reads source from. Uncorroborated, the
+map is empty and line breakpoints are refused with the `--map` hint (review round 1, F1). A test enumerates go-dap's message types
 that hold a `Source` so a library bump can't add an unmapped one.
 
 **D6 Native API.** `container.attach {members: [...]}` starts one or more member sessions (at most 4
@@ -232,10 +237,10 @@ Documented consequences of a pause: HTTP callers time out, the healthcheck fails
 `unhealthyAfter`, Kafka consumers leave their group after `max.poll.interval.ms`.
 
 **What `container.attach` reads.** One `docker inspect --type container --format <template>` whose
-template emits only (13 values): id, name, image id, `.Path`, the running / paused / restarting
+template emits only (14 values): id, name, image id, `.Path`, the running / paused / restarting
 flags, `.HostConfig.Init`, the healthcheck's `Interval`, `Timeout`, `Retries` and whether `Test` is
-`NONE` (never its text), the compose labels `project`, `service` and `project.working_dir`, and
-eyedbg's own fast-mode label (ADR 0021: an attach refuses a container that carries it). Docker's
+`NONE` (never its text), the compose labels `project`, `service`, `project.working_dir` and
+`project.config_files`, and eyedbg's own fast-mode label (ADR 0021: an attach refuses a container that carries it). Docker's
 template engine fails on a missing key, and `.HostConfig.Init` is absent on a container without
 `init`, as is a container's `Healthcheck`, so every optional key is read with `index` (`index
 .HostConfig "Init"`, `index .Config "Healthcheck"`): a container without them isn't an error.
@@ -261,7 +266,13 @@ other fields (`Command`, `Ports`, …) are never stored or shown.
   handled as for any other adapter, unchanged.
 * **Path confinement.** A source is read from the host only when `EvalSymlinks` of the mapped path
   lies inside a mapped host root; `..`, a symlink out of a root and an unmapped container path are
-  never read. Breakpoints outside the map are refused rather than sent.
+  never read. Breakpoints outside the map are refused rather than sent. Even then only a file whose
+  resolved name ends in a source extension (`.cs .csx .vb .fs .fsi .fsx .razor .cshtml .xaml`, in any
+  case) is read, so an adapter naming `id_rsa` or `.env` below a mapped directory gets nothing.
+* **Compose labels are not trusted alone.** A container's labels include its image's own `LABEL`s,
+  so `com.docker.compose.project.working_dir` can be chosen by an image author. The default path
+  map uses it only when a compose file named by `config_files` is a regular file inside that
+  directory (D5); `--map` is the user's own word.
 * **Secrets.** eyedbg selects inspect fields through `--format` and so never receives the
   environment, `Cmd` or entrypoint arguments, and it runs no `compose config`. Docker's stderr is bounded (4 KiB)
   and stripped of control characters before it reaches an error; stdout of inspect/probe calls is

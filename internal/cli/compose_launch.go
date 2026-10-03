@@ -68,6 +68,10 @@ other idles: launch that one first.
 
 Discovery is one 'docker compose ps' with -f FILE (repeatable), -p NAME and --project-directory DIR, as for
 'compose attach'; the Debug build maps /src to the compose directory, so breakpoints are by host path (there is no --map).
+The compose directory is the one the container's labels name, believed only when a compose file (.yml/.yaml) its
+labels list is in it (an image's own labels can claim any directory, so a container made by plain 'docker run' is
+refused) and, when --project-directory or -f is given, when it is the directory they name (for -f, the first
+file's).
 --bp (repeatable) goes in before the app starts, for every service; breakpoints, conditions, logpoints and the exception
 mode your sessions of these services had are carried over. One run per project at a time.
 

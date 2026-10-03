@@ -67,10 +67,14 @@ command or arguments.
   --map REMOTE=LOCAL (repeatable) maps a directory in the container to a host directory, so
   breakpoints by host path and the frames and source excerpts of the stop use host paths: the
   PDBs of an image built from Visual Studio's template name sources under /src, so the default
-  is /src = the compose project's directory (the container's compose working_dir label, when it
-  is a host directory that exists); --map replaces that default. A line breakpoint outside the
-  map is refused, never sent, so without a map (and no such directory) add --map. LOCAL is
-  relative to the current directory.
+  is /src = the compose project's directory (the container's compose working_dir label), used
+  only when that directory exists here and holds a compose file (.yml/.yaml) that the container's
+  compose config_files label lists: an image's own labels can claim any directory, so a label
+  nothing corroborates maps nothing. --map replaces that default and is trusted as typed. A line
+  breakpoint outside the map is refused, never sent, so without a map (and no corroborated
+  directory) add --map. LOCAL is relative to the current directory. Source excerpts in a stop are
+  read only from files below a mapped directory that are named like source (.cs .csx .vb .fs
+  .fsi .fsx .razor .cshtml .xaml, in any case).
   --group NAME labels the session as a member of a group (a compose project).
 Breakpoints hit while attached stop the whole service: its HTTP callers time out, its docker
 healthcheck turns unhealthy after retries x interval + timeout (the session shows it), and a Kafka

@@ -16,9 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as the container's own user. Install that build once with the new `eyedbg adapters install
   netcoredbg --platform linux/arm64` (or `linux/amd64`), which fetches another platform's download
   into `<data dir>/_platform/` and never runs it on the host. Source paths are mapped between the
-  container and the host at the DAP client (default `/src` = the compose project's directory;
-  `--map` replaces it), so breakpoints, frames and source excerpts use host paths, and eyedbg reads
-  only files under the mapped directories. eyedbg never reads a container's environment, command
+  container and the host at the DAP client (default `/src` = the compose project's directory when
+  the container's compose files are found in it, since an image's own labels can claim any
+  directory; `--map` replaces it), so breakpoints, frames and source excerpts use host paths, and
+  eyedbg reads only source-named files (`.cs`, `.vb`, `.fs`, `.razor`, ...) under the mapped
+  directories. eyedbg never reads a container's environment, command
   or arguments, nor `docker compose config`.
 - `eyedbg compose attach|wait|events|bp|stop` (ADR 0020): every running .NET service of a compose
   stack as one group of sessions (the group is the compose project), a breakpoint in all of them,
