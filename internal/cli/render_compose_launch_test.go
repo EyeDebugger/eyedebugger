@@ -108,17 +108,21 @@ func TestComposeRestoreRendering(t *testing.T) {
 		{Service: "api", Container: "myapp-api-1", Error: boom},
 	}
 
+	kept := restoreOutcome{Kept: "/home/me/.eyedbg/compose/myapp", Engine: "docker context desk"}
+
 	tests := []struct {
 		name, golden string
 		members      []restoredMember
-		removed      bool
+		out          restoreOutcome
 		asJSON       bool
 	}{
-		{"mixed", "compose_restore.golden", members, false, false},
-		{"mixed, json", "compose_restore_json.golden", members, false, true},
-		{"everything restored", "compose_restore_removed.golden", members[:2], true, false},
-		{"nothing restored", "compose_restore_none.golden", members[2:], false, false},
-		{"nothing in fast mode", "compose_restore_empty.golden", nil, true, false},
+		{"mixed", "compose_restore.golden", members, restoreOutcome{}, false},
+		{"mixed, json", "compose_restore_json.golden", members, restoreOutcome{}, true},
+		{"everything restored", "compose_restore_removed.golden", members[:2], restoreOutcome{Removed: true}, false},
+		{"nothing restored", "compose_restore_none.golden", members[2:], restoreOutcome{}, false},
+		{"nothing in fast mode: the files are kept", "compose_restore_empty.golden", nil, kept, false},
+		{"nothing in fast mode, json", "compose_restore_kept_json.golden", nil, kept, true},
+		{"all skipped: the files are kept", "compose_restore_kept.golden", members[2:3], kept, false},
 	}
 
 	for _, tt := range tests {
@@ -126,7 +130,7 @@ func TestComposeRestoreRendering(t *testing.T) {
 			t.Parallel()
 
 			var b bytes.Buffer
-			if err := writeComposeRestore(&b, "myapp", tt.members, tt.removed, tt.asJSON); err != nil {
+			if err := writeComposeRestore(&b, "myapp", tt.members, tt.out, tt.asJSON); err != nil {
 				t.Fatal(err)
 			}
 

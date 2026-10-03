@@ -203,19 +203,31 @@ type restoredMember struct {
 	Error    *api.Error `json:"error,omitempty"`
 }
 
+// restoreOutcome is what a restore did to eyedbg's own files for the project.
+type restoreOutcome struct {
+	// Removed: they are gone, no service being in fast mode any more.
+	Removed bool
+	// Kept is eyedbg's directory for the project when the run found no
+	// fast-mode container on its engine, so nothing was removed (the stack may
+	// run on another engine, whose containers still mount it); Engine says
+	// which engine was asked.
+	Kept, Engine string
+}
+
 // writeComposeRestore renders the result of 'compose restore'.
-func writeComposeRestore(w io.Writer, group string, members []restoredMember, removed, asJSON bool) error {
+func writeComposeRestore(w io.Writer, group string, members []restoredMember, out restoreOutcome, asJSON bool) error {
 	if asJSON {
 		return writeJSON(w, struct {
 			Schema  int              `json:"schema"`
 			Group   string           `json:"group"`
 			Members []restoredMember `json:"members"`
 			Removed bool             `json:"removed"`
-		}{jsonSchemaVersion, group, members, removed})
+			Kept    string           `json:"kept,omitempty"`
+		}{jsonSchemaVersion, group, members, out.Removed, out.Kept})
 	}
 
 	if len(members) == 0 {
-		return writeText(w, "group "+group+": no service is in fast mode\n")
+		return writeText(w, "group "+group+": no service is in fast mode\n"+keptNote(group, out))
 	}
 
 	var b strings.Builder
@@ -243,11 +255,25 @@ func writeComposeRestore(w io.Writer, group string, members []restoredMember, re
 			"whatever the old containers wrote outside volumes is gone.\n")
 	}
 
-	if removed {
+	if out.Removed {
 		b.WriteString("eyedbg's files for this project were removed: no service is in fast mode.\n")
 	}
 
+	b.WriteString(keptNote(group, out))
+
 	return writeText(w, b.String())
+}
+
+// keptNote says why eyedbg's files for the project were not removed, "" when
+// there is nothing to say.
+func keptNote(group string, out restoreOutcome) string {
+	if out.Kept == "" {
+		return ""
+	}
+
+	return "note: no fast-mode container of project " + group + " was found on " + out.Engine + ", so eyedbg's files for it were kept: " + out.Kept + "\n" +
+		"If the project runs on another engine (another DOCKER_CONTEXT or DOCKER_HOST), its containers still mount them: run 'compose restore' there. " +
+		"If nothing runs, delete that directory.\n"
 }
 
 // restoreRow is a member's line of the restore table.

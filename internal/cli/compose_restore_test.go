@@ -6,7 +6,9 @@ package cli
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
@@ -18,6 +20,7 @@ type restoreDoc struct {
 	Group   string           `json:"group"`
 	Members []restoredMember `json:"members"`
 	Removed bool             `json:"removed"`
+	Kept    string           `json:"kept"`
 }
 
 func (w *launchWorld) restoreJSON(wantCode int, args ...string) restoreDoc {
@@ -131,8 +134,12 @@ func TestComposeRestoreStoppedAndNamed(t *testing.T) {
 		t.Errorf("members = %+v", doc.Members)
 	}
 
-	if !doc.Removed {
-		t.Error("nothing is in fast mode any more, yet eyedbg's files are there")
+	if !doc.Removed || doc.Kept != "" {
+		t.Errorf("removed = %v, kept = %q: nothing is in fast mode any more, yet eyedbg's files are there", doc.Removed, doc.Kept)
+	}
+
+	if _, err := os.Stat(filepath.Dir(w.override())); !os.IsNotExist(err) {
+		t.Errorf("eyedbg's project directory after a restore that handled the last fast container: %v", err)
 	}
 
 	// Nothing running and no -p: nothing names the project.
@@ -176,5 +183,99 @@ func TestComposeRestoreOptions(t *testing.T) {
 	ups := w.docker.upCalls()
 	if last := ups[len(ups)-1]; !last.wait || !slices.Equal(last.ref.EnvFiles, []string{"prod.env"}) || !slices.Equal(last.services, []string{"producer"}) {
 		t.Errorf("restore's compose up = %+v", last)
+	}
+}
+
+// TestComposeRestoreKeepsFilesWhenNoFastContainerIsSeen: 'restore -p NAME' asks
+// no compose ps, so on the wrong engine (another DOCKER_CONTEXT, a remote host)
+// the project has no fast-mode container to see, though the real ones still
+// mount eyedbg's directory for it. It must stay, with a note saying so.
+func TestComposeRestoreKeepsFilesWhenNoFastContainerIsSeen(t *testing.T) {
+	for _, args := range [][]string{{}, {"consumer"}} {
+		w := newLaunchWorld(t)
+		t.Setenv(envDockerContext, "elsewhere")
+
+		dir := filepath.Dir(w.override())
+		build := filepath.Join(dir, "services", "producer", "App.dll")
+
+		if err := os.MkdirAll(filepath.Dir(build), 0o700); err != nil {
+			t.Fatal(err)
+		}
+
+		for _, f := range []string{build, w.override()} {
+			if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		cmd := append([]string{"compose", "restore", "-p", worldProject}, args...)
+		out, errOut := w.run(exitError, cmd...)
+		expectOutput(t, out, "no fast-mode container of project "+worldProject+" was found on docker context elsewhere", "were kept: "+dir)
+		expectOutput(t, errOut, "nothing is in fast mode")
+
+		for _, f := range []string{build, w.override()} {
+			if _, err := os.Stat(f); err != nil {
+				t.Errorf("restore %v on an engine without the containers removed %s: %v", args, f, err)
+			}
+		}
+
+		doc := w.restoreJSON(exitError, append([]string{"-p", worldProject}, args...)...)
+		if doc.Removed || doc.Kept != dir {
+			t.Errorf("restore %v --json: removed = %v, kept = %q; want kept = %q", args, doc.Removed, doc.Kept, dir)
+		}
+	}
+}
+
+// TestComposeRestoreRefusesUncorroboratedLabels: restore recreates from the
+// directory and files a container's labels name, which an image's own LABELs
+// can set on a container made by plain 'docker run': a service whose files
+// aren't in its directory, or whose directory isn't the one the flags name,
+// fails alone and its container is left as it is.
+func TestComposeRestoreRefusesUncorroboratedLabels(t *testing.T) {
+	w := newLaunchWorld(t)
+	w.enterNamed("producer", "consumer")
+
+	consumer := w.docker.byService("consumer")
+	consumer.fi.ComposeDir = realDirWith(t, "id_rsa")
+
+	doc := w.restoreJSON(0)
+
+	for _, m := range doc.Members {
+		switch m.Service {
+		case "producer":
+			if !m.Restored {
+				t.Errorf("producer = %+v", m)
+			}
+		case "consumer":
+			if m.Restored || m.Error == nil || m.Error.Code != api.CodeInvalidRequest || !strings.Contains(m.Error.Message, "compose labels don't check out") {
+				t.Errorf("consumer = %+v", m)
+			}
+		}
+	}
+
+	for _, up := range w.docker.upCalls() {
+		if up.ref.WorkDir == consumer.fi.ComposeDir {
+			t.Errorf("a compose up ran in the directory a label named: %+v", up)
+		}
+	}
+}
+
+func TestComposeRestoreProjectDirectoryFlag(t *testing.T) {
+	w := newLaunchWorld(t)
+	w.enterNamed("producer")
+
+	doc := w.restoreJSON(exitCodeOf(api.CodeInvalidRequest), "--project-directory", realDirWith(t))
+	if len(doc.Members) != 1 || doc.Members[0].Restored || doc.Members[0].Error == nil ||
+		!strings.Contains(doc.Members[0].Error.Message, "the command line names") {
+		t.Errorf("members = %+v", doc.Members)
+	}
+
+	if ups := w.docker.upCalls(); len(ups) != 1 {
+		t.Errorf("compose up ran after the refusal: %+v", ups[1:])
+	}
+
+	doc = w.restoreJSON(0, "--project-directory", w.dir)
+	if len(doc.Members) != 1 || !doc.Members[0].Restored {
+		t.Errorf("with the right directory: %+v", doc.Members)
 	}
 }
