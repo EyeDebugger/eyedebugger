@@ -30,7 +30,13 @@
   `eyedbg adapters install debugpy`; a C/C++ compiler (`cc`/`c++`), rustc, and lldb-dap (on PATH,
   or `EYEDBG_LLDB_DAP`) for c, cpp and rust; Go and `eyedbg adapters install delve` (or dlv on
   PATH, or `EYEDBG_DLV`) for go. Narrow which languages run with `EYEDBG_E2E_LANGS`
-  (comma-separated).
+  (comma-separated). The docker e2e (`TestCompose*` in `internal/e2e`, the fixture
+  `testdata/apps/dotnet/compose`) is opt-in: set `EYEDBG_E2E_DOCKER=1` (with `EYEDBG_E2E=1`) and have
+  docker with the compose plugin and a Linux engine, plus network access (base images, NuGet, the
+  netcoredbg download); it installs its own netcoredbg, so `eyedbg adapters install netcoredbg
+  --platform linux/ARCH` is not needed first. `TestComposeLaunch` needs the .NET SDK on the host
+  too. Run it alone with `EYEDBG_E2E=1 EYEDBG_E2E_DOCKER=1 go test -count=1 -p 1 -run Compose
+  ./internal/e2e/`; the CI e2e job sets the variable on its two ubuntu entries.
 - For the VS Code extension (`extensions/vscode`, ADR 0015): Node 24 LTS (≥ 22.13) and pnpm — run
   `corepack enable` (checks the pinned sha512), or use any pnpm ≥ 11, which switches itself to
   the version `package.json` pins without checking its hash. pnpm only: never npm, npx or yarn. `task ext:test:integration` downloads VS Code 1.100.0

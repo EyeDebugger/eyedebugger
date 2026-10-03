@@ -519,7 +519,7 @@ Phase 2: DAP facade + VS Code extension; .NET side helper; SharpDbg adapter; mor
   `eyedbg/runInTerminal` exchange, `dap.terminal`, real-binary e2e, and the VS Code extension's
   shell-free runner (`console` in launch configurations).
 
-- **Containers and compose** (built, unreleased; ADR 0020, 0021): `attach dotnet --container`, the path map and translator, groups (`group.wait`, `group.events`), `eyedbg compose attach|wait|events|bp|stop`, fast mode (`compose launch`, `compose restore`, container-launch sessions), `adapters install --platform`, the fixture `testdata/apps/dotnet/compose`.
+- **Containers and compose** (built, unreleased; ADR 0020, 0021): `attach dotnet --container`, the path map and translator, groups (`group.wait`, `group.events`), `eyedbg compose attach|wait|events|bp|stop`, fast mode (`compose launch`, `compose restore`, container-launch sessions), `adapters install --platform`, the fixture `testdata/apps/dotnet/compose`, and a docker e2e (`internal/e2e` `TestComposeAttach` and `TestComposeLaunch`, behind `EYEDBG_E2E_DOCKER=1` on top of `EYEDBG_E2E=1`) that CI runs on its two ubuntu e2e entries.
 
 **More languages** (ADR 0013, run independently of phase 2's own sequencing): C, C++, Rust
 (lldb-dap, manifest-only, no schema change) and Go (Delve, manifest-only through a new
