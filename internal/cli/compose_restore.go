@@ -27,9 +27,9 @@ terminated; an attached session is detached), then 'docker compose up -d --no-de
 --wait-timeout 180' recreates the named services only, with this shell's environment and --env-file files: anything the
 containers wrote to their own file systems outside volumes is lost, as when they entered fast mode. Dependents are never
 touched. Then eyedbg's files for the services it restored (the builds, and the override once no service is in fast mode)
-are removed, and nothing is launched; when the engine lists no fast-mode container of the project at all (the stack
-may run on another DOCKER_CONTEXT or host, whose containers still mount those files) nothing is removed and the
-output names the directory. Like launch, restore recreates only from a compose directory its container's labels
+are removed, and nothing is launched; when the engine shows the project neither through a fast-mode container nor
+through 'docker compose ps' (which -p NAME doesn't ask; the stack may run on another DOCKER_CONTEXT or host, whose
+containers still mount those files) nothing is removed and the output names the directory. Like launch, restore recreates only from a compose directory its container's labels
 corroborate (a compose file of its files label lies in it, and it is the directory --project-directory or -f names). A service that isn't in fast mode is skipped ("not in fast mode"). Containers in
 any state are found, so a stopped fast-mode container is restored too; it is started as part of the recreate.
 
@@ -104,6 +104,9 @@ type restoreRun struct {
 	// foundFast: the engine listed at least one fast-mode container of the
 	// project. removed: eyedbg's files for the project are gone.
 	foundFast, removed bool
+	// psSeen: docker compose ps showed containers of the project on this
+	// engine (the project was not named with -p).
+	psSeen bool
 }
 
 // composeRestore is 'compose restore'.
@@ -123,7 +126,7 @@ func composeRestore(cmd *cobra.Command, info version.Info, g *globals, deps comp
 		return err
 	}
 
-	project, err := restoreProject(cmd.Context(), deps, opts)
+	project, seen, err := restoreProject(cmd.Context(), deps, opts)
 	if err != nil {
 		return err
 	}
@@ -133,7 +136,7 @@ func composeRestore(cmd *cobra.Command, info version.Info, g *globals, deps comp
 		return err
 	}
 
-	run := &restoreRun{stackRun: base, names: names, envFiles: f.envFiles, opts: opts}
+	run := &restoreRun{stackRun: base, names: names, envFiles: f.envFiles, opts: opts, psSeen: seen}
 
 	if err := run.takeLock(); err != nil {
 		return err
@@ -142,10 +145,13 @@ func composeRestore(cmd *cobra.Command, info version.Info, g *globals, deps comp
 
 	runErr := run.execute(cmd.Context())
 
-	// Only a run that saw the project's fast-mode containers tidies eyedbg's
-	// files for it: one that saw none (the stack may be on another engine,
-	// whose containers still mount them) leaves them (docs/adr/0021, D17).
-	if run.foundFast {
+	// Only a run that saw the project on its engine tidies eyedbg's files for
+	// it: through its fast-mode containers, or through docker compose ps (a
+	// failed first launch leaves a build log and no container in fast mode).
+	// One that saw neither (restore -p asks no ps; the stack may be on another
+	// engine, whose containers still mount them) leaves them (docs/adr/0021,
+	// D17).
+	if run.foundFast || run.psSeen {
 		run.removed = run.prune(cmd.Context())
 	}
 
@@ -156,7 +162,7 @@ func composeRestore(cmd *cobra.Command, info version.Info, g *globals, deps comp
 	members := run.members()
 
 	outcome := restoreOutcome{Removed: run.removed}
-	if !run.foundFast {
+	if !run.foundFast && !run.psSeen {
 		outcome.Kept, outcome.Engine = run.projectDir, engineWords(run.host, run.dockerContext)
 	}
 
@@ -168,10 +174,10 @@ func composeRestore(cmd *cobra.Command, info version.Info, g *globals, deps comp
 }
 
 // restoreProject is the compose project to restore: -p's, else the one docker
-// compose ps shows.
-func restoreProject(ctx context.Context, deps composeDeps, opts container.ComposeOptions) (string, error) {
+// compose ps shows (seen: this engine's ps showed it).
+func restoreProject(ctx context.Context, deps composeDeps, opts container.ComposeOptions) (project string, seen bool, err error) {
 	if opts.ProjectName != "" {
-		return opts.ProjectName, nil
+		return opts.ProjectName, false, nil
 	}
 
 	psCtx, cancel := context.WithTimeout(ctx, container.ComposeTimeout+callSlack)
@@ -179,15 +185,17 @@ func restoreProject(ctx context.Context, deps composeDeps, opts container.Compos
 
 	rows, err := deps.ps(psCtx, os.Getenv(envDockerHost), os.Getenv(envDockerContext), opts)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	if len(rows) == 0 {
-		return "", api.NewError(api.CodeInvalidRequest, "no containers in this compose project",
+		return "", false, api.NewError(api.CodeInvalidRequest, "no containers in this compose project",
 			"name the project with -p NAME (a stack that is down shows no containers to docker compose ps)")
 	}
 
-	return oneProject(rows)
+	project, err = oneProject(rows)
+
+	return project, err == nil, err
 }
 
 // engineWords names the docker engine a command talks to, for a message: its
