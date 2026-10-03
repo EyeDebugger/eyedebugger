@@ -81,7 +81,10 @@ eyedbg compose stop
 eyedbg copies its pinned netcoredbg into the container (`docker cp`) and runs it there with
 `docker exec -i`, as the container's own user. Breakpoints, frames and source excerpts use host
 paths: `/src` in the container (where a Visual Studio-template Dockerfile builds) maps to the
-compose project directory; `--map REMOTE=LOCAL` changes that. eyedbg never reads a container's
+compose project directory, but only when that directory holds a compose file the container's own
+labels list (an image's labels can claim any directory); otherwise pass `--map REMOTE=LOCAL`,
+which is also how to change the default. Source excerpts come only from files named like source
+(`.cs`, `.vb`, `.fs`, `.razor`, `.cshtml`, `.xaml`, ...) under a mapped directory. eyedbg never reads a container's
 environment, command or arguments (it reads only the assembly name of a `dotnet X.dll` entrypoint
 and whether a command exists), and never runs `docker compose config`; its compose calls are
 `compose ps` and, for `launch` and `restore`, `compose up` for the services they act on.

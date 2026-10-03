@@ -269,6 +269,13 @@ as "rebuild the image (`docker compose build SERVICE`)"; a multi-targeted projec
 **D14 PDB paths.** The build's `PathMap` to `/src/` gives the same document paths as a
 Visual Studio-template image (`WORKDIR /src`, `COPY . .`), so a fast-mode session uses ADR 0020's
 default map `[{/src, realpath(working dir)}]`. `--map` with `launch` is refused (`INVALID_REQUEST`).
+`launch` and `restore` (and the daemon's `container.launch`) use the working directory and the files
+a container's labels name only when they corroborate each other (ADR 0020, D5: a regular
+`.yml`/`.yaml` file of `config_files` lies in the directory), and, when `--project-directory` or
+the first `-f` names the project's directory, when it is that directory (compose's own rule); a
+container made by plain `docker run` from an image that sets those labels is refused
+(`INVALID_REQUEST`). Without either flag compose found the project from the current directory,
+which eyedbg doesn't second-guess.
 Not chosen: host paths in the PDBs plus an identity map (netcoredbg on Linux would compare `C:\…`
 paths; the path map requires POSIX remotes).
 
@@ -306,7 +313,10 @@ service, in any state, carries `dev.izzat.eyedbg.fast.override` (`docker ps -a` 
 the project directory goes when none does. A `stage-…` directory lives for one run. `lock` (O_EXCL,
 stale after one hour) serialises runs per project. Deletion is confined to those eyedbg-named
 directories by `Lstat` and exact-name grammars: a symlinked or foreign name is left alone, and
-never followed.
+never followed. `restore` removes eyedbg's files for a project only when its engine listed at least
+one fast-mode container of it: `restore -p NAME` asks no `compose ps`, so against the wrong engine
+(another context or host, whose containers still mount the directory) it removes nothing and says
+which directory it kept.
 
 **D18 CLI.** `eyedbg compose launch [SERVICE...] [-f FILE]... [-p NAME] [--project-directory DIR]
 [--dotnet-project SERVICE=PATH]... [--env-file FILE]... [--bp LOC]... [--exceptions M]
@@ -345,8 +355,10 @@ the copy can already run code in that container). The copy survives a restart bu
   entrypoint and eyedbg's labels, never `environment`, `env_file`, `secrets`, `configs`,
   `healthcheck` or `ports`.
 * **Labels, as read back, are untrusted** (anyone who can edit a container's labels can edit
-  eyedbg's input): `dll`, `workdir` and `project` are re-validated at every use, and a launch
-  re-derives nothing from the request (D3).
+  eyedbg's input; an image's own `LABEL`s are copied onto its containers): `dll`, `workdir` and
+  `project` are re-validated at every use, a launch re-derives nothing from the request (D3), and
+  the compose directory and files the labels name are used only when they corroborate each other
+  and the command line (D14).
 * **Escaping fails closed.** MSBuild's and Roslyn's separators in a path are refused, not escaped;
   `$` in override strings is doubled; compose file lists come from labels, never from parsing YAML.
 * **Deletion and overwrite are confined** to eyedbg's per-project directory under its home by `Lstat`

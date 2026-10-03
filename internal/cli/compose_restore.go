@@ -27,7 +27,10 @@ terminated; an attached session is detached), then 'docker compose up -d --no-de
 --wait-timeout 180' recreates the named services only, with this shell's environment and --env-file files: anything the
 containers wrote to their own file systems outside volumes is lost, as when they entered fast mode. Dependents are never
 touched. Then eyedbg's files for the services it restored (the builds, and the override once no service is in fast mode)
-are removed, and nothing is launched. A service that isn't in fast mode is skipped ("not in fast mode"). Containers in
+are removed, and nothing is launched; when the engine lists no fast-mode container of the project at all (the stack
+may run on another DOCKER_CONTEXT or host, whose containers still mount those files) nothing is removed and the
+output names the directory. Like launch, restore recreates only from a compose directory its container's labels
+corroborate (a compose file of its files label lies in it, and it is the directory --project-directory or -f names). A service that isn't in fast mode is skipped ("not in fast mode"). Containers in
 any state are found, so a stopped fast-mode container is restored too; it is started as part of the recreate.
 
 The project is the one 'docker compose ps' shows for -f FILE (repeatable), --project-directory DIR and the current
