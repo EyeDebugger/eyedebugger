@@ -16,7 +16,8 @@ decisions are recorded in `docs/adr/`.
 - `internal/version/` — build metadata (ldflags / `debug.ReadBuildInfo`).
 - `internal/api/` — native JSON-RPC schema shared by the CLI and the extension.
 - `internal/daemon/` — daemon lifecycle, IPC, token auth.
-- `internal/session/` — session, lease, breakpoint ownership, event log, stop snapshot.
+- `internal/session/` — session, lease, breakpoint ownership, event log, stop snapshot; groups
+  (`group.wait`/`group.events`), per-container claims and the host↔container path map (ADRs 0020, 0021).
 - `internal/dap/` — DAP framing both ways (bounded reader): the client toward adapters (seq mapping,
   reverse requests) and the server side of editor connections.
 - `internal/dap/daptest/` — fake DAP adapter for tests (the test binary re-executes itself as it).
@@ -29,7 +30,12 @@ decisions are recorded in `docs/adr/`.
   kill); `internal/helper/helpertest/` is the fake helper (the test binary re-executes itself).
 - `internal/artifacts/` — the private dumps and traces directories (`<EYEDBG_HOME>/dumps`,
   `<EYEDBG_HOME>/traces`, 0700/0600): fresh names, pruning (7 days, newest 10; stale trace-summary
-  scratch files after 1 h), `--out` placement that never overwrites.
+  scratch files after 1 h), `--out` placement that never overwrites; and compose's fast-mode
+  builds (`<EYEDBG_HOME>/compose/<project>`: staging dirs, the mirror, a lock; ADR 0021).
+- `internal/container/` — docker for containers and compose (ADRs 0020, 0021): the engine (argv only,
+  grammar-checked names), inspect templates, the adapter tar and `docker cp`, `compose ps|up`, the
+  fast-mode override, `docker top`; `internal/container/containertest/` is the fake docker (the test
+  binary re-executes itself).
 - `internal/adapters/` — adapter manifests (schema, loader, trust check, templates), installer,
   Python and .NET runtimes; bundled manifests in `internal/adapters/manifests/`
   (`docs/adapter-manifests.md`).
@@ -43,10 +49,13 @@ decisions are recorded in `docs/adr/`.
   (not vendored here): when `SKILL.md` changes, refresh that copy at release (`docs/MAINTAINING.md`
   § Releasing, step 6).
 - `internal/e2e/` — CLI end-to-end tests driving the real `eyedbg`/`eyedbgd` binaries.
+- `internal/sitecheck/` — tests over `site/` (no competing debugger or IDE names, no em dashes or
+  tone words, the install prompt's copies in the README, `llms.txt` and `index.html` identical to
+  `site/install-prompt.txt`).
 - `extensions/vscode/` — the VS Code extension (TypeScript, pnpm, esbuild; ADR 0015): `src/core/`
   pure and unit-tested, `src/vscode/` the glue, `test/integration/` the suite in real VS Code.
 - `testdata/apps/` — sample debuggees for e2e tests (`dotnet/console`, `dotnet/breadth`, `dotnet/tests`,
-  `dotnet/xunit3`, `dotnet/mstest`, `python/basic`).
+  `dotnet/xunit3`, `dotnet/mstest`, `dotnet/compose` (a docker compose stack), `python/basic`).
 - `docs/adr/` — architecture decision records (MADR 4.0).
 
 ## Commands

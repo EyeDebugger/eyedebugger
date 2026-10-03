@@ -203,6 +203,15 @@ Attach: 'eyedbg attach dotnet --pid N' debugs a .NET program that is already run
 must have started, and it must be yours, not already under a debugger); an agent typically does
 this, then a human joins from VS Code with an attach launch.json ('eyedbg help vscode').
 
+Containers: 'eyedbg attach dotnet --container NAME' debugs a .NET process in a running Linux
+docker container with the container's own netcoredbg (install it for the image's architecture
+first: 'eyedbg adapters install netcoredbg --platform linux/arm64', or linux/amd64), and 'eyedbg
+compose attach|launch|wait|bp|stop' debugs every .NET service of a compose stack as one group (see
+'eyedbg help compose'). In verified runs, line breakpoints did not bind when attached to a Release
+image: 'eyedbg compose launch' builds Debug on this machine and launches the app under the debugger in its
+container (it recreates the containers it names, and the service runs only while its session
+does).
+
 Beyond stepping and variables, 'eyedbg help dotnet' covers runtime counters, heap dumps, thread
 captures and CPU traces, and the extension's own .NET views (Counters, Memory, Threads, CPU Trace)
 show them live while you join a session.`
@@ -211,6 +220,8 @@ const dotnetGuideExample = `  eyedbg start dotnet --bp Program.cs:12            
   eyedbg start dotnet --project src/Api/Api.csproj --env ASPNETCORE_URLS=http://localhost:5050
   eyedbg test dotnet Adds --bp 'CalculatorTests.cs@"Assert.Equal"'
   eyedbg attach dotnet --pid 4242
+  eyedbg attach dotnet --container myapp-producer-1         # a .NET process in a docker container
+  eyedbg compose attach                                     # every .NET service of the stack in ./
 
   -- launch.json: build and launch a .NET project, stop at the first line
   {

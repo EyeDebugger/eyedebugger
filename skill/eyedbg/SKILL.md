@@ -100,6 +100,23 @@ eyedbg stop                                       # always, when done
   `test` (MTP/xUnit v3/TUnit) session under either ends without one instead (read the output for
   the result). A VSTest `test` run keeps `dotnet test`'s own exit code either way.
 
+## .NET in docker containers
+
+- Needs docker. Once: `eyedbg adapters install netcoredbg --platform linux/arm64` (or `linux/amd64`:
+  the image's architecture). Then `eyedbg attach dotnet --container NAME`. Glibc images only (not
+  Alpine); verified on Linux containers (Docker Desktop on macOS, docker.io on Linux), not on
+  Windows hosts or podman.
+- A whole compose stack: `eyedbg compose attach` (each running .NET service, one session each),
+  `eyedbg compose bp add Orders.cs:42`, `eyedbg compose wait`, then the usual commands with the
+  answering `-s ID`, finally `eyedbg compose stop`. A stop freezes that whole service (callers time
+  out, its healthcheck turns unhealthy): keep stops short.
+- In verified runs, line breakpoints did not bind when attached to a Release image. `eyedbg compose
+  launch` builds Debug on the host and launches the app under the debugger in its container
+  (startup code too: `--bp`, `--stop-on-entry`). It recreates the named containers, and the service
+  runs only while its session does: after `eyedbg stop` it is down until `compose launch` or
+  `compose restore` (the way back); its output is in `eyedbg output`, not `docker logs`. Ask before
+  using it on a stack that isn't throwaway.
+
 ## Python
 
 - `eyedbg adapters install debugpy` once (or have debugpy in your environment).
