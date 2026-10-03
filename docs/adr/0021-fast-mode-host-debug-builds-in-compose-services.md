@@ -313,10 +313,11 @@ service, in any state, carries `dev.izzat.eyedbg.fast.override` (`docker ps -a` 
 the project directory goes when none does. A `stage-…` directory lives for one run. `lock` (O_EXCL,
 stale after one hour) serialises runs per project. Deletion is confined to those eyedbg-named
 directories by `Lstat` and exact-name grammars: a symlinked or foreign name is left alone, and
-never followed. `restore` removes eyedbg's files for a project only when its engine listed at least
-one fast-mode container of it: `restore -p NAME` asks no `compose ps`, so against the wrong engine
-(another context or host, whose containers still mount the directory) it removes nothing and says
-which directory it kept.
+never followed. `restore` removes eyedbg's files for a project only when its engine showed the project: it listed
+at least one fast-mode container of it, or `docker compose ps` (asked unless `-p NAME` is given)
+listed its containers. `restore -p NAME` against the wrong engine (another context or host,
+whose containers still mount the directory) therefore removes nothing and says which directory
+it kept.
 
 **D18 CLI.** `eyedbg compose launch [SERVICE...] [-f FILE]... [-p NAME] [--project-directory DIR]
 [--dotnet-project SERVICE=PATH]... [--env-file FILE]... [--bp LOC]... [--exceptions M]
