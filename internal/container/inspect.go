@@ -258,6 +258,16 @@ func parseInspect(out []byte) (Info, error) {
 		return Info{}, err
 	}
 
+	setComposeLabels(&i, project, service, wdir, configFiles)
+
+	i.FastMode = fastMode != ""
+
+	return i, nil
+}
+
+// setComposeLabels keeps the compose labels that pass their grammar and drops
+// the others.
+func setComposeLabels(i *Info, project, service, wdir, configFiles string) {
 	if api.CheckGroup(project) == nil {
 		i.Project = project
 	}
@@ -273,10 +283,6 @@ func parseInspect(out []byte) (Info, error) {
 	if _, err := splitConfigFiles(configFiles); err == nil {
 		i.configFiles = configFiles
 	}
-
-	i.FastMode = fastMode != ""
-
-	return i, nil
 }
 
 // parseHealth reads the healthcheck values: nil for none (null), or for a
