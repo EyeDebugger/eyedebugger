@@ -1,1 +1,3 @@
 group myapp: no service is in fast mode
+note: no fast-mode container of project myapp was found on docker context desk, so eyedbg's files for it were kept: /home/me/.eyedbg/compose/myapp
+If the project runs on another engine (another DOCKER_CONTEXT or DOCKER_HOST), its containers still mount them: run 'compose restore' there. If nothing runs, delete that directory.

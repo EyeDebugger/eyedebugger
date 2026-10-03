@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -95,9 +96,11 @@ type restoreRun struct {
 
 	names    []string
 	envFiles []string
+	opts     container.ComposeOptions
 	svcs     []*restoreSvc
-	// removed: eyedbg's files for the project are gone.
-	removed bool
+	// foundFast: the engine listed at least one fast-mode container of the
+	// project. removed: eyedbg's files for the project are gone.
+	foundFast, removed bool
 }
 
 // composeRestore is 'compose restore'.
@@ -127,7 +130,7 @@ func composeRestore(cmd *cobra.Command, info version.Info, g *globals, deps comp
 		return err
 	}
 
-	run := &restoreRun{stackRun: base, names: names, envFiles: f.envFiles}
+	run := &restoreRun{stackRun: base, names: names, envFiles: f.envFiles, opts: opts}
 
 	if err := run.takeLock(); err != nil {
 		return err
@@ -135,7 +138,13 @@ func composeRestore(cmd *cobra.Command, info version.Info, g *globals, deps comp
 	defer run.release()
 
 	runErr := run.execute(cmd.Context())
-	run.removed = run.prune(cmd.Context())
+
+	// Only a run that saw the project's fast-mode containers tidies eyedbg's
+	// files for it: one that saw none (the stack may be on another engine,
+	// whose containers still mount them) leaves them (docs/adr/0021, D17).
+	if run.foundFast {
+		run.removed = run.prune(cmd.Context())
+	}
 
 	if runErr != nil {
 		return runErr
@@ -143,7 +152,12 @@ func composeRestore(cmd *cobra.Command, info version.Info, g *globals, deps comp
 
 	members := run.members()
 
-	if err := writeComposeRestore(cmd.OutOrStdout(), project, members, run.removed, g.json); err != nil {
+	outcome := restoreOutcome{Removed: run.removed}
+	if !run.foundFast {
+		outcome.Kept, outcome.Engine = run.projectDir, engineWords(run.host, run.dockerContext)
+	}
+
+	if err := writeComposeRestore(cmd.OutOrStdout(), project, members, outcome, g.json); err != nil {
 		return err
 	}
 
@@ -173,6 +187,26 @@ func restoreProject(ctx context.Context, deps composeDeps, opts container.Compos
 	return oneProject(rows)
 }
 
+// engineWords names the docker engine a command talks to, for a message: its
+// DOCKER_HOST and DOCKER_CONTEXT, else docker's own default.
+func engineWords(host, dockerContext string) string {
+	var parts []string
+
+	if host != "" {
+		parts = append(parts, "DOCKER_HOST "+host)
+	}
+
+	if dockerContext != "" {
+		parts = append(parts, "docker context "+dockerContext)
+	}
+
+	if len(parts) == 0 {
+		return "this shell's default docker engine"
+	}
+
+	return strings.Join(parts, ", ")
+}
+
 // restoreFailure is the error of a restore that restored nothing: the first
 // failure's, else INVALID_REQUEST when everything was skipped. It has been
 // shown already.
@@ -200,6 +234,8 @@ func (r *restoreRun) execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	r.foundFast = len(fast) > 0
 
 	r.pick(fast)
 	r.inspect(ctx)
@@ -283,6 +319,14 @@ func (r *restoreRun) inspect(ctx context.Context) {
 			s.res.Error = jsonErr(api.NewError(api.CodeInvalidRequest, "container "+fi.Name+" doesn't record the compose files it was created from",
 				"'docker compose up -d --force-recreate "+s.service+"' recreates it from the files you name"))
 		default:
+			// The recreate runs in the directory its labels name: only when
+			// compose's files are really there.
+			if err := corroborateProject(&fi, r.opts); err != nil {
+				s.res.Error = jsonErr(err)
+
+				continue
+			}
+
 			s.fi, s.res.Container = fi, fi.Name
 		}
 	}
