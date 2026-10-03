@@ -60,6 +60,70 @@ code --install-extension eyedebugger_0.2.1_vscode.vsix   # from a GitHub release
 
 Full guide: [extensions/vscode/README.md](extensions/vscode/README.md), `eyedbg help vscode`.
 
+## Containers and docker compose (.NET)
+
+> Unreleased: on `main`, in the release after 0.2.1.
+
+Debug a .NET service in a running Linux docker container, or every .NET service of a compose stack
+as one group, with no edit to a Dockerfile or compose file. Needs docker (with the compose plugin
+for stacks).
+
+```sh
+eyedbg adapters install netcoredbg --platform linux/arm64   # once; linux/amd64 for amd64 images
+eyedbg attach dotnet --container myapp-producer-1 --bp Producer/Program.cs:32
+eyedbg compose attach                    # every running .NET service of the stack in ./, one session each
+eyedbg compose bp add Consumer/Program.cs:17
+eyedbg compose wait                      # blocks until whichever service stops
+eyedbg vars -s s-k3f9                    # then the ordinary commands, with that member's id
+eyedbg compose stop
+```
+
+eyedbg copies its pinned netcoredbg into the container (`docker cp`) and runs it there with
+`docker exec -i`, as the container's own user. Breakpoints, frames and source excerpts use host
+paths: `/src` in the container (where a Visual Studio-template Dockerfile builds) maps to the
+compose project directory; `--map REMOTE=LOCAL` changes that. eyedbg never reads a container's
+environment, command or arguments (it reads only the assembly name of a `dotnet X.dll` entrypoint
+and whether a command exists), and never runs `docker compose config`; its compose calls are
+`compose ps` and, for `launch` and `restore`, `compose up` for the services they act on.
+Docker access is the trust boundary: eyedbg attaches wherever your docker user may.
+
+**Release images.** In verified runs, line breakpoints did not bind when attached to an image built
+`-c Release` (pause and stacks work). Rebuild the image with `--build-arg BUILD_CONFIGURATION=Debug`
+(if its Dockerfile has the argument), or use fast mode, as Visual Studio and Rider do:
+
+```sh
+eyedbg compose launch producer --bp Producer/Program.cs:6   # builds Debug here, launches the app under the debugger in its container
+eyedbg compose restore                                       # back to the image as built
+```
+
+`compose launch` runs `dotnet publish -c Debug` on your machine (the .NET SDK must be installed),
+recreates the named containers once with an override eyedbg writes under its own home, mounts the
+build read-only at the container's working directory and launches the app inside it, with the
+container's own environment, user and working directory, so startup code can be stopped in
+(`--stop-on-entry`). Running it again after an edit rebuilds and relaunches in the same container,
+keeping your breakpoints.
+
+Limitations, stated plainly:
+
+- **Verified** on Linux containers with Docker Desktop 24.0.7 on macOS (arm64) and docker.io 26.1.5
+  on Debian (amd64). **Not verified**: Windows hosts, podman, rootless docker, remote engines,
+  emulated architectures. Images must be glibc-based (not Alpine) amd64 or arm64.
+- A stop freezes the whole service: its callers time out, its healthcheck turns unhealthy after about
+  `retries x interval + timeout`, and a Kafka consumer leaves its group after `max.poll.interval.ms`.
+  Keep stops short; snapshots say how long a service has been stopped.
+- Fast mode **recreates** the containers it names (anything they wrote outside volumes is lost; they
+  get this shell's compose environment). A fast-mode service **runs only while its eyedbg session
+  runs its app**: after `eyedbg stop` it is idle and unhealthy until the next `compose launch` or
+  `compose restore`. Its output is in `eyedbg output` and `compose events --kind output`, not in
+  `docker compose logs`, and its app directory is read-only.
+- Fast mode refuses, with the reason, a service with a `command:` or image CMD, an entrypoint that
+  isn't exec-form `["dotnet", "X.dll"]`, or an image without `tail` (chiseled, distroless).
+- If a client dies without detaching (a killed daemon), netcoredbg and the frozen program stay in the
+  container; `docker restart NAME` clears them.
+
+Details: `eyedbg help compose`, [ADR 0020](docs/adr/0020-debug-services-in-containers-and-compose-groups.md)
+and [ADR 0021](docs/adr/0021-fast-mode-host-debug-builds-in-compose-services.md).
+
 ## Install
 
 Give this prompt to your AI agent and it installs eyedbg for you:
