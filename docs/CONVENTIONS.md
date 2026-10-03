@@ -111,7 +111,13 @@ found skips naming why); `drivers/generic`
   fails the test directly, the same "never skip silently" rule below. `drivers/generic`'s `TestGo*`
   (go, over schema 1's connect transport) need Go on PATH and Delve (`EYEDBG_DLV` or PATH, or
   `adapters install delve`); `TestGoManagedInstall` also needs `EYEDBG_E2E_NETWORK=1` (it downloads
-  Delve into a temporary data directory). `requireE2E`/`require`
+  Delve into a temporary data directory). `internal/e2e`'s `TestCompose*` (the compose fixture,
+  `testdata/apps/dotnet/compose`, built and run by a real docker engine) are a second opt-in on top
+  of `EYEDBG_E2E=1`: `EYEDBG_E2E_DOCKER=1` (unset, they skip naming it; set with the docker CLI, its
+  compose plugin or a Linux engine missing, they fail). They need network access (base images,
+  NuGet, netcoredbg's release download); `TestComposeLaunch` also needs the .NET SDK on the host.
+  Each test builds its own `eyedbg-e2e-<8 hex>` project and removes only that, by name
+  (`down --rmi local --volumes`), never a prune. `requireE2E`/`require`
   closures are the only skip point: without `EYEDBG_E2E=1` the test skips; with it set and the
   adapter missing or broken, it fails, never skips silently. `EYEDBG_E2E_LANGS` (comma-separated
   language names) narrows which languages a real-adapter run exercises: unset runs every language;
