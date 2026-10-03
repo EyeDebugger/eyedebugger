@@ -190,6 +190,14 @@ replaces it). An example, the bundled sharpdbg:
 | `root` | required | the archive directory that becomes the install directory; `""` for the whole archive |
 | `size` | | bytes; the download stops beyond it (1 GiB without it) |
 
+`eyedbg adapters install NAME --platform OS/ARCH` fetches the download for another platform than
+this machine's (a platform key above, e.g. `linux/arm64`; an adapter with no download for it
+fails as for the host). It installs under `<data dir>/_platform/<os>-<arch>/<name>/<version>`
+(a leading `_` can't start a manifest `name`, so it can't collide with one); the host's own
+install is untouched and eyedbg never runs that copy on this machine. It exists so the pinned
+netcoredbg for a Linux container can be fetched on a macOS or Windows host: `eyedbg attach dotnet
+--container` and `eyedbg compose` stream it into the container (docs/adr/0020, 0021).
+
 `language`: `name` (required, like `name`), `builtin` (a Go driver serves it: then no `options`,
 `launch`, `attach`, `exceptions` or `evalGuard`), `extensions` (`[".py"]`) and `markers` (file names
 or globs like `pyproject.toml`, `*.csproj`). `extensions` and `markers` are shown by `adapters ls
