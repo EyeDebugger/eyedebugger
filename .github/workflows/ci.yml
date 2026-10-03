@@ -163,10 +163,12 @@ jobs:
           # entries exclude c, cpp and rust. Delve publishes a windows/amd64 build (so
           # windows-latest adds go, exercising the connect transport's AF_UNIX socket on
           # Windows for the first time) but none for windows/arm64, so windows-11-arm
-          # drops go too.
+          # drops go too. docker is EYEDBG_E2E_DOCKER: the docker e2e (docs/adr/0020, 0021)
+          # runs on the two Linux entries only: Windows runners can't run Linux containers
+          # and macOS runners have no docker.
           full='[
-            {"os":"ubuntu-latest","netcoredbg":true,"race":true,"langs":""},
-            {"os":"ubuntu-24.04-arm","netcoredbg":true,"race":true,"langs":""},
+            {"os":"ubuntu-latest","netcoredbg":true,"race":true,"langs":"","docker":true},
+            {"os":"ubuntu-24.04-arm","netcoredbg":true,"race":true,"langs":"","docker":true},
             {"os":"macos-latest","netcoredbg":true,"race":true,"langs":""},
             {"os":"windows-latest","netcoredbg":true,"race":true,"langs":"python,dotnet,go"},
             {"os":"macos-15-intel","netcoredbg":false,"race":true,"langs":""},
@@ -195,6 +197,7 @@ jobs:
       EYEDBG_E2E: "1"
       EYEDBG_E2E_NETWORK: "1"
       EYEDBG_E2E_LANGS: ${{ matrix.langs }}
+      EYEDBG_E2E_DOCKER: ${{ matrix.docker && '1' || '' }}
       E2E_COUNT: ${{ inputs.e2e-count || '1' }}
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
