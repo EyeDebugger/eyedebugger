@@ -232,15 +232,21 @@ Documented consequences of a pause: HTTP callers time out, the healthcheck fails
 `unhealthyAfter`, Kafka consumers leave their group after `max.poll.interval.ms`.
 
 **What `container.attach` reads.** One `docker inspect --type container --format <template>` whose
-template emits only: id, name, platform, image, `.Path`, the running / paused / restarting flags,
-`.HostConfig.Init`, the healthcheck's `Interval`, `Timeout`, `Retries` and whether `Test` is
-`NONE` (never its text; read with `index .Config "Healthcheck"` so a container without one isn't an
-error), and the compose labels `project`, `service` and `project.working_dir`. Never `.Config.Env`,
-`.Args`, `.Config.Cmd`, entrypoint arguments or healthcheck commands, and never `docker compose
-config` (which inlines `env_file` values into `environment`, with or without `--no-interpolate`, on
-compose 2.23). The one compose call is `compose ps --format json`, parsed for `ID`, `Name`,
-`Service`, `Project` and `State` only; its other fields (`Command`, `Labels`, `Ports`, …) are never
-stored or shown.
+template emits only (13 values): id, name, image id, `.Path`, the running / paused / restarting
+flags, `.HostConfig.Init`, the healthcheck's `Interval`, `Timeout`, `Retries` and whether `Test` is
+`NONE` (never its text), the compose labels `project`, `service` and `project.working_dir`, and
+eyedbg's own fast-mode label (ADR 0021: an attach refuses a container that carries it). Docker's
+template engine fails on a missing key, and `.HostConfig.Init` is absent on a container without
+`init`, as is a container's `Healthcheck`, so every optional key is read with `index` (`index
+.HostConfig "Init"`, `index .Config "Healthcheck"`): a container without them isn't an error.
+`.Platform` is **not** read: it is only `"linux"`; the architecture comes from `docker image
+inspect --format '{{.Os}}/{{.Architecture}}/{{.Variant}}'` of the image id the inspect returned.
+Never `.Config.Env`, `.Args`, `.Config.Cmd`, entrypoint arguments or healthcheck commands, and never
+`docker compose config` (which inlines `env_file` values into `environment`, with or without
+`--no-interpolate`, on compose 2.23). The one compose call is `compose ps --format json`, parsed
+for `ID`, `Name`, `Service`, `Project` and `State` only (on compose 2.23 the project comes from its
+`Labels` field, matched on the exact `com.docker.compose.project` key; no other label is kept); its
+other fields (`Command`, `Ports`, …) are never stored or shown.
 
 ### Security
 
