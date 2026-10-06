@@ -113,7 +113,8 @@ func TestMirrorCopiesATree(t *testing.T) {
 	got := snapshot(t, dst)
 
 	if runtime.GOOS == "windows" {
-		for _, p := range []string{"App.dll", "run.sh", filepath.Join("runtimes", "linux-x64", "native", "lib.so"), "empty", filepath.Join("empty", "nested")} {
+		// snapshot's keys are fs.WalkDir's: slash-separated on every OS.
+		for _, p := range []string{"App.dll", "run.sh", "runtimes/linux-x64/native/lib.so", "empty", "empty/nested"} {
 			if _, ok := got[p]; !ok {
 				t.Errorf("%s missing: %v", p, got)
 			}
