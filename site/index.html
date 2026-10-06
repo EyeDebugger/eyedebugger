@@ -1559,6 +1559,93 @@ threads 11, 12, 13 (3 threads, background, threadpool):
   </div>
 </section>
 
+<!-- ============ containers ============ -->
+<section id="containers">
+  <div class="wrap">
+    <div class="sec-head" data-reveal>
+      <span class="eyebrow">Docker and compose</span>
+      <h2>Every .NET service in the stack, <span class="grad">debugged as one group.</span></h2>
+      <p class="lede">From the release after 0.2.1, <code>eyedbg compose</code> attaches to the .NET services of a running docker compose stack, with no change to your Dockerfile or compose files. Breakpoints go in by host path, <code>compose wait</code> tells you which service stopped, and the ordinary commands take it from there. For a single container, <code>eyedbg attach dotnet --container NAME</code>.</p>
+    </div>
+    <div class="diag">
+      <div class="qs" role="tablist" aria-label="Compose debugging" aria-orientation="vertical" data-reveal>
+        <button class="q" type="button" role="tab" id="q-c-attach" aria-controls="d-c-attach" aria-selected="true">
+          <span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="8" y="14" width="8" height="7" rx="1.5"/></svg></span>
+          <span><b>Attach to the whole stack</b><span>One session per service, one group, one breakpoint set for all of them.</span></span>
+        </button>
+        <button class="q" type="button" role="tab" id="q-c-wait" aria-controls="d-c-wait" aria-selected="false" tabindex="-1">
+          <span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>
+          <span><b>Which service stopped?</b><span>Block until any of them stops, then see where and for how long.</span></span>
+        </button>
+        <button class="q" type="button" role="tab" id="q-c-launch" aria-controls="d-c-launch" aria-selected="false" tabindex="-1">
+          <span class="ic"><svg viewBox="0 0 24 24"><path d="M5 3l14 9-14 9z"/></svg></span>
+          <span><b>Stop in startup code</b><span>Build Debug on your machine and launch the app under the debugger, in its container.</span></span>
+        </button>
+        <button class="q" type="button" role="tab" id="q-c-restore" aria-controls="d-c-restore" aria-selected="false" tabindex="-1">
+          <span class="ic"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v4h4"/></svg></span>
+          <span><b>Put it back</b><span>Recreate the services as built when you are done.</span></span>
+        </button>
+      </div>
+      <div data-reveal>
+        <div class="panel" role="tabpanel" id="d-c-attach" aria-labelledby="q-c-attach">
+          <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg compose attach --bp Program.cs:42
+group myapp: attached to 2 of 4 service(s)
+  web       s-k3f9  attached  container myapp-web-1; its healthcheck fails after 18s of a stop
+  consumer  s-m2n4  attached  container myapp-consumer-1
+  db        -       skipped   pid 1 runs postgres
+  api       -       failed    container myapp-api-1 is not running [ATTACH_FAILED] (start it first)
+path map: /src=/work/app
+breakpoint Program.cs:42:
+  web       bp 1 Program.cs:42 verified
+  consumer  bp 2 Program.cs:44 (requested line 42) pending: module not loaded
+next: eyedbg compose wait -g myapp  |  eyedbg compose bp add FILE:LINE -g myapp  |  eyedbg compose stop -g myapp</code></pre></div>
+        </div>
+        <div class="panel" role="tabpanel" id="d-c-wait" aria-labelledby="q-c-wait" hidden>
+          <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg compose wait
+group myapp: s-k3f9 (web) stopped: breakpoint
+session s-k3f9 (dotnet, netcoredbg; service web, container myapp-web-1, group myapp) stopped: breakpoint, thread 4242 (stopped 5s)
+  at Program.&lt;Main&gt;$() Program.cs:4
+    3 | {
+  &gt; 4 |     total += i;
+    5 |     Console.WriteLine(total);
+also stopped:
+  consumer (s-m2n4)  pause      stopped 12s
+  s-q8x1             exception  stopped 3m0s
+to act on it: eyedbg vars -s s-k3f9, eyedbg continue -s s-k3f9; 'eyedbg compose wait --new -g myapp' waits for the next stop</code></pre></div>
+        </div>
+        <div class="panel" role="tabpanel" id="d-c-launch" aria-labelledby="q-c-launch" hidden>
+          <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg compose launch --bp Program.cs:6
+group myapp: launched 2 of 3 service(s)
+  producer  s-k3f9  launched  built Producer/Producer.csproj in 2.1s -&gt; recreated -&gt; launched; container myapp-producer-1; its healthcheck fails after 18s of a stop
+  consumer  s-m2n4  launched  built Consumer/Consumer.csproj in 2.1s -&gt; recreated -&gt; launched; container myapp-consumer-1; its healthcheck fails after 18s of a stop
+  db        -       skipped   its entrypoint isn't exec-form 'dotnet X.dll'
+path map: /src=/work/app
+breakpoint Program.cs:6:
+  producer  bp 1 Program.cs:6 verified
+  consumer  bp 1 Program.cs:6 pending: module not loaded
+override: /home/me/.eyedbg/compose/myapp/override.yml
+build log: /home/me/.eyedbg/compose/myapp/build.log
+undo with: eyedbg compose restore producer consumer
+next: eyedbg compose wait -g myapp  |  eyedbg compose bp add FILE:LINE -g myapp  |  eyedbg compose events --kind output -g myapp  |  eyedbg compose stop -g myapp</code></pre></div>
+        </div>
+        <div class="panel" role="tabpanel" id="d-c-restore" aria-labelledby="q-c-restore" hidden>
+          <div class="code" data-lang="term"><div class="code-bar"><span class="lang">Terminal</span></div><pre><code>$ eyedbg compose restore
+group myapp: restored 2 of 4 service(s)
+  producer  restored  recreated as built; ended 1 session (s-k3f9)
+  consumer  restored  recreated as built
+  db        skipped   not in fast mode
+  api       failed    docker compose up failed: container myapp-producer-1 is unhealthy [ATTACH_FAILED] (see 'docker compose ps')
+note: recreated as built, with this shell's compose environment (variables and --env-file files); whatever the old containers wrote outside volumes is gone.</code></pre></div>
+        </div>
+        <div class="note">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
+          <span>A stop freezes the whole service, so keep stops short. eyedbg never reads a container's environment, command or arguments, and won't build a project it finds in a folder the stack's containers can write to. Verified on Docker Desktop on macOS and docker.io on Linux; Windows hosts, podman and remote engines are not verified. <code>eyedbg help compose</code> has the details.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ============ built for agents ============ -->
 <section id="agents">
   <div class="wrap">
@@ -1695,6 +1782,7 @@ hint: ask human:alex to run 'eyedbg lease grant agent'; 'eyedbg events --wait --
           <li><a href="#install">Install</a></li>
           <li><a href="#features">Features</a></li>
           <li><a href="#dotnet">.NET diagnostics</a></li>
+          <li><a href="#containers">Docker and compose</a></li>
         </ul>
       </div>
       <div>
