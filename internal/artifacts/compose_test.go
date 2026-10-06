@@ -7,8 +7,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -787,6 +789,176 @@ func TestLockStaleness(t *testing.T) {
 	entries, _ := os.ReadDir(pd)
 	if len(entries) != 0 {
 		t.Errorf("leftovers: %v", entries)
+	}
+}
+
+// TestLockIdentityIsContent pins what tells one lock from another: what it
+// holds, not its file identity. A lock rewritten in place keeps its inode,
+// as a lock taken over may get its predecessor's (ext4 reuses a freed inode
+// at once), and must not be removed by the first holder's unlock.
+func TestLockIdentityIsContent(t *testing.T) {
+	t.Parallel()
+
+	pd := realTemp(t)
+	path := filepath.Join(pd, lockName)
+
+	unlock, err := Lock(pd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	line := mustRead(t, path)
+	if !regexp.MustCompile(`^\d+ [0-9a-f]{32}\n$`).MatchString(line) {
+		t.Fatalf("lock content = %q, want \"<pid> <token>\\n\"", line)
+	}
+
+	// Another run's lock in the same file (the inode stays).
+	other := "1 " + strings.Repeat("ab", 16) + "\n"
+	if err := os.WriteFile(path, []byte(other), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	unlock()
+
+	if !exists(path) || mustRead(t, path) != other {
+		t.Fatal("unlock removed a lock that isn't its own")
+	}
+
+	if entries, _ := os.ReadDir(pd); len(entries) != 1 {
+		t.Errorf("leftovers: %v", entries)
+	}
+
+	// Two runs' tokens differ.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	again, err := Lock(pd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again()
+
+	if mustRead(t, path) == line {
+		t.Error("two locks hold the same line")
+	}
+}
+
+// TestLockTakeover covers which stale locks are taken over: only a
+// complete lock line, which is what identifies the lock being removed.
+func TestLockTakeover(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		link    bool // a symlink instead of a file
+		taken   bool
+	}{
+		{name: "this version's", content: "42 " + strings.Repeat("0f", 16) + "\n", taken: true},
+		{name: "an older version's pid only", content: "42\n", taken: true},
+		{name: "empty (a run died writing it)", content: ""},
+		{name: "unfinished line", content: "42 0f0f"},
+		{name: "two lines", content: "42\n43\n"},
+		{name: "too long", content: strings.Repeat("x", lockReadMax) + "\n"},
+		{name: "a symlink", link: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			pd := realTemp(t)
+			path := filepath.Join(pd, lockName)
+
+			if tt.link {
+				target := filepath.Join(realTemp(t), "target")
+				writeFile(t, target, "42\n")
+				symlink(t, target, path)
+			} else {
+				writeFile(t, path, tt.content)
+			}
+
+			checkTakeover(t, pd, tt.content, tt.taken)
+		})
+	}
+}
+
+// checkTakeover takes pd's lock when every lock is stale, and checks it was
+// taken over or not, as taken says.
+func checkTakeover(t *testing.T, pd, content string, taken bool) {
+	t.Helper()
+
+	path := filepath.Join(pd, lockName)
+
+	// Every lock in pd is stale by then (a symlink's own times can't be set
+	// portably).
+	unlock, err := lock(pd, time.Now().Add(2*LockMaxAge))
+	if !taken {
+		if err == nil {
+			unlock()
+			t.Fatal("taken over")
+		}
+
+		if !errors.Is(err, ErrLocked) {
+			t.Fatalf("lock = %v, want ErrLocked", err)
+		}
+
+		if !exists(path) {
+			t.Error("the lock was removed")
+		}
+
+		return
+	}
+
+	if err != nil {
+		t.Fatalf("not taken over: %v", err)
+	}
+
+	if mustRead(t, path) == content {
+		t.Error("the stale lock is still there")
+	}
+
+	unlock()
+
+	if entries, _ := os.ReadDir(pd); len(entries) != 0 {
+		t.Errorf("leftovers: %v", entries)
+	}
+}
+
+// TestRemoveLockChecksWhatItMoves covers removeLock's checks: a lock that
+// doesn't hold what is wanted is left in place, untouched.
+func TestRemoveLockChecksWhatItMoves(t *testing.T) {
+	t.Parallel()
+
+	pd := realTemp(t)
+	path := filepath.Join(pd, lockName)
+	writeFile(t, path, "1 aa\n")
+
+	root, err := os.OpenRoot(pd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+
+	if removeLock(root, []byte("1 bb\n")) {
+		t.Fatal("removed a lock holding something else")
+	}
+
+	if mustRead(t, path) != "1 aa\n" {
+		t.Fatal("the lock changed")
+	}
+
+	if entries, _ := os.ReadDir(pd); len(entries) != 1 {
+		t.Errorf("leftovers: %v", entries)
+	}
+
+	if !removeLock(root, []byte("1 aa\n")) || exists(path) {
+		t.Fatal("the matching lock was not removed")
+	}
+
+	if removeLock(root, []byte("1 aa\n")) {
+		t.Error("removed a lock that isn't there")
 	}
 }
 
