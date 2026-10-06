@@ -1,4 +1,4 @@
-web       s-k3f9  bp 3 Producer/Program.cs:42 if i > 3 verified
-consumer  s-m2n4  bp 1 Producer/Program.cs:44 (requested line 42) pending: module not loaded
+web       s-k3f9  bp 3 Program.cs:42 if i > 3 verified
+consumer  s-m2n4  bp 1 Program.cs:44 (requested line 42) pending: module not loaded
 db        s-q8x1  skipped: its file is outside this service's path map
 s-z0z0    s-z0z0  failed: the lease is held by human:ijat [LEASE_HELD] (ask for it)

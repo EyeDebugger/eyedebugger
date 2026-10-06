@@ -45,17 +45,17 @@ func TestComposeAttachRendering(t *testing.T) {
 	consumer.State, consumer.Stop, consumer.StoppedAt = api.StateRunning, nil, nil
 	consumer.Container.Map = []api.PathMapping{{Remote: "/app", Local: "/work/other"}}
 
-	bpVerified := &api.Breakpoint{ID: 1, Owner: "agent", File: "/work/app/Producer/Program.cs", RequestedLine: 42, Line: 42, Verified: true}
-	bpPending := &api.Breakpoint{ID: 2, Owner: "agent", File: "/work/app/Producer/Program.cs", RequestedLine: 42, Line: 44, Message: "module not loaded"}
+	bpVerified := &api.Breakpoint{ID: 1, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 42, Line: 42, Verified: true}
+	bpPending := &api.Breakpoint{ID: 2, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 42, Line: 44, Message: "module not loaded"}
 	boom := api.NewError(api.CodeAttachFailed, "container myapp-api-1 is not running", "start it first")
 	skip := "pid 1 runs postgres"
 
 	shared := []attachedMember{
 		{Service: "web", Container: "myapp-web-1", Session: &web, Breakpoints: []bpOutcome{
-			{Location: "Producer/Program.cs:42", Breakpoint: bpVerified}, {Location: "Orders.cs:9", Skipped: "its file is outside this service's path map"},
+			{Location: "Program.cs:42", Breakpoint: bpVerified}, {Location: "Orders.cs:9", Skipped: "its file is outside this service's path map"},
 		}},
 		{Service: "consumer", Container: "myapp-consumer-1", Session: &consumer, Breakpoints: []bpOutcome{
-			{Location: "Producer/Program.cs:42", Breakpoint: bpPending}, {Location: "Orders.cs:9", Error: boom},
+			{Location: "Program.cs:42", Breakpoint: bpPending}, {Location: "Orders.cs:9", Error: boom},
 		}},
 		{Service: "db", Container: "myapp-db-1", Skipped: skip},
 		{Service: "api", Container: "myapp-api-1", Error: boom},
@@ -186,15 +186,15 @@ func TestComposeEventsRendering(t *testing.T) {
 func TestComposeBreakpointAndStopRendering(t *testing.T) {
 	t.Parallel()
 
-	bp := &api.Breakpoint{ID: 3, Owner: "agent", File: "/work/app/Producer/Program.cs", RequestedLine: 42, Line: 42, Verified: true, Condition: "i > 3"}
-	moved := &api.Breakpoint{ID: 1, Owner: "agent", File: "/work/app/Producer/Program.cs", RequestedLine: 42, Line: 44, Message: "module not loaded"}
+	bp := &api.Breakpoint{ID: 3, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 42, Line: 42, Verified: true, Condition: "i > 3"}
+	moved := &api.Breakpoint{ID: 1, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 42, Line: 44, Message: "module not loaded"}
 	boom := api.NewError(api.CodeLeaseHeld, "the lease is held by human:ijat", "ask for it")
 
 	adds := []bpMember{
-		{Service: "web", SessionID: "s-k3f9", bpOutcome: bpOutcome{Location: "Producer/Program.cs:42", Breakpoint: bp}},
-		{Service: "consumer", SessionID: "s-m2n4", bpOutcome: bpOutcome{Location: "Producer/Program.cs:42", Breakpoint: moved}},
-		{Service: "db", SessionID: "s-q8x1", bpOutcome: bpOutcome{Location: "Producer/Program.cs:42", Skipped: "its file is outside this service's path map"}},
-		{SessionID: "s-z0z0", bpOutcome: bpOutcome{Location: "Producer/Program.cs:42", Error: boom}},
+		{Service: "web", SessionID: "s-k3f9", bpOutcome: bpOutcome{Location: "Program.cs:42", Breakpoint: bp}},
+		{Service: "consumer", SessionID: "s-m2n4", bpOutcome: bpOutcome{Location: "Program.cs:42", Breakpoint: moved}},
+		{Service: "db", SessionID: "s-q8x1", bpOutcome: bpOutcome{Location: "Program.cs:42", Skipped: "its file is outside this service's path map"}},
+		{SessionID: "s-z0z0", bpOutcome: bpOutcome{Location: "Program.cs:42", Error: boom}},
 	}
 	lists := []bpListMember{
 		{Service: "web", SessionID: "s-k3f9", Breakpoints: []api.Breakpoint{*bp, *moved}},

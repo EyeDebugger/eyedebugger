@@ -31,19 +31,19 @@ const (
 func TestComposeLaunchRendering(t *testing.T) {
 	t.Parallel()
 
-	bp := &api.Breakpoint{ID: 1, Owner: "agent", File: "/work/app/Producer/Program.cs", RequestedLine: 6, Line: 6, Verified: true}
-	pending := &api.Breakpoint{ID: 1, Owner: "agent", File: "/work/app/Producer/Program.cs", RequestedLine: 6, Line: 6, Message: "module not loaded"}
+	bp := &api.Breakpoint{ID: 1, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 6, Line: 6, Verified: true}
+	pending := &api.Breakpoint{ID: 1, Owner: "agent", File: "/work/app/Program.cs", RequestedLine: 6, Line: 6, Message: "module not loaded"}
 	boom := api.NewError(api.CodeBuildFailed, "dotnet publish failed: see the build log", "error CS1002 in Program.cs(12)")
 	lease := api.NewError(api.CodeLeaseHeld, "the lease is held by human:bob", "ask for it")
 
 	entered := []launchedMember{
 		{
-			attachedMember: attachedMember{Service: "producer", Container: "myapp-producer-1", Session: launchedSession("s-k3f9", "producer"), Breakpoints: []bpOutcome{{Location: "Producer/Program.cs:6", Breakpoint: bp}}},
+			attachedMember: attachedMember{Service: "producer", Container: "myapp-producer-1", Session: launchedSession("s-k3f9", "producer"), Breakpoints: []bpOutcome{{Location: "Program.cs:6", Breakpoint: bp}}},
 			Project:        "Producer/Producer.csproj",
 			Fast:           &launchFast{Project: "Producer/Producer.csproj", BuildLog: renderBuildLog, Override: renderOverride, Recreated: true, DurationMs: 2140},
 		},
 		{
-			attachedMember: attachedMember{Service: "consumer", Container: "myapp-consumer-1", Session: launchedSession("s-m2n4", "consumer"), Breakpoints: []bpOutcome{{Location: "Producer/Program.cs:6", Breakpoint: pending}}},
+			attachedMember: attachedMember{Service: "consumer", Container: "myapp-consumer-1", Session: launchedSession("s-m2n4", "consumer"), Breakpoints: []bpOutcome{{Location: "Program.cs:6", Breakpoint: pending}}},
 			Project:        "Consumer/Consumer.csproj",
 			Fast:           &launchFast{Project: "Consumer/Consumer.csproj", BuildLog: renderBuildLog, Override: renderOverride, Recreated: true, DurationMs: 2140},
 		},
