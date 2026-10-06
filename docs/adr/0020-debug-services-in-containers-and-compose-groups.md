@@ -272,7 +272,8 @@ other fields (`Command`, `Ports`, …) are never stored or shown.
 * **Compose labels are not trusted alone.** A container's labels include its image's own `LABEL`s,
   so `com.docker.compose.project.working_dir` can be chosen by an image author. The default path
   map uses it only when a compose file named by `config_files` is a regular file inside that
-  directory (D5); `--map` is the user's own word.
+  directory (D5); `--map` is the user's own word. The same rule governs eyedbg's own labels
+  (ADR 0021, D12): any container label is untrusted input unless eyedbg-owned state corroborates it.
 * **Secrets.** eyedbg selects inspect fields through `--format` and so never receives the
   environment, `Cmd` or entrypoint arguments, and it runs no `compose config`. Docker's stderr is bounded (4 KiB)
   and stripped of control characters before it reaches an error; stdout of inspect/probe calls is

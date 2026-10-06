@@ -40,7 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a fast-mode service runs only while its eyedbg session runs its app (`stop` leaves it idle and
   unhealthy; its output is in `eyedbg output` and `compose events --kind output`, not `docker
   compose logs`). Services with a `command:` or CMD, a non-exec-form entrypoint or no `tail` in the
-  image are refused, with the reason.
+  image are refused, with the reason. A project file a container could have written (under a
+  read-write bind mount of any container of the stack) is never found and built unasked, since a
+  build runs its code on the host: name it with `--dotnet-project SERVICE=PATH`; each project is
+  printed on stderr before its build (and is `project` in `--json`); a container's own fast-mode
+  labels count only when eyedbg's override file for the project records them. A stack whose compose
+  files lie outside its `--project-directory` is not supported (the refusal says what to do).
 - New daemon methods `container.attach`, `container.launch`, `group.wait` and `group.events`; sessions
   report `group`, `container` and `stoppedAt` (additive). `version --json` lists the features
   `container` and `compose-launch`. No `ProtocolVersion` or JSON `schema` change; an older daemon

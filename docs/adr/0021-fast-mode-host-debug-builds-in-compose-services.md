@@ -227,7 +227,8 @@ bit), makes directories 0755, removes destination entries that aren't in the sta
 symlinks with `os.Remove` (links are never followed), real directories with `os.RemoveAll` of that
 exact joined path — and walks the source first, so anything but regular files and directories fails
 **before** any change; the destination must already be a real directory. A container is recreated
-only on entry, or when its labels name another override path or label-format version. `--no-build`
+only on entry: one whose fast-mode labels this project's override file doesn't record (another
+override path, a moved home, an image's own `LABEL`s) is judged as built (D12). `--no-build`
 relaunches from the service directory as it is. Not chosen: publishing straight into the mounted
 directory (overwriting a running app's mapped assemblies can crash it, and a failed build leaves a
 half-copied app).
@@ -245,10 +246,40 @@ eyedbg's `dev.izzat.eyedbg.fast.{version,override,dll,workdir,project}`. Never `
 `^(\./)?[A-Za-z0-9_.-]+\.dll$`. An entrypoint of any other shape — shell wrappers, apphosts, an IDE's
 debugger worker — is refused. The .NET project is the unique `<name>.csproj|.fsproj|.vbproj`
 (name = the DLL without `.dll`) under the compose working directory (realpath; the walk skips
-dot-directories, `bin`, `obj` and `node_modules`, follows no symlinks and stops at 50 000 entries),
-else `--dotnet-project SERVICE=PATH`, which must resolve inside it. **eyedbg's own labels are read
-back as untrusted input**: values are validated by the grammars above (control characters refused,
-paths absolute or confined), exactly as if a caller had typed them.
+dot-directories, `bin`, `obj` and `node_modules`, follows no symlinks and stops at 50 000 entries)
+**that no container of the stack can write**, else `--dotnet-project SERVICE=PATH`, which must resolve
+inside the compose directory.
+
+*Writable mounts.* Building a project runs its code on the host, so a project file a container
+could have planted is never found. Per run (once, and only when a search is needed) eyedbg asks docker
+for the host `Source` of every read-write **bind** mount of every container of the project in any
+state (`docker ps -a --filter label=com.docker.compose.project=P`, then one `docker inspect` whose
+template names only `.Mounts[].Source` of `RW` bind mounts; a pinned template, no environment or
+arguments). A match at or under a source is not counted among the matches; when it is the only match,
+the service is refused (`INVALID_REQUEST`, skipped without names) naming `--dotnet-project`; when the
+compose directory itself is at or under a source, no search is made. A path is at or under a source
+when it, or an ancestor up to the compose directory, is the same file as the source (`os.SameFile`),
+so symlinks and letter case on a case-insensitive file system don't matter; a source that doesn't
+exist on this host is compared by its path. A **read-only** mount can't be written by its container
+and stays searchable (named volumes aren't bind mounts here). A project named with
+`--dotnet-project` is built even under a writable mount: the user chose that file. A project a
+corroborated label remembers (below) was accepted by an earlier run and isn't searched again. Not
+analysed: a project outside the mounts whose `ProjectReference`s, imports or globs reach into one.
+
+*Untrusted labels.* **Any container label is untrusted input unless eyedbg-owned state
+corroborates it.** The compose directory is corroborated by the compose files in it (D14);
+eyedbg's own `dev.izzat.eyedbg.fast.*` labels only when the override file in eyedbg's 0700 project
+directory (`<home>/compose/<project>/override.yml`, a regular file with eyedbg's header, read back
+bounded) records the same `version` and `override` for that service, at that file's own path, and,
+for the label format this code reads, the same `dll`, `workdir` and `project`. A container whose
+labels fail that is judged as built (its labels decide nothing, so the project comes from the search
+or the flag, and an idle container is refused saying its labels were ignored); the staying services
+an override is rewritten with come from corroborated containers only. Values are also validated by
+the grammars above (control characters refused, paths absolute or confined), exactly as if a caller
+had typed them.
+
+Each service's project (relative to the compose directory) is printed on stderr before its build
+starts, and is `project` of the member in `--json` (additive, also for a failed build).
 
 **D13 Host build.** The CLI runs `dotnet publish <project> -c Debug -o <stage>/<service>
 --artifacts-path <home>/compose/<project>/artifacts -p:UseAppHost=false -p:DebugType=portable
@@ -275,7 +306,11 @@ a container's labels name only when they corroborate each other (ADR 0020, D5: a
 the first `-f` names the project's directory, when it is that directory (compose's own rule); a
 container made by plain `docker run` from an image that sets those labels is refused
 (`INVALID_REQUEST`). Without either flag compose found the project from the current directory,
-which eyedbg doesn't second-guess.
+which eyedbg doesn't second-guess. **Not supported:** compose files outside the project directory
+(`--project-directory DIR` with `-f FILE` outside DIR): eyedbg can't tell that layout from a foreign
+container's labels, so it is refused with "can't confirm the project directory", the files it looked
+at, and the way out (keep a compose file inside the project directory, or run compose without
+`--project-directory`); `attach` uses `--map` there.
 Not chosen: host paths in the PDBs plus an identity map (netcoredbg on Linux would compare `C:\…`
 paths; the path map requires POSIX remotes).
 
@@ -313,11 +348,13 @@ service, in any state, carries `dev.izzat.eyedbg.fast.override` (`docker ps -a` 
 the project directory goes when none does. A `stage-…` directory lives for one run. `lock` (O_EXCL,
 stale after one hour) serialises runs per project. Deletion is confined to those eyedbg-named
 directories by `Lstat` and exact-name grammars: a symlinked or foreign name is left alone, and
-never followed. `restore` removes eyedbg's files for a project only when its engine showed the project: it listed
-at least one fast-mode container of it, or `docker compose ps` (asked unless `-p NAME` is given)
-listed its containers. `restore -p NAME` against the wrong engine (another context or host,
-whose containers still mount the directory) therefore removes nothing and says which directory
-it kept.
+never followed. `restore` decides by what the project directory holds, not by what its engine
+showed: it removes eyedbg's files for the project when it listed at least one fast-mode container of
+it, or when the directory holds nothing a container can mount (no `override.yml`, nothing under
+`services/`: a failed first launch's `build.log`, the directory this run's lock made). With neither
+(the same-named project on another engine, whose containers still mount the directory: a `restore -p
+NAME` or a `restore` whose `compose ps` showed that other project) it removes nothing and says which
+directory it kept. A run that finds nothing and holds nothing leaves no directory and no note.
 
 **D18 CLI.** `eyedbg compose launch [SERVICE...] [-f FILE]... [-p NAME] [--project-directory DIR]
 [--dotnet-project SERVICE=PATH]... [--env-file FILE]... [--bp LOC]... [--exceptions M]
@@ -356,10 +393,18 @@ the copy can already run code in that container). The copy survives a restart bu
   entrypoint and eyedbg's labels, never `environment`, `env_file`, `secrets`, `configs`,
   `healthcheck` or `ports`.
 * **Labels, as read back, are untrusted** (anyone who can edit a container's labels can edit
-  eyedbg's input; an image's own `LABEL`s are copied onto its containers): `dll`, `workdir` and
-  `project` are re-validated at every use, a launch re-derives nothing from the request (D3), and
-  the compose directory and files the labels name are used only when they corroborate each other
-  and the command line (D14).
+  eyedbg's input; an image's own `LABEL`s are copied onto its containers): *any container label is
+  untrusted input unless eyedbg-owned state corroborates it.* `dll`, `workdir` and `project` are
+  re-validated at every use and believed only when eyedbg's own override file records them (D12), a
+  launch re-derives nothing from the request (D3), and the compose directory and files the labels
+  name are used only when they corroborate each other and the command line (D14).
+* **A container can't choose what the host builds.** The host build runs the project's code, so a
+  project file written by a container (the stack's read-write bind mounts, D12) is never found and
+  built unasked; a project the user names with `--dotnet-project` is the user's own choice, built
+  wherever it lies in the compose directory. Each service's project is printed before its build.
+  Residual: MSBuild reaches files beyond the project file (a `ProjectReference`, an `Import`, a
+  glob into a writable directory, a package source); eyedbg checks the project file it picks, not its
+  graph, and a named volume bound to a host path is not seen as a bind mount.
 * **Escaping fails closed.** MSBuild's and Roslyn's separators in a path are refused, not escaped;
   `$` in override strings is doubled; compose file lists come from labels, never from parsing YAML.
 * **Deletion and overwrite are confined** to eyedbg's per-project directory under its home by `Lstat`

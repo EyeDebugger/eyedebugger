@@ -112,7 +112,8 @@ eyedbg stop                                       # always, when done
   out, its healthcheck turns unhealthy): keep stops short.
 - In verified runs, line breakpoints did not bind when attached to a Release image. `eyedbg compose
   launch` builds Debug on the host and launches the app under the debugger in its container
-  (startup code too: `--bp`, `--stop-on-entry`). It recreates the named containers, and the service
+  (startup code too: `--bp`, `--stop-on-entry`); it never builds a project a container can
+  write, so name it: `--dotnet-project SERVICE=PATH`. It recreates the named containers, and the service
   runs only while its session does: after `eyedbg stop` it is down until `compose launch` or
   `compose restore` (the way back); its output is in `eyedbg output`, not `docker logs`. Ask before
   using it on a stack that isn't throwaway.
