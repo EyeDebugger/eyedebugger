@@ -4,7 +4,8 @@
 
 [![CI](https://github.com/EyeDebugger/eyedebugger/actions/workflows/ci.yml/badge.svg)](https://github.com/EyeDebugger/eyedebugger/actions/workflows/ci.yml)
 
-> **Beta (v0.2.1).** Debug .NET (netcoredbg, or the opt-in SharpDbg), Python (debugpy), C, C++,
+> **Beta (v0.3.0).** Debug .NET (netcoredbg, or the opt-in SharpDbg; also in docker containers and
+> compose stacks), Python (debugpy), C, C++,
 > Rust (lldb-dap) and Go (Delve) programs on Linux, macOS and Windows (x64 and arm64; .NET on Intel
 > Macs through SharpDbg only, `eyedbg adapters install sharpdbg`, and on Windows on Arm with
 > `--adapter sharpdbg`, unverified; C/C++/Rust need
@@ -47,7 +48,7 @@ Full design: [docs/DESIGN.md](docs/DESIGN.md).
 Join an agent's live session from VS Code, or start your own and let the agent join you:
 
 ```sh
-code --install-extension eyedebugger_0.2.1_vscode.vsix   # from a GitHub release
+code --install-extension eyedebugger_0.3.0_vscode.vsix   # from a GitHub release
 ```
 
 ```json
@@ -211,7 +212,8 @@ eyedbg adapters install netcoredbg   # or: python, delve (c, cpp and rust use ll
 eyedbg adapters doctor
 ```
 
-Claude Code users can also add the skill as a plugin (it still needs the `eyedbg` binary above):
+Claude Code users can also add the skill as a plugin. It still needs the `eyedbg` binary above: the
+plugin has the agent run `eyedbg skill print`, so the guide always matches your installed version.
 
 ```sh
 /plugin marketplace add EyeDebugger/claude-plugin
