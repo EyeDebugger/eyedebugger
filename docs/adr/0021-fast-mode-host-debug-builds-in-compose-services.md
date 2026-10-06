@@ -252,20 +252,26 @@ inside the compose directory.
 
 *Writable mounts.* Building a project runs its code on the host, so a project file a container
 could have planted is never found. Per run (once, and only when a search is needed) eyedbg asks docker
-for the host `Source` of every read-write **bind** mount of every container of the project in any
-state (`docker ps -a --filter label=com.docker.compose.project=P`, then one `docker inspect` whose
-template names only `.Mounts[].Source` of `RW` bind mounts; a pinned template, no environment or
-arguments). A match at or under a source is not counted among the matches; when it is the only match,
-the service is refused (`INVALID_REQUEST`, skipped without names) naming `--dotnet-project`; when the
-compose directory itself is at or under a source, no search is made. A path is at or under a source
-when it, or an ancestor up to the compose directory, is the same file as the source (`os.SameFile`),
-so symlinks and letter case on a case-insensitive file system don't matter; a source that doesn't
-exist on this host is compared by its path. Docker Desktop for Mac showed one bind source as
-`/host_mnt/<host path>` (once, in the first container after the app started; later ones showed the
-host path), so a source with that prefix counts under both spellings. A remote engine's or Windows
-host's paths don't name this machine's files: the rule can't see them (unverified, as those
-setups are). A **read-only** mount can't be written by its container
-and stays searchable (named volumes aren't bind mounts here). A project named with
+what every container of the project, in any state, can write on the host (`docker ps -a --filter
+label=com.docker.compose.project=P`, then one `docker inspect` whose pinned template names only the
+`Source` of `RW` bind mounts and the `Name` of `RW` volumes of the `local` driver; no environment or
+arguments). A local volume can be a bind of a host directory (`driver_opts: {type: none, o: bind,
+device: PATH}`): one `docker volume inspect` with a pinned template prints a volume's `device` option
+only when its `type` option is `none`, and no other option (`o` may hold an NFS or CIFS password, so
+it is neither printed nor read); those devices count like bind sources. A match at or under a source
+is not counted among the matches; when it is the only match, the service is refused
+(`INVALID_REQUEST`, skipped without names) naming `--dotnet-project`; when the compose directory
+itself is at or under a source, no search is made. A path is at or under a source when it, or an
+ancestor up to the compose directory, is the same file as the source (`os.SameFile`), so symlinks and
+letter case on a case-insensitive file system don't matter. Docker Desktop for Mac shows a bind source
+as `/host_mnt/<host path>` in the first container after the app started (seen twice; later ones showed
+the host path), so a source with that prefix has both spellings. **Fail closed:** a source none of
+whose spellings exists on this machine (a remote engine's path, a path of Docker Desktop's VM such as
+`/var/run/docker.sock` on a Windows host, a source since deleted) can't be compared, so no search is
+made either, with the same `--dotnet-project` hint; engine paths are accepted in host or Linux syntax,
+so a Windows host refuses the search instead of failing to read the answer. A **read-only** mount
+can't be written by its container and stays searchable; a volume that isn't bound to a host directory
+is docker's own storage, which no project search reaches. A project named with
 `--dotnet-project` is built even under a writable mount: the user chose that file. A project a
 corroborated label remembers (below) was accepted by an earlier run and isn't searched again. Not
 analysed: a project outside the mounts whose `ProjectReference`s, imports or globs reach into one.
@@ -278,7 +284,9 @@ bounded) records the same `version` and `override` for that service, at that fil
 for the label format this code reads, the same `dll`, `workdir` and `project`. A container whose
 labels fail that is judged as built (its labels decide nothing, so the project comes from the search
 or the flag, and an idle container is refused saying its labels were ignored); the staying services
-an override is rewritten with come from corroborated containers only. Values are also validated by
+an override is rewritten with come from corroborated containers only, each with the project the
+override records (also when that file has moved since: the service's next launch searches again);
+one whose build directory is gone can't stay, and launching it then says to restore it first. Values are also validated by
 the grammars above (control characters refused, paths absolute or confined), exactly as if a caller
 had typed them.
 
@@ -374,7 +382,11 @@ changes before the old sessions are stopped, apart from the adapter copy into an
 runs before the old app was stopped. Exit 0 when at least one service launched, else the first
 failure's class. `restore` stops the members' sessions, runs `up -d --no-deps --force-recreate
 --no-build --wait --wait-timeout 180` with only the container's own files, rewrites the override
-and prunes; it never launches. A service that isn't in fast mode is skipped ("not in fast mode").
+and prunes; it never launches. The file a container's `fast.override` label names is left out of
+those files only when it is this home's override, an override eyedbg wrote from any home (a regular
+`override.yml` whose first line is eyedbg's header, which an image can't put into a user's compose
+file), or isn't there; any other file stays, so an image's label can't drop one of the user's own
+compose files (a container from a moved home is still restored). A service that isn't in fast mode is skipped ("not in fast mode").
 
 **D19 The adapter copy, probed first.** At entry the CLI copies netcoredbg into the **as-built**
 container and probes it, so musl, a foreign architecture and a read-only root filesystem fail before
@@ -403,12 +415,16 @@ the copy can already run code in that container). The copy survives a restart bu
   launch re-derives nothing from the request (D3), and the compose directory and files the labels
   name are used only when they corroborate each other and the command line (D14).
 * **A container can't choose what the host builds.** The host build runs the project's code, so a
-  project file written by a container (the stack's read-write bind mounts, D12) is never found and
-  built unasked; a project the user names with `--dotnet-project` is the user's own choice, built
+  project file written by a container (under the stack's read-write bind mounts and bind-backed local
+  volumes, D12) is never found and built unasked, and a writable source eyedbg can't find on this
+  machine stops the search; a project the user names with `--dotnet-project` is the user's own choice, built
   wherever it lies in the compose directory. Each service's project is printed before its build.
   Residual: MSBuild reaches files beyond the project file (a `ProjectReference`, an `Import`, a
   glob into a writable directory, a package source); eyedbg checks the project file it picks, not its
-  graph, and a named volume bound to a host path is not seen as a bind mount.
+  graph. It sees only the writers that exist at launch: files that a since-removed container wrote
+  under the compose directory (a `docker compose run --rm` one-off, a service whose mount was later
+  dropped from the compose file) are not told apart from the user's. Volumes of other drivers
+  (plugins) that map host directories are not read.
 * **Escaping fails closed.** MSBuild's and Roslyn's separators in a path are refused, not escaped;
   `$` in override strings is doubled; compose file lists come from labels, never from parsing YAML.
 * **Deletion and overwrite are confined** to eyedbg's per-project directory under its home by `Lstat`
