@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -71,7 +72,13 @@ func (c fastContainer) fastJSON() string {
 	)
 
 	if !c.unlabelled {
-		override = "/home/me/.eyedbg/compose/my-app/override.yml"
+		// The label is a host path: eyedbg wrote it on this machine.
+		path := filepath.FromSlash("/home/me/.eyedbg/compose/my-app/override.yml")
+		if runtime.GOOS == "windows" {
+			path = "C:" + path
+		}
+
+		override = path
 	}
 
 	var (

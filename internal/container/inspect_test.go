@@ -4,6 +4,9 @@
 package container
 
 import (
+	"encoding/json"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -65,16 +68,38 @@ type inspectCase struct {
 	want func(i Info) string
 }
 
+// hostAbs is the Unix-style absolute path p as one of this host: on
+// Windows, on drive C:. Compose labels hold host paths.
+func hostAbs(p string) string {
+	if runtime.GOOS == "windows" {
+		return "C:" + filepath.FromSlash(p)
+	}
+
+	return p
+}
+
+// jsonString is s as a JSON string.
+func jsonString(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+
+	return string(b)
+}
+
 func stateCases() []inspectCase {
+	files := hostAbs("/p/compose.yaml") + "," + hostAbs("/p/override.yaml")
+
 	return []inspectCase{
 		{"init", func(f []string) { f[7] = "true" }, func(i Info) string { return wrongIf(!i.Init, "Init false") }},
 		{"paused and restarting", func(f []string) { f[5], f[6] = "true", "true" }, func(i Info) string {
 			return wrongIf(!i.Paused || !i.Restarting, "Paused or Restarting false")
 		}},
-		{"config files", func(f []string) { f[13] = `"/p/compose.yaml,/p/override.yaml"` }, func(i Info) string {
-			return wrongIf(i.configFiles != "/p/compose.yaml,/p/override.yaml", "files label not kept")
+		{"config files", func(f []string) { f[13] = jsonString(files) }, func(i Info) string {
+			return wrongIf(i.configFiles != files, "files label not kept")
 		}},
-		{"config files failing their grammar are dropped", func(f []string) { f[13] = `"/p/compose.yaml,relative.yaml"` }, func(i Info) string {
+		{"config files failing their grammar are dropped", func(f []string) { f[13] = jsonString(hostAbs("/p/compose.yaml") + ",relative.yaml") }, func(i Info) string {
 			return wrongIf(i.configFiles != "", "a bad files label was kept")
 		}},
 		{"fast mode", func(f []string) { f[12] = `"/x/override.yml"` }, func(i Info) string { return wrongIf(!i.FastMode, "FastMode false") }},
