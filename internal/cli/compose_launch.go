@@ -358,9 +358,9 @@ type launchRun struct {
 	buildLog string
 	log      *os.File
 
-	// rw are the read-write bind mount sources of the project's containers
-	// (read at the first search for a project: rwRead, rwErr).
-	rw     []string
+	// rw are the host files and directories the project's containers can
+	// write (read at the first search for a project: rwRead, rwErr).
+	rw     []container.WritableSource
 	rwRead bool
 	rwErr  error
 }

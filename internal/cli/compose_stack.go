@@ -33,7 +33,7 @@ type stackDocker interface {
 	InspectFast(ctx context.Context, ref string) (container.FastInfo, error)
 	ProbeIdle(ctx context.Context, ref string) error
 	FastContainers(ctx context.Context, project string) ([]container.FastContainer, error)
-	RWBindSources(ctx context.Context, project string) ([]string, error)
+	WritableSources(ctx context.Context, project string) ([]container.WritableSource, error)
 	ComposeUp(ctx context.Context, ref container.ProjectRef, override string, services []string, wait bool) error
 }
 

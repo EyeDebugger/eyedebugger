@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -53,17 +54,19 @@ func skippedProjectDir(name string) bool {
 // ten candidates). It returns the project's absolute path below the
 // resolved root.
 //
-// rw are the host paths of the read-write bind mounts of the stack's
-// containers (container.Engine.RWBindSources): a container can write
-// anything under one, a project file included, and building a project is
-// running its code on this machine. So a project at or under one of them is
-// never returned: it is not counted among the matches, and when it is the
-// only match the error says so. When root is itself at or under one, no
-// project is found at all. Mounts are compared as the same directory
-// (os.SameFile on each ancestor, so symlinks and letter case don't matter),
-// else by resolved path when a source can't be read here. A read-only mount
-// is not in rw: its container can't write it.
-func FindContainerProject(root, dll string, limit int, rw []string) (string, error) {
+// rw are the host files and directories the stack's containers can write
+// (container.Engine.WritableSources: read-write bind mounts, local volumes
+// bound to a host directory): a container can write anything under one, a
+// project file included, and building a project is running its code on this
+// machine. So a project at or under one of them is never returned: it is not
+// counted among the matches, and when it is the only match the error says so.
+// When root is itself at or under one, no project is found at all; nor when
+// one can't be found on this machine under any of its spellings (a path of
+// the engine's VM, a remote engine's, one that is gone), since what it covers
+// can't be told. Mounts are compared as the same file (os.SameFile on each
+// ancestor, so symlinks and letter case don't matter). A read-only mount is
+// not in rw: its container can't write it.
+func FindContainerProject(root, dll string, limit int, rw []container.WritableSource) (string, error) {
 	if !container.ValidDLL(dll) {
 		return "", api.NewError(api.CodeInvalidRequest, "invalid assembly name "+quote(dll), "")
 	}
@@ -77,8 +80,14 @@ func FindContainerProject(root, dll string, limit int, rw []string) (string, err
 	mounts := newMountSet(rw)
 
 	if src := mounts.covering(realRoot, ""); src != "" {
-		return "", api.NewError(api.CodeInvalidRequest, "the compose directory "+quote(realRoot)+" is at or under "+quote(src)+", a read-write bind mount of one of the stack's containers: "+
+		return "", api.NewError(api.CodeInvalidRequest, "the compose directory "+quote(realRoot)+" is at or under "+quote(src)+", a read-write mount of one of the stack's containers: "+
 			"a container could have written any project file there, so none is searched for the project of "+dll,
+			"pass --dotnet-project SERVICE=PATH to name the project yourself")
+	}
+
+	if src := mounts.unseen(); src != "" {
+		return "", api.NewError(api.CodeInvalidRequest, quote(src)+", a read-write mount of one of the stack's containers, is not a path on this machine: "+
+			"eyedbg can't tell whether it covers the compose directory, so no project is searched for "+dll,
 			"pass --dotnet-project SERVICE=PATH to name the project yourself")
 	}
 
@@ -148,47 +157,72 @@ func writtenError(root, dll string, written []string) error {
 	}
 
 	return api.NewError(api.CodeInvalidRequest,
-		"the only project for "+dll+" is in a directory a container can write (a read-write bind mount): "+strings.Join(listed, ", "),
+		"the only project for "+dll+" is in a directory a container can write (a read-write mount): "+strings.Join(listed, ", "),
 		"a container could have planted it; if it is yours, pass --dotnet-project SERVICE=PATH")
 }
 
-// mountSet is the read-write bind mount sources of a stack, as they can be
-// compared.
+// mountSet is the sources a stack's containers can write, as they can be
+// compared: per source, each spelling and its file info (nil when it isn't
+// here).
 type mountSet struct {
-	paths []string
-	infos []os.FileInfo
+	sources [][]mountPath
 }
 
-// newMountSet reads each source: its file info when it exists here (os.Stat
-// follows a symlink; an entry without one is compared by its path alone).
-func newMountSet(sources []string) mountSet {
+// mountPath is one spelling of a source.
+type mountPath struct {
+	path string
+	info os.FileInfo
+}
+
+// newMountSet reads each spelling of each source (os.Stat follows a symlink).
+func newMountSet(sources []container.WritableSource) mountSet {
 	var m mountSet
 
 	for _, src := range sources {
-		info, err := os.Stat(src)
-		if err != nil {
-			info = nil
+		paths := make([]mountPath, 0, len(src.Paths))
+
+		for _, p := range src.Paths {
+			info, err := os.Stat(p)
+			if err != nil {
+				info = nil
+			}
+
+			paths = append(paths, mountPath{path: filepath.Clean(p), info: info})
 		}
 
-		m.paths = append(m.paths, filepath.Clean(src))
-		m.infos = append(m.infos, info)
+		m.sources = append(m.sources, paths)
 	}
 
 	return m
 }
 
-// covering returns the source that p is at or under, "" when none: p and each
-// of its parents up to (not above) stop are compared with every source. A
-// stop of "" goes up to the file system root.
+// unseen is the first source none of whose spellings exists here, "" when
+// every one does.
+func (m mountSet) unseen() string {
+	for _, paths := range m.sources {
+		if len(paths) > 0 && !slices.ContainsFunc(paths, func(mp mountPath) bool { return mp.info != nil }) {
+			return paths[0].path
+		}
+	}
+
+	return ""
+}
+
+// covering returns the source (its first spelling) that p is at or under, ""
+// when none: p and each of its parents up to (not above) stop are compared
+// with every spelling of every source, by path and as the same file. A stop of
+// "" goes up to the file system root.
 func (m mountSet) covering(p, stop string) string {
-	if len(m.paths) == 0 {
+	if len(m.sources) == 0 {
 		return ""
 	}
 
 	for cur := p; ; cur = filepath.Dir(cur) {
-		for i, src := range m.paths {
-			if cur == src || (m.infos[i] != nil && sameFile(cur, m.infos[i])) {
-				return src
+		for _, paths := range m.sources {
+			for _, mp := range paths {
+				if cur == mp.path || (mp.info != nil && sameFile(cur, mp.info)) {
+					return paths[0].path
+				}
 			}
 		}
 

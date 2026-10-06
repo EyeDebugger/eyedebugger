@@ -655,22 +655,82 @@ func (e Engine) FastContainers(ctx context.Context, project string) ([]FastConta
 // the host path of a bind mount in inspect output.
 const dockerDesktopHostMount = "/host_mnt"
 
-// maxRWMountContainers bounds the containers of a project whose mounts
-// [Engine.RWBindSources] reads.
-const maxRWMountContainers = 512
+// Bounds of what [Engine.WritableSources] reads.
+const (
+	// maxRWMountContainers bounds the containers of a project whose mounts are
+	// read.
+	maxRWMountContainers = 512
+	// maxRWVolumes bounds the distinct local volumes they mount read-write.
+	maxRWVolumes = 512
+	// maxVolumeName bounds a volume's name.
+	maxVolumeName = 255
+)
 
-// rwMountsTemplate selects, of a container, only the host path of each of its
-// read-write bind mounts: a JSON array (a trailing null ends it). It names
-// no environment, arguments or other mount field.
-const rwMountsTemplate = `[{{range .Mounts}}{{if and .RW (eq .Type "bind")}}{{json .Source}},{{end}}{{end}}null]`
+// rwMountsTemplate selects, of a container, only what says where it can write
+// on the host: the host path of each read-write bind mount, and the name of
+// each read-write volume of the local driver (one may be bound to a host
+// directory, which [volumeDeviceTemplate] tells). One JSON object per line;
+// a trailing null ends each array. It names no environment, arguments, other
+// mount field or volume option.
+const rwMountsTemplate = `{"bind":[{{range .Mounts}}{{if and .RW (eq .Type "bind")}}{{json .Source}},{{end}}{{end}}null],` +
+	`"volume":[{{range .Mounts}}{{if and .RW (eq .Type "volume") (eq .Driver "local")}}{{json .Name}},{{end}}{{end}}null]}`
 
-// RWBindSources are the host paths of the read-write bind mounts of every
-// container of compose project (a name), in any state, sorted and without
-// duplicates: whatever sits under one of them a container can write. It is one
-// docker ps -a and one docker inspect, and fails on any answer it can't read,
-// so the caller never works from a partial list. A named volume is not a bind
-// mount here (its host path is docker's own).
-func (e Engine) RWBindSources(ctx context.Context, project string) ([]string, error) {
+// volumeDeviceTemplate selects, of a volume, its device option, and only for
+// a local volume whose type option is "none": the local driver's bind of a
+// host directory (driver_opts type none, o bind, device PATH). null for any
+// other volume. It reads no other option: "o" may hold an NFS or CIFS
+// password.
+const volumeDeviceTemplate = `{{if and (eq .Driver "local") .Options}}{{if eq (print (index .Options "type")) "none"}}` +
+	`{{with index .Options "device"}}{{json .}}{{else}}null{{end}}{{else}}null{{end}}{{else}}null{{end}}`
+
+// WritableSource is one host file or directory a container of a stack can
+// write: a read-write bind mount's source, or the device of a local volume
+// bound to a host directory. Paths are the spellings it may have here: the
+// engine's, then (for Docker Desktop's /host_mnt/<path>) the host path.
+// Each is absolute in host or in Linux syntax: on a Windows host the engine
+// may report a path of its Linux VM, which names no file here.
+type WritableSource struct {
+	Paths []string
+}
+
+// WritableSources are the host files and directories every container of
+// compose project (a name), in any state, can write (see [WritableSource]),
+// sorted and without duplicates: whatever sits under one of them a container
+// may have written. It is one docker ps -a, one docker inspect and, when they
+// mount local volumes read-write, one docker volume inspect; it fails on any
+// answer it can't read, so the caller never works from a partial list. A
+// volume that isn't bound to a host directory is docker's own storage, not
+// listed. Writers that no longer exist (a removed 'compose run --rm'
+// container, a mount since dropped from the compose file) can't be seen.
+func (e Engine) WritableSources(ctx context.Context, project string) ([]WritableSource, error) {
+	ids, err := e.projectContainerIDs(ctx, project)
+	if err != nil || len(ids) == 0 {
+		return nil, err
+	}
+
+	argv := e.Args(slices.Concat([]string{"inspect", "--type", "container", "--format", rwMountsTemplate, "--"}, ids)...)
+
+	res, fail := e.run(ctx, QueryTimeout, nil, argv)
+	if fail != nil {
+		return nil, dockerError(fail)
+	}
+
+	binds, volumes, err := parseRWMounts(res.stdout, len(ids))
+	if err != nil {
+		return nil, err
+	}
+
+	devices, err := e.volumeDevices(ctx, volumes)
+	if err != nil {
+		return nil, err
+	}
+
+	return writableSources(slices.Concat(binds, devices)), nil
+}
+
+// projectContainerIDs are the full ids of the containers of project, in any
+// state: at most maxRWMountContainers.
+func (e Engine) projectContainerIDs(ctx context.Context, project string) ([]string, error) {
 	if err := api.CheckGroup(project); err != nil {
 		return nil, err
 	}
@@ -681,72 +741,162 @@ func (e Engine) RWBindSources(ctx context.Context, project string) ([]string, er
 	}
 
 	ids := strings.Fields(string(res.stdout))
-	if len(ids) == 0 {
-		return nil, nil
-	}
-
 	if len(ids) > maxRWMountContainers {
 		return nil, api.NewError(api.CodeAttachFailed, fmt.Sprintf("project %s has %d containers; eyedbg reads the mounts of at most %d", project, len(ids), maxRWMountContainers), "")
 	}
 
 	for _, id := range ids {
 		if !isFullID(id) {
-			return nil, api.NewError(api.CodeAttachFailed, "unexpected answer from docker ps: "+show(id, 100),
-				"eyedbg reads a fixed set of fields; this docker may differ from the ones it was verified with (docker 24 to 26)")
+			return nil, unexpectedAnswer("docker ps", show(id, 100))
 		}
 	}
 
-	argv := e.Args(slices.Concat([]string{"inspect", "--type", "container", "--format", rwMountsTemplate, "--"}, ids)...)
+	return ids, nil
+}
 
-	res, fail = e.run(ctx, QueryTimeout, nil, argv)
+// volumeDevices are the host directories the named local volumes are bound
+// to, with one docker volume inspect; a volume not bound to one has none.
+func (e Engine) volumeDevices(ctx context.Context, names []string) ([]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+
+	argv := e.Args(slices.Concat([]string{"volume", "inspect", "--format", volumeDeviceTemplate, "--"}, names)...)
+
+	res, fail := e.run(ctx, QueryTimeout, nil, argv)
 	if fail != nil {
 		return nil, dockerError(fail)
 	}
 
-	return parseRWMounts(res.stdout, len(ids))
-}
-
-// parseRWMounts decodes want lines of rwMountsTemplate's output.
-func parseRWMounts(out []byte, want int) ([]string, error) {
-	bad := func(why string) ([]string, error) {
-		return nil, api.NewError(api.CodeAttachFailed, "unexpected answer from docker inspect: "+why,
-			"eyedbg reads a fixed set of fields; this docker may differ from the ones it was verified with (docker 24 to 26)")
+	lines := strings.Split(strings.TrimRight(string(res.stdout), "\r\n"), "\n")
+	if len(lines) != len(names) {
+		return nil, unexpectedAnswer("docker volume inspect", fmt.Sprintf("%d answers for %d volumes", len(lines), len(names)))
 	}
 
-	lines := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n")
-	if len(lines) != want {
-		return bad(fmt.Sprintf("%d answers for %d containers", len(lines), want))
-	}
-
-	var sources []string
+	var devices []string
 
 	for _, line := range lines {
-		var list []*string
-		if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\r")), &list); err != nil {
-			return bad("a container's mounts are not a JSON array")
+		var device *string
+		if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\r")), &device); err != nil {
+			return nil, unexpectedAnswer("docker volume inspect", "a volume's device is not a JSON string")
 		}
 
-		for _, p := range list {
-			if p == nil {
-				continue
-			}
-
-			if !plainAbsPath(*p) {
-				return bad("a mount source is not a plain absolute path: " + show(*p, 80))
-			}
-
-			sources = append(sources, *p)
-
-			// Docker Desktop for Mac has shown a bind source as /host_mnt/<host
-			// path> (seen once, on a first container after the app started): both
-			// spellings count, since an extra one only makes the rule stricter.
-			if host, ok := strings.CutPrefix(*p, dockerDesktopHostMount); ok && host != "" {
-				sources = append(sources, host)
-			}
+		switch {
+		case device == nil || *device == "":
+			// Not bound to a host directory (a type none volume without a device
+			// can't be mounted at all).
+		case !engineAbsPath(*device):
+			return nil, unexpectedAnswer("docker volume inspect", "a volume's device is not a plain absolute path: "+show(*device, 80))
+		default:
+			devices = append(devices, *device)
 		}
 	}
 
-	slices.Sort(sources)
+	return devices, nil
+}
 
-	return slices.Compact(sources), nil
+// unexpectedAnswer is the error for an answer of docker (what) that eyedbg
+// can't read.
+func unexpectedAnswer(what, why string) error {
+	return api.NewError(api.CodeAttachFailed, "unexpected answer from "+what+": "+why,
+		"eyedbg reads a fixed set of fields; this docker may differ from the ones it was verified with (docker 24 to 26)")
+}
+
+// rwMounts is one line of rwMountsTemplate's output.
+type rwMounts struct {
+	Bind   *[]*string `json:"bind"`
+	Volume *[]*string `json:"volume"`
+}
+
+// parseRWMounts decodes want lines of rwMountsTemplate's output: the bind
+// sources, and the names of the volumes, without duplicates.
+func parseRWMounts(out []byte, want int) (binds, volumes []string, err error) {
+	lines := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n")
+	if len(lines) != want {
+		return nil, nil, unexpectedAnswer("docker inspect", fmt.Sprintf("%d answers for %d containers", len(lines), want))
+	}
+
+	for _, line := range lines {
+		b, v, err := parseRWMountsLine(strings.TrimSuffix(line, "\r"))
+		if err != nil {
+			return nil, nil, err
+		}
+
+		binds, volumes = append(binds, b...), append(volumes, v...)
+	}
+
+	slices.Sort(volumes)
+	volumes = slices.Compact(volumes)
+
+	if len(volumes) > maxRWVolumes {
+		return nil, nil, api.NewError(api.CodeAttachFailed, fmt.Sprintf("the project's containers mount %d volumes read-write; eyedbg reads at most %d", len(volumes), maxRWVolumes), "")
+	}
+
+	return binds, volumes, nil
+}
+
+// parseRWMountsLine decodes one container's line of rwMountsTemplate's output.
+func parseRWMountsLine(line string) (binds, volumes []string, err error) {
+	var m rwMounts
+	if err := json.Unmarshal([]byte(line), &m); err != nil || m.Bind == nil || m.Volume == nil {
+		return nil, nil, unexpectedAnswer("docker inspect", "a container's mounts are not the JSON eyedbg asked for")
+	}
+
+	for _, p := range *m.Bind {
+		switch {
+		case p == nil:
+		case !engineAbsPath(*p):
+			return nil, nil, unexpectedAnswer("docker inspect", "a mount source is not a plain absolute path: "+show(*p, 80))
+		default:
+			binds = append(binds, *p)
+		}
+	}
+
+	for _, v := range *m.Volume {
+		switch {
+		case v == nil:
+		case len(*v) > maxVolumeName || !grammar(*v, isAlnum, isNameChar):
+			return nil, nil, unexpectedAnswer("docker inspect", "a volume name is not valid: "+show(*v, 80))
+		default:
+			volumes = append(volumes, *v)
+		}
+	}
+
+	return binds, volumes, nil
+}
+
+// writableSources are the sources at paths, each with its spellings, sorted
+// and without duplicates.
+func writableSources(paths []string) []WritableSource {
+	slices.Sort(paths)
+	paths = slices.Compact(paths)
+
+	out := make([]WritableSource, 0, len(paths))
+
+	for _, p := range paths {
+		src := WritableSource{Paths: []string{p}}
+
+		// Docker Desktop for Mac has shown a bind source as /host_mnt/<host
+		// path> (seen once, on a first container after the app started): both
+		// spellings count, since an extra one only makes the rule stricter.
+		if host, ok := strings.CutPrefix(p, dockerDesktopHostMount); ok && strings.HasPrefix(host, "/") {
+			src.Paths = append(src.Paths, host)
+		}
+
+		out = append(out, src)
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+
+	return out
+}
+
+// engineAbsPath reports whether p, a path the engine reports, is plain text
+// within the bound for a label, and absolute in this host's syntax or in
+// Linux's: an engine in a Linux VM (Docker Desktop on Windows) may report its
+// own paths, which name no file here.
+func engineAbsPath(p string) bool {
+	return p != "" && len(p) <= maxLabel && !hasControl(p) && (filepath.IsAbs(p) || path.IsAbs(p))
 }

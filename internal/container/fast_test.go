@@ -902,88 +902,131 @@ func TestFastContainersChecksProjectNames(t *testing.T) {
 	}
 }
 
-// pinnedRWMountsTemplate is the inspect template of RWBindSources, spelled
-// out: it names the host path of read-write bind mounts and nothing else.
-const pinnedRWMountsTemplate = `[{{range .Mounts}}{{if and .RW (eq .Type "bind")}}{{json .Source}},{{end}}{{end}}null]`
+// pinnedRWMountsTemplate is the inspect template of WritableSources, spelled
+// out: it names the host path of read-write bind mounts, the name of
+// read-write local volumes, and nothing else.
+const pinnedRWMountsTemplate = `{"bind":[{{range .Mounts}}{{if and .RW (eq .Type "bind")}}{{json .Source}},{{end}}{{end}}null],` +
+	`"volume":[{{range .Mounts}}{{if and .RW (eq .Type "volume") (eq .Driver "local")}}{{json .Name}},{{end}}{{end}}null]}`
 
-// TestRWBindSourcesDockerDesktopPrefix: a source shown as /host_mnt/<path>
-// (Docker Desktop for Mac, seen once) counts under both spellings.
-func TestRWBindSourcesDockerDesktopPrefix(t *testing.T) {
+// pinnedVolumeDeviceTemplate is the volume inspect template, spelled out: the
+// device option of a local volume of type none, and no other option ("o" may
+// hold a password).
+const pinnedVolumeDeviceTemplate = `{{if and (eq .Driver "local") .Options}}{{if eq (print (index .Options "type")) "none"}}` +
+	`{{with index .Options "device"}}{{json .}}{{else}}null{{end}}{{else}}null{{end}}{{else}}null{{end}}`
+
+// rwLine is one line of the mounts template's output.
+func rwLine(binds, volumes string) string {
+	return `{"bind":[` + binds + `null],"volume":[` + volumes + `null]}` + "\n"
+}
+
+// paths are the spellings of each source.
+func paths(srcs []container.WritableSource) [][]string {
+	out := make([][]string, len(srcs))
+	for i, s := range srcs {
+		out[i] = s.Paths
+	}
+
+	return out
+}
+
+// TestWritableSourcesDockerDesktopPrefix: a source shown as /host_mnt/<path>
+// (Docker Desktop for Mac, seen once) has both spellings.
+func TestWritableSourcesDockerDesktopPrefix(t *testing.T) {
 	t.Parallel()
 
 	id := strings.Repeat("1", 64)
 	e := containertest.Engine(t, containertest.Scenario{Rules: []containertest.Rule{
 		{Match: []string{"ps"}, Stdout: id + "\n"},
-		{Match: []string{"inspect"}, Stdout: `["/host_mnt/Users/me/app/data","/host_mnt",null]` + "\n"},
+		{Match: []string{"inspect"}, Stdout: rwLine(`"/host_mnt/Users/me/app/data","/host_mnt","/host_mntx/a",`, "")},
 	}})
 
-	got, err := e.RWBindSources(t.Context(), "my-app")
+	got, err := e.WritableSources(t.Context(), "my-app")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if want := []string{"/Users/me/app/data", "/host_mnt", "/host_mnt/Users/me/app/data"}; !slices.Equal(got, want) {
-		t.Errorf("sources = %q, want %q", got, want)
+	want := [][]string{{"/host_mnt"}, {"/host_mnt/Users/me/app/data", "/Users/me/app/data"}, {"/host_mntx/a"}}
+	if !slices.EqualFunc(paths(got), want, slices.Equal) {
+		t.Errorf("sources = %q, want %q", paths(got), want)
 	}
 }
 
-func TestRWBindSourcesAsksForMountsOnly(t *testing.T) {
+func TestWritableSourcesAsksForMountsOnly(t *testing.T) {
 	t.Parallel()
 
 	id1, id2 := strings.Repeat("1", 64), strings.Repeat("2", 64)
 	calls := filepath.Join(t.TempDir(), "calls")
 	e := containertest.Engine(t, containertest.Scenario{Calls: calls, Rules: []containertest.Rule{
 		{Match: []string{"ps"}, Stdout: id1 + "\n" + id2 + "\n"},
-		{Match: []string{"inspect"}, Stdout: `["/b/data",null]` + "\n" + `["/a/logs","/b/data",null]` + "\n"},
+		{Match: []string{"inspect"}, Stdout: rwLine(`"/b/data",`, `"vol_b",`) + rwLine(`"/a/logs","/b/data",`, `"vol.a","vol_b",`)},
+		{Match: []string{"volume", "inspect"}, Stdout: `"/c/bound"` + "\n" + "null\n"},
 	}})
 	e.Host = "tcp://remote:2375"
 
-	got, err := e.RWBindSources(t.Context(), "my-app")
+	got, err := e.WritableSources(t.Context(), "my-app")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if want := []string{"/a/logs", "/b/data"}; !slices.Equal(got, want) {
-		t.Errorf("sources = %q, want %q (sorted, no duplicates)", got, want)
+	if want := [][]string{{"/a/logs"}, {"/b/data"}, {"/c/bound"}}; !slices.EqualFunc(paths(got), want, slices.Equal) {
+		t.Errorf("sources = %q, want %q (sorted, no duplicates)", paths(got), want)
 	}
 
 	argvs := containertest.ReadCalls(t, calls)
 	wantPS := []string{"--host=tcp://remote:2375", "ps", "--all", "--no-trunc", "--quiet", "--filter=label=com.docker.compose.project=my-app"}
 	wantInspect := []string{"--host=tcp://remote:2375", "inspect", "--type", "container", "--format", pinnedRWMountsTemplate, "--", id1, id2}
+	wantVolumes := []string{"--host=tcp://remote:2375", "volume", "inspect", "--format", pinnedVolumeDeviceTemplate, "--", "vol.a", "vol_b"}
 
-	if len(argvs) != 2 || !slices.Equal(argvs[0], wantPS) || !slices.Equal(argvs[1], wantInspect) {
-		t.Errorf("docker ran %q\nwant %q and %q", argvs, wantPS, wantInspect)
+	if len(argvs) != 3 || !slices.Equal(argvs[0], wantPS) || !slices.Equal(argvs[1], wantInspect) || !slices.Equal(argvs[2], wantVolumes) {
+		t.Errorf("docker ran %q\nwant %q, %q and %q", argvs, wantPS, wantInspect, wantVolumes)
 	}
 
-	// The template never names more than the sources of writable bind mounts.
-	for _, banned := range []string{".Config", "Env", "Args", ".HostConfig", "Destination", "Name"} {
-		if strings.Contains(pinnedRWMountsTemplate, banned) {
-			t.Errorf("the template names %s", banned)
+	// The templates never name more than the sources of writable mounts and
+	// the device of a volume bound to a host directory.
+	templates := pinnedRWMountsTemplate + pinnedVolumeDeviceTemplate
+	for _, banned := range []string{".Config", "Env", "Args", ".HostConfig", "Destination", `"o"`, ".Labels", ".Mountpoint", ".Status"} {
+		if strings.Contains(templates, banned) {
+			t.Errorf("a template names %s", banned)
 		}
+	}
+
+	if n := strings.Count(pinnedVolumeDeviceTemplate, "index .Options"); n != 2 ||
+		!strings.Contains(pinnedVolumeDeviceTemplate, `index .Options "type"`) || !strings.Contains(pinnedVolumeDeviceTemplate, `index .Options "device"`) {
+		t.Errorf("the volume template reads options other than type and device: %s", pinnedVolumeDeviceTemplate)
 	}
 }
 
-// TestRWBindSourcesTemplate runs the template over inspect documents: only a
-// read-write bind mount counts; a read-only one (its container can't write
-// it), a named volume and a tmpfs don't.
-func TestRWBindSourcesTemplate(t *testing.T) {
+// TestWritableSourcesTemplate runs the template over inspect documents: only a
+// read-write bind mount and a read-write local volume count; a read-only one
+// (its container can't write it), another driver's volume and a tmpfs don't.
+func TestWritableSourcesTemplate(t *testing.T) {
 	t.Parallel()
 
 	mount := func(typ, src string, rw bool) any {
-		return map[string]any{"Type": typ, "Source": src, "Destination": "/x", "RW": rw, "Name": "secret-volume-name"}
+		return map[string]any{"Type": typ, "Source": src, "Destination": "/x", "RW": rw}
+	}
+	volume := func(name, driver string, rw bool) any {
+		return map[string]any{"Type": "volume", "Name": name, "Source": "/var/lib/docker/volumes/" + name + "/_data", "Driver": driver, "Destination": "/x", "RW": rw}
 	}
 
 	tests := []struct {
-		name   string
-		mounts []any
-		want   []string
+		name          string
+		mounts        []any
+		binds, volume []string
 	}{
-		{"a read-write bind", []any{mount("bind", "/h/data", true)}, []string{"/h/data"}},
-		{"a read-only bind", []any{mount("bind", "/h/app", false)}, nil},
-		{"a named volume", []any{mount("volume", "/var/lib/docker/volumes/v/_data", true)}, nil},
-		{"a tmpfs", []any{mount("tmpfs", "", true)}, nil},
-		{"mixed", []any{mount("bind", "/h/app", false), mount("bind", "/h/a b/$c", true), mount("volume", "/v", true)}, []string{"/h/a b/$c"}},
-		{"none", nil, nil},
+		{"a read-write bind", []any{mount("bind", "/h/data", true)}, []string{"/h/data"}, nil},
+		{"a read-only bind", []any{mount("bind", "/h/app", false)}, nil, nil},
+		{"a read-write local volume", []any{volume("v", "local", true)}, nil, []string{"v"}},
+		{"a read-only local volume", []any{volume("v", "local", false)}, nil, nil},
+		{"another driver's volume", []any{volume("v", "nfs-plugin", true)}, nil, nil},
+		{"a tmpfs", []any{mount("tmpfs", "", true)}, nil, nil},
+		{
+			"mixed",
+			[]any{mount("bind", "/h/app", false), mount("bind", "/h/a b/$c", true), volume("w", "local", true), volume("x", "local", false)},
+			[]string{"/h/a b/$c"},
+			[]string{"w"},
+		},
+		{"none", nil, nil, nil},
 	}
 
 	for _, tt := range tests {
@@ -992,70 +1035,187 @@ func TestRWBindSourcesTemplate(t *testing.T) {
 
 			out := dockerJSON(t, pinnedRWMountsTemplate, map[string]any{"Mounts": tt.mounts})
 
-			var got []*string
+			var got struct {
+				Bind   []*string `json:"bind"`
+				Volume []*string `json:"volume"`
+			}
 			if err := json.Unmarshal([]byte(out), &got); err != nil {
 				t.Fatalf("not JSON: %q: %v", out, err)
 			}
 
-			var sources []string
-
-			for _, p := range got {
-				if p != nil {
-					sources = append(sources, *p)
-				}
-			}
-
-			if !slices.Equal(sources, tt.want) {
-				t.Errorf("sources = %q, want %q (output %s)", sources, tt.want, out)
+			if b, v := derefAll(got.Bind), derefAll(got.Volume); !slices.Equal(b, tt.binds) || !slices.Equal(v, tt.volume) {
+				t.Errorf("binds = %q, volumes = %q; want %q, %q (output %s)", b, v, tt.binds, tt.volume, out)
 			}
 		})
 	}
 }
 
-// TestRWBindSourcesBadAnswers: a partial list must never come back, since the
-// caller trusts every project outside it.
-func TestRWBindSourcesBadAnswers(t *testing.T) {
+// TestVolumeDeviceTemplate runs the volume template over volume documents:
+// only a local volume of type none (a bind of a host directory) gives its
+// device, and no other option is ever printed.
+func TestVolumeDeviceTemplate(t *testing.T) {
 	t.Parallel()
 
-	id := strings.Repeat("1", 64)
-	id2 := strings.Repeat("2", 64)
+	const secret = "password=hunter2-not-printed"
 
 	tests := []struct {
-		name     string
-		ps, insp containertest.Rule
+		name string
+		doc  map[string]any
+		want string
 	}{
-		{"ps fails", containertest.Rule{Exit: 1, Stderr: "boom"}, containertest.Rule{}},
-		{"a short id", containertest.Rule{Stdout: "abc123\n"}, containertest.Rule{}},
-		{"inspect fails", containertest.Rule{Stdout: id + "\n"}, containertest.Rule{Exit: 1, Stderr: "no such container"}},
-		{"too few answers", containertest.Rule{Stdout: id + "\n" + id2 + "\n"}, containertest.Rule{Stdout: `["/a"]` + "\n"}},
-		{"not JSON", containertest.Rule{Stdout: id + "\n"}, containertest.Rule{Stdout: "/a\n"}},
-		{"a relative source", containertest.Rule{Stdout: id + "\n"}, containertest.Rule{Stdout: `["data",null]` + "\n"}},
-		{"a control character", containertest.Rule{Stdout: id + "\n"}, containertest.Rule{Stdout: `["/a\nb",null]` + "\n"}},
+		{"a bind of a host directory", map[string]any{"Driver": "local", "Options": map[string]any{"type": "none", "o": "bind," + secret, "device": "/h/data"}}, `"/h/data"`},
+		{"an nfs volume", map[string]any{"Driver": "local", "Options": map[string]any{"type": "nfs", "o": "addr=10.0.0.1," + secret, "device": ":/export"}}, "null"},
+		{"a cifs volume", map[string]any{"Driver": "local", "Options": map[string]any{"type": "cifs", "o": secret, "device": "//srv/share"}}, "null"},
+		{"a plain volume", map[string]any{"Driver": "local", "Options": nil}, "null"},
+		{"no type", map[string]any{"Driver": "local", "Options": map[string]any{"device": "/h/data"}}, "null"},
+		{"type none without a device", map[string]any{"Driver": "local", "Options": map[string]any{"type": "none", "o": "bind"}}, "null"},
+		{"another driver", map[string]any{"Driver": "plugin", "Options": map[string]any{"type": "none", "device": "/h/data"}}, "null"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			tt.ps.Match, tt.insp.Match = []string{"ps"}, []string{"inspect"}
-			e := containertest.Engine(t, containertest.Scenario{Rules: []containertest.Rule{tt.ps, tt.insp}})
+			out := dockerJSON(t, pinnedVolumeDeviceTemplate, tt.doc)
+			if strings.Contains(out, "hunter2") {
+				t.Fatalf("the template printed an option it must not: %s", out)
+			}
 
-			if got, err := e.RWBindSources(t.Context(), "my-app"); err == nil || got != nil {
-				t.Errorf("got %q, %v; want an error and no list", got, err)
+			if out != tt.want {
+				t.Errorf("output = %s, want %s", out, tt.want)
 			}
 		})
 	}
 }
 
-func TestRWBindSourcesNoContainerNoInspect(t *testing.T) {
+// TestVolumeDeviceTemplateTyped runs the volume template over docker's own
+// shape of a volume (Options a map of strings, nil for a plain volume), the
+// one the docker CLI formats first.
+func TestVolumeDeviceTemplateTyped(t *testing.T) {
+	t.Parallel()
+
+	type volume struct {
+		Driver  string
+		Options map[string]string
+	}
+
+	tmpl := template.Must(template.New("v").Funcs(template.FuncMap{"json": func(v any) (string, error) {
+		b, err := json.Marshal(v)
+
+		return string(b), err //nolint:wrapcheck // A test helper.
+	}}).Parse(pinnedVolumeDeviceTemplate))
+
+	for _, tt := range []struct {
+		v    volume
+		want string
+	}{
+		{volume{"local", map[string]string{"type": "none", "o": "bind", "device": "/h/d"}}, `"/h/d"`},
+		{volume{"local", nil}, "null"},
+		{volume{"local", map[string]string{"type": "nfs", "o": "addr=x,password=hunter2"}}, "null"},
+		{volume{"local", map[string]string{"type": "none"}}, "null"},
+	} {
+		var out strings.Builder
+		if err := tmpl.Execute(&out, tt.v); err != nil {
+			t.Fatalf("%+v: %v", tt.v, err)
+		}
+
+		if out.String() != tt.want {
+			t.Errorf("%+v: output %s, want %s", tt.v, out.String(), tt.want)
+		}
+	}
+}
+
+// derefAll is the values of the non-nil elements.
+func derefAll(ps []*string) []string {
+	var out []string
+
+	for _, p := range ps {
+		if p != nil {
+			out = append(out, *p)
+		}
+	}
+
+	return out
+}
+
+// TestWritableSourcesBadAnswers: a partial list must never come back, since
+// the caller trusts every project outside it.
+func TestWritableSourcesBadAnswers(t *testing.T) {
+	t.Parallel()
+
+	id := strings.Repeat("1", 64)
+	id2 := strings.Repeat("2", 64)
+	one := containertest.Rule{Stdout: id + "\n"}
+	withVolume := containertest.Rule{Stdout: rwLine("", `"v",`)}
+
+	tests := []struct {
+		name          string
+		ps, insp, vol containertest.Rule
+	}{
+		{"ps fails", containertest.Rule{Exit: 1, Stderr: "boom"}, containertest.Rule{}, containertest.Rule{}},
+		{"a short id", containertest.Rule{Stdout: "abc123\n"}, containertest.Rule{}, containertest.Rule{}},
+		{"inspect fails", one, containertest.Rule{Exit: 1, Stderr: "no such container"}, containertest.Rule{}},
+		{"too few answers", containertest.Rule{Stdout: id + "\n" + id2 + "\n"}, containertest.Rule{Stdout: rwLine(`"/a",`, "")}, containertest.Rule{}},
+		{"not JSON", one, containertest.Rule{Stdout: "/a\n"}, containertest.Rule{}},
+		{"the old array", one, containertest.Rule{Stdout: `["/a",null]` + "\n"}, containertest.Rule{}},
+		{"no volume list", one, containertest.Rule{Stdout: `{"bind":["/a",null]}` + "\n"}, containertest.Rule{}},
+		{"a relative source", one, containertest.Rule{Stdout: rwLine(`"data",`, "")}, containertest.Rule{}},
+		{"a control character", one, containertest.Rule{Stdout: rwLine(`"/a\nb",`, "")}, containertest.Rule{}},
+		{"a bad volume name", one, containertest.Rule{Stdout: rwLine("", `"--help",`)}, containertest.Rule{Stdout: "null\n"}},
+		{"volume inspect fails", one, withVolume, containertest.Rule{Exit: 1, Stderr: "no such volume"}},
+		{"too few volume answers", one, withVolume, containertest.Rule{Stdout: ""}},
+		{"a volume answer not JSON", one, withVolume, containertest.Rule{Stdout: "/h/data\n"}},
+		{"a relative device", one, withVolume, containertest.Rule{Stdout: `"data"` + "\n"}},
+		{"a device with a control character", one, withVolume, containertest.Rule{Stdout: `"/a\u0007b"` + "\n"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tt.ps.Match, tt.insp.Match, tt.vol.Match = []string{"ps"}, []string{"inspect"}, []string{"volume", "inspect"}
+			e := containertest.Engine(t, containertest.Scenario{Rules: []containertest.Rule{tt.ps, tt.vol, tt.insp}})
+
+			if got, err := e.WritableSources(t.Context(), "my-app"); err == nil || got != nil {
+				t.Errorf("got %q, %v; want an error and no list", paths(got), err)
+			}
+		})
+	}
+}
+
+// TestWritableSourcesLinuxPaths: a source in Linux syntax is read on every
+// host (Docker Desktop on Windows reports its VM's paths, as for the docker
+// socket); whether it names a file here is the caller's question.
+func TestWritableSourcesLinuxPaths(t *testing.T) {
+	t.Parallel()
+
+	id := strings.Repeat("1", 64)
+	e := containertest.Engine(t, containertest.Scenario{Rules: []containertest.Rule{
+		{Match: []string{"ps"}, Stdout: id + "\n"},
+		{Match: []string{"inspect"}, Stdout: rwLine(`"/var/run/docker.sock","/run/desktop/mnt/host/c/app/data",`, `"v",`)},
+		{Match: []string{"volume", "inspect"}, Stdout: `"/run/desktop/mnt/host/c/app/logs"` + "\n"},
+	}})
+
+	got, err := e.WritableSources(t.Context(), "my-app")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := [][]string{{"/run/desktop/mnt/host/c/app/data"}, {"/run/desktop/mnt/host/c/app/logs"}, {"/var/run/docker.sock"}}
+	if !slices.EqualFunc(paths(got), want, slices.Equal) {
+		t.Errorf("sources = %q, want %q", paths(got), want)
+	}
+}
+
+func TestWritableSourcesNoContainerNoInspect(t *testing.T) {
 	t.Parallel()
 
 	calls := filepath.Join(t.TempDir(), "calls")
 	e := containertest.Engine(t, containertest.Scenario{Calls: calls, Rules: []containertest.Rule{{Match: []string{"ps"}}}})
 
-	got, err := e.RWBindSources(t.Context(), "my-app")
+	got, err := e.WritableSources(t.Context(), "my-app")
 	if err != nil || got != nil {
-		t.Errorf("got %q, %v; want none", got, err)
+		t.Errorf("got %q, %v; want none", paths(got), err)
 	}
 
 	if n := len(containertest.ReadCalls(t, calls)); n != 1 {
@@ -1063,7 +1223,7 @@ func TestRWBindSourcesNoContainerNoInspect(t *testing.T) {
 	}
 
 	for _, p := range []string{"", "My App", "--x"} {
-		if _, err := e.RWBindSources(t.Context(), p); api.CodeOf(err) != api.CodeInvalidRequest {
+		if _, err := e.WritableSources(t.Context(), p); api.CodeOf(err) != api.CodeInvalidRequest {
 			t.Errorf("project %q: err = %v", p, err)
 		}
 	}

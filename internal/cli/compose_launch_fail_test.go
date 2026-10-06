@@ -1144,8 +1144,8 @@ func TestComposeLaunchProjectDirectoryFlags(t *testing.T) {
 }
 
 // TestComposeLaunchRefusesProjectsInWritableMounts: a project that a container
-// can write (it lies under a read-write bind mount of any container of the
-// stack) is never found and built by the search: a container may have planted
+// can write (it lies under a read-write mount of any container of the stack)
+// is never found and built by the search: a container may have planted
 // it, and building runs its code here. Read-only mounts are not in the list
 // (a container can't write them). A project the user names is built anyway.
 func TestComposeLaunchRefusesProjectsInWritableMounts(t *testing.T) {
@@ -1192,7 +1192,19 @@ func TestComposeLaunchRefusesProjectsInWritableMounts(t *testing.T) {
 		w.docker.rw = []string{filepath.Dir(w.dir)}
 
 		out, _ := w.run(exitCodeOf(api.CodeInvalidRequest), "compose", "launch")
-		expectOutput(t, out, "launched 0 of 4 service(s)", "compose directory", "read-write bind mount")
+		expectOutput(t, out, "launched 0 of 4 service(s)", "compose directory", "read-write mount")
+
+		if n := len(w.publishedProjects()); n != 0 {
+			t.Errorf("built %v", w.publishedProjects())
+		}
+	})
+
+	t.Run("a mount that isn't on this machine stops the search", func(t *testing.T) {
+		w := newLaunchWorld(t)
+		w.docker.rw = []string{"/run/desktop/mnt/host/c/eyedbg-nowhere/data"}
+
+		out, _ := w.run(exitCodeOf(api.CodeInvalidRequest), "compose", "launch")
+		expectOutput(t, out, "launched 0 of 4 service(s)", "is not a path on this machine", "--dotnet-project")
 
 		if n := len(w.publishedProjects()); n != 0 {
 			t.Errorf("built %v", w.publishedProjects())

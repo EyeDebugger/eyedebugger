@@ -293,7 +293,7 @@ func (r *launchRun) resolveProjects(ctx context.Context) {
 // --dotnet-project is built wherever it lies in the compose directory, even
 // under a bind mount a container can write: the user chose that file. One
 // found by search (or remembered by a label) is never one a container could
-// have written, which a search checks against the read-write bind mounts of
+// have written, which a search checks against the read-write mounts of
 // every container of the stack; the one a corroborated label remembers was
 // accepted by an earlier run.
 func (r *launchRun) projectOf(ctx context.Context, s *launchSvc) (abs, rel string, err error) {
@@ -322,12 +322,12 @@ func (r *launchRun) projectOf(ctx context.Context, s *launchSvc) (abs, rel strin
 	return abs, rel, projectError("the project found for "+s.dll, err)
 }
 
-// rwSources are the host paths of the read-write bind mounts of every
-// container of the project, read once per run.
-func (r *launchRun) rwSources(ctx context.Context) ([]string, error) {
+// rwSources are the host files and directories every container of the
+// project can write, read once per run.
+func (r *launchRun) rwSources(ctx context.Context) ([]container.WritableSource, error) {
 	if !r.rwRead {
 		r.rwRead = true
-		r.rw, r.rwErr = r.docker.RWBindSources(ctx, r.project)
+		r.rw, r.rwErr = r.docker.WritableSources(ctx, r.project)
 	}
 
 	return r.rw, r.rwErr
