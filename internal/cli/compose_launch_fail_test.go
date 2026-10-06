@@ -6,6 +6,7 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1309,4 +1310,55 @@ func TestComposeLaunchKeepsOnlyRecordedFastServicesInTheOverride(t *testing.T) {
 	if want := []string{"consumer2", "producer"}; !slices.Equal(got, want) {
 		t.Errorf("override services = %v, want %v (consumer's labels were not the recorded ones)", got, want)
 	}
+}
+
+// TestComposeLaunchKeepsAMovedProjectsService: a service this home put in fast
+// mode whose project file has moved stays in the override when another service
+// is launched (its recorded project kept; its own next launch searches again).
+// One whose build directory is gone can't stay (the override couldn't mount
+// it); launching it is then refused with this eyedbg's way back.
+func TestComposeLaunchKeepsAMovedProjectsService(t *testing.T) {
+	t.Run("project moved", func(t *testing.T) {
+		w := newLaunchWorld(t)
+		w.enterNamed("producer")
+
+		producer := w.docker.byService("producer")
+		producer.fi.Fast.Project, producer.fi.Fast.ProjectPath = "", ""
+
+		w.enterNamed("consumer")
+
+		doc := readOverride(t, w.override())
+		if _, ok := doc.Services["producer"]; !ok {
+			t.Fatalf("producer was dropped from the override: %v", slices.Collect(maps.Keys(doc.Services)))
+		}
+
+		w.checkFragment(t, "producer", doc)
+
+		out, _ := w.run(0, "compose", "launch", "producer")
+		expectOutput(t, out, "launched 1 of 1 service(s)", "built Producer/Producer.csproj in")
+	})
+
+	t.Run("build directory gone", func(t *testing.T) {
+		w := newLaunchWorld(t)
+		w.enterNamed("producer")
+
+		if err := os.RemoveAll(w.serviceDir("producer")); err != nil {
+			t.Fatal(err)
+		}
+
+		w.enterNamed("consumer")
+
+		if _, ok := readOverride(t, w.override()).Services["producer"]; ok {
+			t.Fatal("producer stayed in the override without its build directory")
+		}
+
+		w.docker.byService("producer").fi.DLL = ""
+
+		_, errOut := w.run(exitCodeOf(api.CodeInvalidRequest), "compose", "launch", "producer")
+		expectOutput(t, errOut, "fast-mode labels, ignored", "'eyedbg compose restore producer' puts it back as built, then 'eyedbg compose launch producer'")
+
+		if strings.Contains(errOut, "the eyedbg that made it") {
+			t.Errorf("sends the user to another eyedbg:\n%s", errOut)
+		}
+	})
 }

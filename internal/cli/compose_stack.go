@@ -313,12 +313,15 @@ func (r *stackRun) writeOverride(frags []container.FastService) error {
 
 // fragmentOf is the override's fragment for a service already in fast mode,
 // rebuilt from its container's labels, as eyedbg's own override records them
-// (the labels alone are untrusted); it has none when its labels, its build
-// directory or its project file can't be found ('eyedbg compose launch
-// SERVICE' makes them again).
+// (the labels alone are untrusted). Its project is the one recorded, even when
+// that file has moved since (the next 'eyedbg compose launch SERVICE' searches
+// again). It has none when its labels aren't recorded or its build directory
+// is gone (the override can't mount it): the container then keeps labels no
+// override records, and launch refuses it until 'eyedbg compose restore
+// SERVICE' puts it back as built.
 func (r *stackRun) fragmentOf(ctx context.Context, c container.FastContainer) (container.FastService, bool) {
 	fi, err := r.docker.InspectFast(ctx, c.ID)
-	if err != nil || fi.Fast == nil || fi.Fast.Version != container.FastVersion || fi.Fast.Project == "" || !r.recordedFast(c.Service, fi.Fast) {
+	if err != nil || fi.Fast == nil || fi.Fast.Version != container.FastVersion || fi.Fast.ProjectLabel == "" || !r.recordedFast(c.Service, fi.Fast) {
 		return container.FastService{}, false
 	}
 
@@ -327,7 +330,7 @@ func (r *stackRun) fragmentOf(ctx context.Context, c container.FastContainer) (c
 		return container.FastService{}, false
 	}
 
-	return container.FastService{Name: c.Service, DLL: fi.Fast.DLL, WorkDir: fi.Fast.WorkDir, Project: fi.Fast.Project, Source: dir}, true
+	return container.FastService{Name: c.Service, DLL: fi.Fast.DLL, WorkDir: fi.Fast.WorkDir, Project: fi.Fast.ProjectLabel, Source: dir}, true
 }
 
 // stayingFragments are the fragments of the project's fast-mode services that
