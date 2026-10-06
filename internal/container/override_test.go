@@ -769,3 +769,64 @@ func TestReadRecordedRefusesWhatIsNotEyedbgs(t *testing.T) {
 		})
 	}
 }
+
+// TestOverrideAt: only a regular override.yml starting with eyedbg's header is
+// eyedbg's; nothing at the path is not present. Anything else (a user's file,
+// a symlink to eyedbg's, a FIFO, a directory) is present and not eyedbg's.
+func TestOverrideAt(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	write := func(rel, content string) string {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		return p
+	}
+
+	ours := write("home/override.yml", container.OverrideHeader+"\n{}\n")
+	headerOnly := write("short/override.yml", container.OverrideHeader)
+	user := write("user/override.yml", "services: {}\n")
+	otherName := write("named/compose.yml", container.OverrideHeader+"\n{}\n")
+	later := write("later/override.yml", "# mine\n"+container.OverrideHeader+"\n")
+
+	tests := []struct {
+		name          string
+		path          string
+		present, mine bool
+	}{
+		{"eyedbg's", ours, true, true},
+		{"the header without its newline", headerOnly, true, false},
+		{"a user's file", user, true, false},
+		{"another name", otherName, true, false},
+		{"the header on a later line", later, true, false},
+		{"nothing there", filepath.Join(dir, "gone", "override.yml"), false, false},
+		{"a directory", filepath.Join(dir, "home"), true, false},
+		{"a relative path", "override.yml", true, false},
+		{"empty", "", true, false},
+	}
+
+	if link := filepath.Join(dir, "link", "override.yml"); os.MkdirAll(filepath.Dir(link), 0o700) == nil && os.Symlink(ours, link) == nil {
+		tests = append(tests, struct {
+			name          string
+			path          string
+			present, mine bool
+		}{"a symlink to eyedbg's", link, true, false})
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if present, mine := container.OverrideAt(tt.path); present != tt.present || mine != tt.mine {
+				t.Errorf("OverrideAt(%q) = %v, %v; want %v, %v", tt.path, present, mine, tt.present, tt.mine)
+			}
+		})
+	}
+}
