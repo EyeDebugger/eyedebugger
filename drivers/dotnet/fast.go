@@ -178,6 +178,10 @@ type mountPath struct {
 }
 
 // newMountSet reads each spelling of each source (os.Stat follows a symlink).
+// A spelling that isn't absolute here names no file here: on Windows, a path
+// in Linux syntax (the engine VM's "/", say) is rooted but has no volume, and
+// os.Stat would read it on the current directory's drive — which may or may
+// not be the compose directory's.
 func newMountSet(sources []container.WritableSource) mountSet {
 	var m mountSet
 
@@ -185,9 +189,11 @@ func newMountSet(sources []container.WritableSource) mountSet {
 		paths := make([]mountPath, 0, len(src.Paths))
 
 		for _, p := range src.Paths {
-			info, err := os.Stat(p)
-			if err != nil {
-				info = nil
+			var info os.FileInfo
+			if filepath.IsAbs(p) {
+				if i, err := os.Stat(p); err == nil {
+					info = i
+				}
 			}
 
 			paths = append(paths, mountPath{path: filepath.Clean(p), shown: p, info: info})
