@@ -260,7 +260,11 @@ the service is refused (`INVALID_REQUEST`, skipped without names) naming `--dotn
 compose directory itself is at or under a source, no search is made. A path is at or under a source
 when it, or an ancestor up to the compose directory, is the same file as the source (`os.SameFile`),
 so symlinks and letter case on a case-insensitive file system don't matter; a source that doesn't
-exist on this host is compared by its path. A **read-only** mount can't be written by its container
+exist on this host is compared by its path. Docker Desktop for Mac showed one bind source as
+`/host_mnt/<host path>` (once, in the first container after the app started; later ones showed the
+host path), so a source with that prefix counts under both spellings. A remote engine's or Windows
+host's paths don't name this machine's files: the rule can't see them (unverified, as those
+setups are). A **read-only** mount can't be written by its container
 and stays searchable (named volumes aren't bind mounts here). A project named with
 `--dotnet-project` is built even under a writable mount: the user chose that file. A project a
 corroborated label remembers (below) was accepted by an earlier run and isn't searched again. Not
