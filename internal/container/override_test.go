@@ -772,7 +772,8 @@ func TestReadRecordedRefusesWhatIsNotEyedbgs(t *testing.T) {
 
 // TestOverrideAt: only a regular override.yml starting with eyedbg's header is
 // eyedbg's; nothing at the path is not present. Anything else (a user's file,
-// a symlink to eyedbg's, a FIFO, a directory) is present and not eyedbg's.
+// a symlink to eyedbg's, a directory, standing for every file that isn't
+// regular) is present and not eyedbg's.
 func TestOverrideAt(t *testing.T) {
 	t.Parallel()
 
