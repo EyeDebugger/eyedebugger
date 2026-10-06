@@ -41,9 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unhealthy; its output is in `eyedbg output` and `compose events --kind output`, not `docker
   compose logs`). Services with a `command:` or CMD, a non-exec-form entrypoint or no `tail` in the
   image are refused, with the reason. A project file a container could have written (under a
-  read-write bind mount or bind-backed local volume of any container of the stack) is never found
-  and built unasked, since a build runs its code on the host, and nothing is searched when such a
-  mount isn't on this machine (a remote engine, a Docker Desktop VM path on Windows): name it with
+  read-write bind mount or a read-write local volume's absolute device of any container of the
+  stack) is never found and built unasked, since a build runs its code on the host, and nothing is
+  searched when such a mount doesn't exist on this machine (a remote engine's or Docker Desktop VM
+  path, or removed since): name it with
   `--dotnet-project SERVICE=PATH`; each project is
   printed on stderr before its build (and is `project` in `--json`); a container's own fast-mode
   labels count only when eyedbg's override file for the project records them, and `restore` leaves

@@ -256,9 +256,16 @@ what every container of the project, in any state, can write on the host (`docke
 label=com.docker.compose.project=P`, then one `docker inspect` whose pinned template names only the
 `Source` of `RW` bind mounts and the `Name` of `RW` volumes of the `local` driver; no environment or
 arguments). A local volume can be a bind of a host directory (`driver_opts: {type: none, o: bind,
-device: PATH}`): one `docker volume inspect` with a pinned template prints a volume's `device` option
-only when its `type` option is `none`, and no other option (`o` may hold an NFS or CIFS password, so
-it is neither printed nor read); those devices count like bind sources. A match at or under a source
+device: PATH}`; with `o: bind` the kernel binds the device whatever `type` says, so `type: bind`
+works too): one `docker volume inspect` with a pinned template prints the `device` option of every
+local volume and no other option, not even `type` (`o` may hold an NFS or CIFS password, so it is
+neither printed nor read). Without `o` a bind can't be told from a block device, so every device that
+is an absolute path (host or Linux syntax) counts like a bind source: one that is no ancestor of a
+project changes nothing. A device that isn't absolute (nfs `host:/export`, tmpfs `tmpfs`) or starts
+with two separators (a cifs share `//srv/share`, `\\srv\share`; on Windows a stat of one would open an
+SMB connection, so it is never stat'ed) is no host path and is left out; an absolute device that
+doesn't exist here stops the search like any unseen source below (consistent with it: on a Windows
+host a bind device is a VM path, which is exactly the case to refuse). A match at or under a source
 is not counted among the matches; when it is the only match, the service is refused
 (`INVALID_REQUEST`, skipped without names) naming `--dotnet-project`; when the compose directory
 itself is at or under a source, no search is made. A path is at or under a source when it, or an
@@ -415,8 +422,8 @@ the copy can already run code in that container). The copy survives a restart bu
   launch re-derives nothing from the request (D3), and the compose directory and files the labels
   name are used only when they corroborate each other and the command line (D14).
 * **A container can't choose what the host builds.** The host build runs the project's code, so a
-  project file written by a container (under the stack's read-write bind mounts and bind-backed local
-  volumes, D12) is never found and built unasked, and a writable source eyedbg can't find on this
+  project file written by a container (under the stack's read-write bind mounts and local volumes'
+  absolute devices, D12) is never found and built unasked, and a writable source eyedbg can't find on this
   machine stops the search; a project the user names with `--dotnet-project` is the user's own choice, built
   wherever it lies in the compose directory. Each service's project is printed before its build.
   Residual: MSBuild reaches files beyond the project file (a `ProjectReference`, an `Import`, a
@@ -424,7 +431,9 @@ the copy can already run code in that container). The copy survives a restart bu
   graph. It sees only the writers that exist at launch: files that a since-removed container wrote
   under the compose directory (a `docker compose run --rm` one-off, a service whose mount was later
   dropped from the compose file) are not told apart from the user's. Volumes of other drivers
-  (plugins) that map host directories are not read.
+  (plugins) that map host directories are not read. A local volume's bind device spelled relative
+  (the kernel resolves it against dockerd's working directory) or with a leading `//` is not
+  listed; both are the user's own, unusual spellings.
 * **Escaping fails closed.** MSBuild's and Roslyn's separators in a path are refused, not escaped;
   `$` in override strings is doubled; compose file lists come from labels, never from parsing YAML.
 * **Deletion and overwrite are confined** to eyedbg's per-project directory under its home by `Lstat`

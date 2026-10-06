@@ -675,17 +675,18 @@ const (
 const rwMountsTemplate = `{"bind":[{{range .Mounts}}{{if and .RW (eq .Type "bind")}}{{json .Source}},{{end}}{{end}}null],` +
 	`"volume":[{{range .Mounts}}{{if and .RW (eq .Type "volume") (eq .Driver "local")}}{{json .Name}},{{end}}{{end}}null]}`
 
-// volumeDeviceTemplate selects, of a volume, its device option, and only for
-// a local volume whose type option is "none": the local driver's bind of a
-// host directory (driver_opts type none, o bind, device PATH). null for any
-// other volume. It reads no other option: "o" may hold an NFS or CIFS
-// password.
-const volumeDeviceTemplate = `{{if and (eq .Driver "local") .Options}}{{if eq (print (index .Options "type")) "none"}}` +
-	`{{with index .Options "device"}}{{json .}}{{else}}null{{end}}{{else}}null{{end}}{{else}}null{{end}}`
+// volumeDeviceTemplate selects, of a volume of the local driver, its device
+// option, whatever its type: with "o" bind, any type is a bind of the device
+// (driver_opts type none, o bind, device PATH is the documented spelling).
+// null for another driver's volume and for one without a device. It reads no
+// other option, not even type: "o" may hold an NFS or CIFS password.
+const volumeDeviceTemplate = `{{if and (eq .Driver "local") .Options}}` +
+	`{{with index .Options "device"}}{{json .}}{{else}}null{{end}}{{else}}null{{end}}`
 
 // WritableSource is one host file or directory a container of a stack can
 // write: a read-write bind mount's source, or the device of a local volume
-// bound to a host directory. Paths are the spellings it may have here: the
+// that may be bound to a host directory (an absolute path, not a network
+// share). Paths are the spellings it may have here: the
 // engine's, then (for Docker Desktop's /host_mnt/<path>) the host path.
 // Each is absolute in host or in Linux syntax: on a Windows host the engine
 // may report a path of its Linux VM, which names no file here.
@@ -699,7 +700,8 @@ type WritableSource struct {
 // may have written. It is one docker ps -a, one docker inspect and, when they
 // mount local volumes read-write, one docker volume inspect; it fails on any
 // answer it can't read, so the caller never works from a partial list. A
-// volume that isn't bound to a host directory is docker's own storage, not
+// volume without a device is docker's own storage, and one whose device is
+// no host path (see [Engine.volumeDevices]) is elsewhere: neither is
 // listed. Writers that no longer exist (a removed 'compose run --rm'
 // container, a mount since dropped from the compose file) can't be seen.
 func (e Engine) WritableSources(ctx context.Context, project string) ([]WritableSource, error) {
@@ -754,8 +756,16 @@ func (e Engine) projectContainerIDs(ctx context.Context, project string) ([]stri
 	return ids, nil
 }
 
-// volumeDevices are the host directories the named local volumes are bound
-// to, with one docker volume inspect; a volume not bound to one has none.
+// volumeDevices are the host paths the named local volumes may be bound to,
+// with one docker volume inspect: each device that is an absolute path (in
+// host or Linux syntax) and not a network share's. Without "o" (never read)
+// eyedbg can't tell a bind from a block device, so it lists both: a device
+// that isn't an ancestor of the compose directory or a project changes
+// nothing, and one that isn't on this machine stops the search (the
+// caller's rule for every source). A device that isn't absolute (nfs's
+// ":/export", tmpfs's "tmpfs") or names a share ("//srv/share", which a
+// stat on Windows would open as an SMB connection) is no host path and is
+// left out.
 func (e Engine) volumeDevices(ctx context.Context, names []string) ([]string, error) {
 	if len(names) == 0 {
 		return nil, nil
@@ -783,10 +793,11 @@ func (e Engine) volumeDevices(ctx context.Context, names []string) ([]string, er
 
 		switch {
 		case device == nil || *device == "":
-			// Not bound to a host directory (a type none volume without a device
-			// can't be mounted at all).
-		case !engineAbsPath(*device):
-			return nil, unexpectedAnswer("docker volume inspect", "a volume's device is not a plain absolute path: "+show(*device, 80))
+			// Docker's own storage (a bind needs a device).
+		case len(*device) > maxLabel || hasControl(*device):
+			return nil, unexpectedAnswer("docker volume inspect", "a volume's device is not plain text: "+show(*device, 80))
+		case isShare(*device) || !engineAbsPath(*device):
+			// Not a host path: a network share, nfs's host:/export, tmpfs.
 		default:
 			devices = append(devices, *device)
 		}
@@ -877,8 +888,9 @@ func writableSources(paths []string) []WritableSource {
 		src := WritableSource{Paths: []string{p}}
 
 		// Docker Desktop for Mac has shown a bind source as /host_mnt/<host
-		// path> (seen once, on a first container after the app started): both
-		// spellings count, since an extra one only makes the rule stricter.
+		// path> (seen twice, each time on the first container after the app
+		// started): both spellings count, since an extra one only makes the
+		// rule stricter.
 		if host, ok := strings.CutPrefix(p, dockerDesktopHostMount); ok && strings.HasPrefix(host, "/") {
 			src.Paths = append(src.Paths, host)
 		}
@@ -891,6 +903,18 @@ func writableSources(paths []string) []WritableSource {
 	}
 
 	return out
+}
+
+// isShare reports whether a volume's device names a network share
+// (//server/share or \\server\share, as cifs spells it): it starts with two
+// separators of either kind.
+func isShare(device string) bool {
+	return len(device) >= 2 && isSlash(device[0]) && isSlash(device[1])
+}
+
+// isSlash reports whether c is a path separator on some host.
+func isSlash(c byte) bool {
+	return c == '/' || c == '\\'
 }
 
 // engineAbsPath reports whether p, a path the engine reports, is plain text
