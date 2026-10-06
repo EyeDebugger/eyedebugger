@@ -31,7 +31,9 @@ are removed, and nothing is launched. What the project's directory holds decides
 with nothing in it a container could mount (no override, no build), eyedbg's files go; otherwise (the stack may run on
 another DOCKER_CONTEXT or host, whose containers still mount those files) nothing is removed and the output names the
 directory. Like launch, restore recreates only from a compose directory its container's labels
-corroborate (a compose file of its files label lies in it, and it is the directory --project-directory or -f names). A service that isn't in fast mode is skipped ("not in fast mode"). Containers in
+corroborate (a compose file of its files label lies in it, and it is the directory --project-directory or -f names); of
+those files it leaves out only eyedbg's override (this eyedbg's, or one an eyedbg of another EYEDBG_HOME wrote: it
+starts with eyedbg's header), never another file a label names. A service that isn't in fast mode is skipped ("not in fast mode"). Containers in
 any state are found, so a stopped fast-mode container is restored too; it is started as part of the recreate.
 
 The project is the one 'docker compose ps' shows for -f FILE (repeatable), --project-directory DIR and the current

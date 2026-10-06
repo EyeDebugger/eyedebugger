@@ -389,7 +389,7 @@ func TestComposeLaunchHelp(t *testing.T) {
 	for _, want := range []string{
 		"RECREATES", "SAME container", "DOWN", "docker compose logs", "read-only", "command: or image CMD", "service_healthy",
 		"A compile error therefore changes nothing", "compose restore", "--no-build", "chiseled", "never reads", "no --map",
-		"read-write bind mount", "--dotnet-project SERVICE=PATH", "untrusted input", "Not supported: compose files outside the project directory",
+		"read-write bind mount", "driver_opts type none", "isn't a path on this\nmachine", "--dotnet-project SERVICE=PATH", "untrusted input", "Not supported: compose files outside the project directory",
 	} {
 		if !strings.Contains(launch.Long, want) {
 			t.Errorf("compose launch's help lacks %q", want)
