@@ -63,8 +63,9 @@ func TestComposeLaunchRendering(t *testing.T) {
 	}
 
 	failed := []launchedMember{
-		{attachedMember: attachedMember{Service: "producer", Container: "myapp-producer-1", Error: boom}, Project: "Producer/Producer.csproj"},
-		{attachedMember: attachedMember{Service: "consumer", Container: "myapp-consumer-1", Error: lease}},
+		{attachedMember: attachedMember{Service: "producer", Container: "myapp-producer-1", Error: boom}, Project: "Producer/Producer.csproj", buildFailed: true},
+		// Chosen and built, then failed at the lease: not the project's fault.
+		{attachedMember: attachedMember{Service: "consumer", Container: "myapp-consumer-1", Error: lease}, Project: "Consumer/Consumer.csproj"},
 	}
 
 	partial := []launchedMember{
