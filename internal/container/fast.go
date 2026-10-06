@@ -651,6 +651,10 @@ func (e Engine) FastContainers(ctx context.Context, project string) ([]FastConta
 	return found, nil
 }
 
+// dockerDesktopHostMount is the prefix Docker Desktop for Mac has put before
+// the host path of a bind mount in inspect output.
+const dockerDesktopHostMount = "/host_mnt"
+
 // maxRWMountContainers bounds the containers of a project whose mounts
 // [Engine.RWBindSources] reads.
 const maxRWMountContainers = 512
@@ -732,6 +736,13 @@ func parseRWMounts(out []byte, want int) ([]string, error) {
 			}
 
 			sources = append(sources, *p)
+
+			// Docker Desktop for Mac has shown a bind source as /host_mnt/<host
+			// path> (seen once, on a first container after the app started): both
+			// spellings count, since an extra one only makes the rule stricter.
+			if host, ok := strings.CutPrefix(*p, dockerDesktopHostMount); ok && host != "" {
+				sources = append(sources, host)
+			}
 		}
 	}
 

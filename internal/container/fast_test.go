@@ -906,6 +906,27 @@ func TestFastContainersChecksProjectNames(t *testing.T) {
 // out: it names the host path of read-write bind mounts and nothing else.
 const pinnedRWMountsTemplate = `[{{range .Mounts}}{{if and .RW (eq .Type "bind")}}{{json .Source}},{{end}}{{end}}null]`
 
+// TestRWBindSourcesDockerDesktopPrefix: a source shown as /host_mnt/<path>
+// (Docker Desktop for Mac, seen once) counts under both spellings.
+func TestRWBindSourcesDockerDesktopPrefix(t *testing.T) {
+	t.Parallel()
+
+	id := strings.Repeat("1", 64)
+	e := containertest.Engine(t, containertest.Scenario{Rules: []containertest.Rule{
+		{Match: []string{"ps"}, Stdout: id + "\n"},
+		{Match: []string{"inspect"}, Stdout: `["/host_mnt/Users/me/app/data","/host_mnt",null]` + "\n"},
+	}})
+
+	got, err := e.RWBindSources(t.Context(), "my-app")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := []string{"/Users/me/app/data", "/host_mnt", "/host_mnt/Users/me/app/data"}; !slices.Equal(got, want) {
+		t.Errorf("sources = %q, want %q", got, want)
+	}
+}
+
 func TestRWBindSourcesAsksForMountsOnly(t *testing.T) {
 	t.Parallel()
 
