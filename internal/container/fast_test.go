@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -909,10 +910,10 @@ const pinnedRWMountsTemplate = `{"bind":[{{range .Mounts}}{{if and .RW (eq .Type
 	`"volume":[{{range .Mounts}}{{if and .RW (eq .Type "volume") (eq .Driver "local")}}{{json .Name}},{{end}}{{end}}null]}`
 
 // pinnedVolumeDeviceTemplate is the volume inspect template, spelled out: the
-// device option of a local volume of type none, and no other option ("o" may
-// hold a password).
-const pinnedVolumeDeviceTemplate = `{{if and (eq .Driver "local") .Options}}{{if eq (print (index .Options "type")) "none"}}` +
-	`{{with index .Options "device"}}{{json .}}{{else}}null{{end}}{{else}}null{{end}}{{else}}null{{end}}`
+// device option of a local volume, whatever its type, and no other option
+// ("o" may hold a password).
+const pinnedVolumeDeviceTemplate = `{{if and (eq .Driver "local") .Options}}` +
+	`{{with index .Options "device"}}{{json .}}{{else}}null{{end}}{{else}}null{{end}}`
 
 // rwLine is one line of the mounts template's output.
 func rwLine(binds, volumes string) string {
@@ -984,15 +985,15 @@ func TestWritableSourcesAsksForMountsOnly(t *testing.T) {
 	// The templates never name more than the sources of writable mounts and
 	// the device of a volume bound to a host directory.
 	templates := pinnedRWMountsTemplate + pinnedVolumeDeviceTemplate
-	for _, banned := range []string{".Config", "Env", "Args", ".HostConfig", "Destination", `"o"`, ".Labels", ".Mountpoint", ".Status"} {
+	for _, banned := range []string{".Config", "Env", "Args", ".HostConfig", "Destination", `"o"`, `"type"`, ".Labels", ".Mountpoint", ".Status"} {
 		if strings.Contains(templates, banned) {
 			t.Errorf("a template names %s", banned)
 		}
 	}
 
-	if n := strings.Count(pinnedVolumeDeviceTemplate, "index .Options"); n != 2 ||
-		!strings.Contains(pinnedVolumeDeviceTemplate, `index .Options "type"`) || !strings.Contains(pinnedVolumeDeviceTemplate, `index .Options "device"`) {
-		t.Errorf("the volume template reads options other than type and device: %s", pinnedVolumeDeviceTemplate)
+	if n := strings.Count(pinnedVolumeDeviceTemplate, ".Options"); n != 2 ||
+		!strings.Contains(pinnedVolumeDeviceTemplate, `index .Options "device"`) {
+		t.Errorf("the volume template reads options other than device: %s", pinnedVolumeDeviceTemplate)
 	}
 }
 
@@ -1051,8 +1052,8 @@ func TestWritableSourcesTemplate(t *testing.T) {
 }
 
 // TestVolumeDeviceTemplate runs the volume template over volume documents:
-// only a local volume of type none (a bind of a host directory) gives its
-// device, and no other option is ever printed.
+// a local volume gives its device whatever its type (with o=bind, any type is
+// a bind), and no other option is ever printed.
 func TestVolumeDeviceTemplate(t *testing.T) {
 	t.Parallel()
 
@@ -1064,10 +1065,12 @@ func TestVolumeDeviceTemplate(t *testing.T) {
 		want string
 	}{
 		{"a bind of a host directory", map[string]any{"Driver": "local", "Options": map[string]any{"type": "none", "o": "bind," + secret, "device": "/h/data"}}, `"/h/data"`},
-		{"an nfs volume", map[string]any{"Driver": "local", "Options": map[string]any{"type": "nfs", "o": "addr=10.0.0.1," + secret, "device": ":/export"}}, "null"},
-		{"a cifs volume", map[string]any{"Driver": "local", "Options": map[string]any{"type": "cifs", "o": secret, "device": "//srv/share"}}, "null"},
+		{"a bind spelled type bind", map[string]any{"Driver": "local", "Options": map[string]any{"type": "bind", "o": "bind," + secret, "device": "/h/data"}}, `"/h/data"`},
+		{"an nfs volume", map[string]any{"Driver": "local", "Options": map[string]any{"type": "nfs", "o": "addr=10.0.0.1," + secret, "device": ":/export"}}, `":/export"`},
+		{"a cifs volume", map[string]any{"Driver": "local", "Options": map[string]any{"type": "cifs", "o": secret, "device": "//srv/share"}}, `"//srv/share"`},
+		{"a tmpfs volume", map[string]any{"Driver": "local", "Options": map[string]any{"type": "tmpfs", "o": "size=100m", "device": "tmpfs"}}, `"tmpfs"`},
 		{"a plain volume", map[string]any{"Driver": "local", "Options": nil}, "null"},
-		{"no type", map[string]any{"Driver": "local", "Options": map[string]any{"device": "/h/data"}}, "null"},
+		{"no type", map[string]any{"Driver": "local", "Options": map[string]any{"device": "/h/data"}}, `"/h/data"`},
 		{"type none without a device", map[string]any{"Driver": "local", "Options": map[string]any{"type": "none", "o": "bind"}}, "null"},
 		{"another driver", map[string]any{"Driver": "plugin", "Options": map[string]any{"type": "none", "device": "/h/data"}}, "null"},
 	}
@@ -1110,8 +1113,11 @@ func TestVolumeDeviceTemplateTyped(t *testing.T) {
 		want string
 	}{
 		{volume{"local", map[string]string{"type": "none", "o": "bind", "device": "/h/d"}}, `"/h/d"`},
+		{volume{"local", map[string]string{"type": "bind", "o": "bind", "device": "/h/d"}}, `"/h/d"`},
 		{volume{"local", nil}, "null"},
 		{volume{"local", map[string]string{"type": "nfs", "o": "addr=x,password=hunter2"}}, "null"},
+		{volume{"local", map[string]string{"type": "nfs", "o": "addr=x,password=hunter2", "device": ":/export"}}, `":/export"`},
+		{volume{"plugin", map[string]string{"device": "/h/d"}}, "null"},
 		{volume{"local", map[string]string{"type": "none"}}, "null"},
 	} {
 		var out strings.Builder
@@ -1165,7 +1171,7 @@ func TestWritableSourcesBadAnswers(t *testing.T) {
 		{"volume inspect fails", one, withVolume, containertest.Rule{Exit: 1, Stderr: "no such volume"}},
 		{"too few volume answers", one, withVolume, containertest.Rule{Stdout: ""}},
 		{"a volume answer not JSON", one, withVolume, containertest.Rule{Stdout: "/h/data\n"}},
-		{"a relative device", one, withVolume, containertest.Rule{Stdout: `"data"` + "\n"}},
+		{"a device too long", one, withVolume, containertest.Rule{Stdout: `"/` + strings.Repeat("a", 4096) + `"` + "\n"}},
 		{"a device with a control character", one, withVolume, containertest.Rule{Stdout: `"/a\u0007b"` + "\n"}},
 	}
 
@@ -1180,6 +1186,56 @@ func TestWritableSourcesBadAnswers(t *testing.T) {
 				t.Errorf("got %q, %v; want an error and no list", paths(got), err)
 			}
 		})
+	}
+}
+
+// TestWritableSourcesVolumeDevices: every absolute device of a local volume
+// is a source, whatever its type (eyedbg can't read "o", so a block device
+// counts too, harmlessly); a device that is no host path (nfs's
+// host:/export, tmpfs, a relative one, a network share) is left out, never an
+// error. Whether a source is on this machine is the caller's question: an
+// absolute device that isn't stops its search.
+func TestWritableSourcesVolumeDevices(t *testing.T) {
+	t.Parallel()
+
+	id := strings.Repeat("1", 64)
+	answers := []string{
+		`"/h/bound"`,         // type none or bind, o=bind
+		`"/dev/sdb1"`,        // a block device
+		`"/h/not-here"`,      // a device that isn't on this machine
+		`":/export"`,         // nfs
+		`"10.0.0.1:/export"`, // nfs
+		`"tmpfs"`,            // tmpfs
+		`"data"`,             // relative
+		`"//srv/share"`,      // cifs
+		`"\\\\srv\\share"`,   // a share, Windows spelling
+		`"/\\srv\\share"`,    // a share, mixed separators
+		`""`,                 // empty
+		"null",               // plain volume
+	}
+	names := make([]string, len(answers))
+	for i := range answers {
+		names[i] = fmt.Sprintf(`"v%02d",`, i)
+	}
+
+	calls := filepath.Join(t.TempDir(), "calls")
+	e := containertest.Engine(t, containertest.Scenario{Calls: calls, Rules: []containertest.Rule{
+		{Match: []string{"ps"}, Stdout: id + "\n"},
+		{Match: []string{"inspect"}, Stdout: rwLine("", strings.Join(names, ""))},
+		{Match: []string{"volume", "inspect"}, Stdout: strings.Join(answers, "\n") + "\n"},
+	}})
+
+	got, err := e.WritableSources(t.Context(), "my-app")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := [][]string{{"/dev/sdb1"}, {"/h/bound"}, {"/h/not-here"}}; !slices.EqualFunc(paths(got), want, slices.Equal) {
+		t.Errorf("sources = %q, want %q", paths(got), want)
+	}
+
+	if argvs := containertest.ReadCalls(t, calls); len(argvs) != 3 || len(argvs[2]) != 5+len(answers) {
+		t.Errorf("docker ran %q, want one volume inspect of %d volumes", argvs, len(answers))
 	}
 }
 
