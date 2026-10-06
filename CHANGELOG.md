@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-06
+
 ### Added
 
 - Debugging .NET services in docker containers (ADR 0020). `eyedbg attach dotnet --container NAME
@@ -462,7 +464,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A response over 1 MiB (e.g. `output` after a lot of program output) dropped the connection.
 - Stopping a session that is also ending by itself no longer races over its end reason.
 
-[Unreleased]: https://github.com/EyeDebugger/eyedebugger/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/EyeDebugger/eyedebugger/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/EyeDebugger/eyedebugger/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/EyeDebugger/eyedebugger/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/EyeDebugger/eyedebugger/compare/v0.2.0-beta.1...v0.2.0
 [0.2.0-beta.1]: https://github.com/EyeDebugger/eyedebugger/compare/v0.1.2...v0.2.0-beta.1

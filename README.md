@@ -62,7 +62,7 @@ Full guide: [extensions/vscode/README.md](extensions/vscode/README.md), `eyedbg 
 
 ## Containers and docker compose (.NET)
 
-> Unreleased: on `main`, in the release after 0.2.1.
+> Since 0.3.0.
 
 Debug a .NET service in a running Linux docker container, or every .NET service of a compose stack
 as one group, with no edit to a Dockerfile or compose file. Needs docker (with the compose plugin
