@@ -55,8 +55,8 @@ func skippedProjectDir(name string) bool {
 // resolved root.
 //
 // rw are the host files and directories the stack's containers can write
-// (container.Engine.WritableSources: read-write bind mounts, local volumes
-// bound to a host directory): a container can write anything under one, a
+// (container.Engine.WritableSources: read-write bind mounts, local volumes'
+// absolute devices): a container can write anything under one, a
 // project file included, and building a project is running its code on this
 // machine. So a project at or under one of them is never returned: it is not
 // counted among the matches, and when it is the only match the error says so.
@@ -86,7 +86,8 @@ func FindContainerProject(root, dll string, limit int, rw []container.WritableSo
 	}
 
 	if src := mounts.unseen(); src != "" {
-		return "", api.NewError(api.CodeInvalidRequest, quote(src)+", a read-write mount of one of the stack's containers, is not a path on this machine: "+
+		return "", api.NewError(api.CodeInvalidRequest, quote(src)+", a read-write mount of one of the stack's containers, doesn't exist on this machine "+
+			"(a remote engine's or Docker Desktop VM path, or removed since): "+
 			"eyedbg can't tell whether it covers the compose directory, so no project is searched for "+dll,
 			"pass --dotnet-project SERVICE=PATH to name the project yourself")
 	}
@@ -168,10 +169,12 @@ type mountSet struct {
 	sources [][]mountPath
 }
 
-// mountPath is one spelling of a source.
+// mountPath is one spelling of a source: as compared here (path) and as the
+// engine reported it (shown, for messages).
 type mountPath struct {
-	path string
-	info os.FileInfo
+	path  string
+	shown string
+	info  os.FileInfo
 }
 
 // newMountSet reads each spelling of each source (os.Stat follows a symlink).
@@ -187,7 +190,7 @@ func newMountSet(sources []container.WritableSource) mountSet {
 				info = nil
 			}
 
-			paths = append(paths, mountPath{path: filepath.Clean(p), info: info})
+			paths = append(paths, mountPath{path: filepath.Clean(p), shown: p, info: info})
 		}
 
 		m.sources = append(m.sources, paths)
@@ -196,12 +199,12 @@ func newMountSet(sources []container.WritableSource) mountSet {
 	return m
 }
 
-// unseen is the first source none of whose spellings exists here, "" when
-// every one does.
+// unseen is the first source none of whose spellings exists here, as the
+// engine spelled it, "" when every one does.
 func (m mountSet) unseen() string {
 	for _, paths := range m.sources {
 		if len(paths) > 0 && !slices.ContainsFunc(paths, func(mp mountPath) bool { return mp.info != nil }) {
-			return paths[0].path
+			return paths[0].shown
 		}
 	}
 

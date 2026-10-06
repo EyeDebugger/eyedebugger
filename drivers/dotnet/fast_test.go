@@ -262,7 +262,7 @@ func TestFindContainerProjectSkipsWritableMounts(t *testing.T) {
 
 	const (
 		writable = "a container can write"
-		notHere  = "is not a path on this machine"
+		notHere  = "doesn't exist on this machine (a remote engine's or Docker Desktop VM path, or removed since)"
 	)
 
 	tests := []struct {
@@ -284,6 +284,9 @@ func TestFindContainerProjectSkipsWritableMounts(t *testing.T) {
 		{name: "a name that only starts like the mount's", dll: "Vendor.dll", rw: []string{filepath.Join(root, "dat")}, want: "data/x/Vendor.csproj"},
 		{name: "a mount source that isn't here", dll: "Vendor.dll", rw: []string{filepath.Join(root, "nowhere", "data")}, err: notHere},
 		{name: "a source in Linux syntax that isn't here", dll: "Vendor.dll", rw: []string{"/run/desktop/mnt/host/nowhere-eyedbg/data"}, err: notHere},
+		// Named as the engine spelled it, not as this host would (on Windows,
+		// filepath.Clean turns every / into \).
+		{name: "an unseen source is shown as docker shows it", dll: "Vendor.dll", rw: []string{"/var/run/../nowhere-eyedbg//docker.sock"}, err: `"/var/run/../nowhere-eyedbg//docker.sock", a read-write mount`},
 		{name: "the project outside the mount, a planted twin inside", dll: "App.dll", rw: []string{filepath.Join(root, "data")}, want: "src/App/App.csproj"},
 		{name: "a planted twin is not an ambiguity either", dll: "App.dll", rw: []string{filepath.Join(root, "data"), filepath.Join(root, "other")}, want: "src/App/App.csproj"},
 	}
@@ -361,8 +364,8 @@ func TestFindContainerProjectSpellings(t *testing.T) {
 	}{
 		{"the second spelling is here", "Vendor.dll", []container.WritableSource{{Paths: []string{"/host_mnt" + data, data}}}, "", "a container can write"},
 		{"the second spelling is here, the project outside", "App.dll", []container.WritableSource{{Paths: []string{"/host_mnt" + data, data}}}, "src/App/App.csproj", ""},
-		{"no spelling is here", "App.dll", []container.WritableSource{{Paths: []string{"/host_mnt" + away, away}}}, "", "is not a path on this machine"},
-		{"one source of several isn't here", "App.dll", []container.WritableSource{{Paths: []string{data}}, {Paths: []string{away}}}, "", "is not a path on this machine"},
+		{"no spelling is here", "App.dll", []container.WritableSource{{Paths: []string{"/host_mnt" + away, away}}}, "", "doesn't exist on this machine"},
+		{"one source of several isn't here", "App.dll", []container.WritableSource{{Paths: []string{data}}, {Paths: []string{away}}}, "", "doesn't exist on this machine"},
 	}
 
 	for _, tt := range tests {

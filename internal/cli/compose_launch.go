@@ -68,10 +68,11 @@ A service that depends on another with 'condition: service_healthy' fails when c
 other idles: launch that one first.
 
 Building a project runs its code on this machine, so a project a container could have planted is never built unasked:
-a search skips every file under (or at) a read-write bind mount, or a local volume bound to a host directory
-(driver_opts type none), of any container of the stack, resolved as real paths (a read-only mount can't be written
-by its container and is searched); when the compose directory itself is under one, or one isn't a path on this
-machine (a remote engine's, a Docker Desktop VM path on Windows), nothing is searched. Such a service is refused (skipped without names) with a hint to name the project yourself:
+a search skips every file under (or at) a read-write bind mount, or the device of a read-write local volume
+(driver_opts device, whatever its type, when it is an absolute path and not a network share), of any container of
+the stack, resolved as real paths (a read-only mount can't be written by its container and is searched); when the
+compose directory itself is under one, or one doesn't exist on this machine (a remote engine's or Docker Desktop VM
+path, or removed since), nothing is searched. Such a service is refused (skipped without names) with a hint to name the project yourself:
 --dotnet-project SERVICE=PATH, which is built wherever it lies in the compose directory, as it is your choice. A
 service's own fast-mode labels (dev.izzat.eyedbg.fast.*) are believed only when eyedbg's override file for the
 project records the same ones: any container label is untrusted input unless eyedbg's own files corroborate it.
