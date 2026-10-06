@@ -25,6 +25,9 @@ type launchedMember struct {
 	// nothing was to be built or none was chosen.
 	Project string      `json:"project,omitempty"`
 	Fast    *launchFast `json:"fast,omitempty"`
+	// buildFailed: the error is the build's, so the text row names the
+	// project (any later failure is not the project's).
+	buildFailed bool
 }
 
 // launchFast is what a launch did to a service that now runs.
@@ -140,7 +143,7 @@ func launchRow(m *launchedMember) []string {
 		return []string{name, m.Session.ID, "launched", launchDetail(m)}
 	case m.Skipped != "":
 		return []string{name, "-", rowSkipped, m.Skipped}
-	case m.Error != nil && m.Project != "":
+	case m.Error != nil && m.buildFailed && m.Project != "":
 		return []string{name, "-", rowFailed, "project " + m.Project + ": " + errorLine(m.Error)}
 	case m.Error != nil:
 		return []string{name, "-", rowFailed, errorLine(m.Error)}

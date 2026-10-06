@@ -401,6 +401,7 @@ func (r *launchRun) build(ctx context.Context) {
 
 		for _, s := range group {
 			if err != nil {
+				s.buildFailed = true
 				r.fail(s, err)
 
 				continue
@@ -696,7 +697,7 @@ func (r *launchRun) members() []launchedMember {
 
 	for i, s := range r.svcs {
 		m := s.res
-		m.Service, m.Container, m.Project = s.row.Service, s.row.Name, s.projectRel
+		m.Service, m.Container, m.Project, m.buildFailed = s.row.Service, s.row.Name, s.projectRel, s.buildFailed
 
 		if m.Session != nil {
 			m.Fast = &launchFast{

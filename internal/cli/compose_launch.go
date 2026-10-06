@@ -329,10 +329,11 @@ type launchSvc struct {
 	// project is the project file (absolute) and projectRel its path below
 	// the compose directory.
 	project, projectRel string
-	// out is the staged build to mirror.
-	out   string
-	built time.Duration
-	carry carry
+	// out is the staged build to mirror; buildFailed: its build failed.
+	out         string
+	built       time.Duration
+	buildFailed bool
+	carry       carry
 	// downed: the service's app was stopped by this run; recreated: its
 	// container was.
 	downed, recreated bool
