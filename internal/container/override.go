@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -286,6 +287,52 @@ func (rec Recorded) Corroborates(service string, fl *FastLabels) bool {
 	}
 
 	return true
+}
+
+// OverrideAt says what is at path, the compose file a container's
+// fast.override label names (untrusted: an image's LABEL can name any file):
+// whether anything is there, and whether it is an override eyedbg wrote, by
+// any eyedbg home: a regular file named [OverrideName] whose first line is
+// [OverrideHeader]. An image can't make a user's compose file start with that
+// line, so only such a file (or none) may be left out when the container is
+// recreated as built. A path that isn't plain and absolute, or a file that
+// can't be read, is present and not eyedbg's.
+func OverrideAt(path string) (present, ours bool) {
+	if !plainAbsPath(path) {
+		return true, false
+	}
+
+	info, err := os.Lstat(path)
+
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return false, false
+	case err != nil:
+		return true, false
+	case !info.Mode().IsRegular() || filepath.Base(path) != OverrideName:
+		return true, false
+	}
+
+	f, err := openNoBlock(path)
+	if err != nil {
+		return true, false
+	}
+	defer f.Close()
+
+	// What was opened must be the regular file checked (no FIFO or device
+	// swapped in since).
+	if opened, err := f.Stat(); err != nil || !opened.Mode().IsRegular() || !os.SameFile(opened, info) {
+		return true, false
+	}
+
+	want := OverrideHeader + "\n"
+	buf := make([]byte, len(want))
+
+	if _, err := io.ReadFull(f, buf); err != nil {
+		return true, false
+	}
+
+	return true, string(buf) == want
 }
 
 // tempTries bounds picking a fresh temporary name.

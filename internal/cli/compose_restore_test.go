@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
+	"github.com/eyedebugger/eyedebugger/internal/container"
 )
 
 // restoreDoc is 'compose restore --json'.
@@ -361,4 +362,87 @@ func TestComposeRestoreProjectDirectoryFlag(t *testing.T) {
 	if len(doc.Members) != 1 || !doc.Members[0].Restored {
 		t.Errorf("with the right directory: %+v", doc.Members)
 	}
+}
+
+// TestComposeRestoreOverrideLabelUntrusted: the compose file a container's
+// fast.override label names is left out of the recreate only when it is
+// eyedbg's (this home's, or any home's: it starts with eyedbg's header) or
+// isn't there; an image's LABEL naming one of the user's own compose files
+// can't drop it.
+func TestComposeRestoreOverrideLabelUntrusted(t *testing.T) {
+	otherHome := filepath.Join(realDirWith(t), "compose", worldProject)
+	if err := os.MkdirAll(otherHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		file    func(w *launchWorld) string
+		content string // "" for no file
+		dropped bool
+	}{
+		{"a user's compose file", func(w *launchWorld) string { return filepath.Join(w.dir, "compose.hardening.yml") }, "services: {}\n", false},
+		{"a user's file named like eyedbg's", func(w *launchWorld) string { return filepath.Join(w.dir, container.OverrideName) }, "services: {}\n", false},
+		{"a file that only mentions the header", func(w *launchWorld) string { return filepath.Join(w.dir, "x", container.OverrideName) }, "# x\n" + container.OverrideHeader + "\n", false},
+		{"another home's override", func(*launchWorld) string { return filepath.Join(otherHome, container.OverrideName) }, container.OverrideHeader + "\n{}\n", true},
+		{"a file that isn't there", func(w *launchWorld) string { return filepath.Join(w.dir, "gone", container.OverrideName) }, "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newLaunchWorld(t)
+			w.enterNamed("producer")
+
+			named := tt.file(w)
+			if tt.content != "" {
+				writeFileAll(t, named, tt.content)
+			}
+
+			producer := w.docker.byService("producer")
+			producer.fi.Fast.Override = named
+			producer.fi.ConfigFiles = append(slices.Clone(producer.fi.ConfigFiles), named)
+
+			files := w.restoredFiles("producer")
+			if got := slices.Contains(files, named); got == tt.dropped {
+				t.Errorf("files = %q: %s left out = %v, want %v", files, named, !got, tt.dropped)
+			}
+
+			if slices.Contains(files, w.override()) {
+				t.Errorf("files = %q hold this home's override", files)
+			}
+		})
+	}
+}
+
+// writeFileAll writes content to p, making its directories.
+func writeFileAll(t *testing.T, p, content string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// restoredFiles restores service, which must succeed with one compose up, and
+// is the compose files that up named.
+func (w *launchWorld) restoredFiles(service string) []string {
+	w.t.Helper()
+
+	upsBefore := len(w.docker.upCalls())
+
+	doc := w.restoreJSON(0, service)
+	if len(doc.Members) != 1 || !doc.Members[0].Restored {
+		w.t.Fatalf("members = %+v", doc.Members)
+	}
+
+	ups := w.docker.upCalls()[upsBefore:]
+	if len(ups) != 1 {
+		w.t.Fatalf("compose up ran %d times: %+v", len(ups), ups)
+	}
+
+	return ups[0].ref.Files
 }

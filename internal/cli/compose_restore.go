@@ -88,7 +88,9 @@ type restoreSvc struct {
 	service string
 	id      string
 	fi      container.FastInfo
-	res     restoredMember
+	// files are the compose files to recreate it from ([restoreRun.filesOf]).
+	files []string
+	res   restoredMember
 }
 
 // live reports whether the service is still in the run.
@@ -337,6 +339,7 @@ func (r *restoreRun) inspect(ctx context.Context) {
 			}
 
 			s.fi, s.res.Container = fi, fi.Name
+			s.files = r.filesOf(&s.fi)
 		}
 	}
 }
@@ -391,7 +394,7 @@ func (r *restoreRun) up(ctx context.Context) {
 	var order []string
 
 	for _, s := range r.live() {
-		key := groupKey(s.fi.ComposeDir, r.filesOf(s))
+		key := groupKey(s.fi.ComposeDir, s.files)
 		if _, ok := groups[key]; !ok {
 			order = append(order, key)
 		}
@@ -407,7 +410,7 @@ func (r *restoreRun) up(ctx context.Context) {
 			names[i] = s.service
 		}
 
-		ref := container.ProjectRef{Name: r.project, WorkDir: group[0].fi.ComposeDir, Files: r.filesOf(group[0]), EnvFiles: r.envFiles}
+		ref := container.ProjectRef{Name: r.project, WorkDir: group[0].fi.ComposeDir, Files: group[0].files, EnvFiles: r.envFiles}
 
 		err := ref.Validate()
 		if err == nil {
@@ -428,15 +431,23 @@ func (r *restoreRun) up(ctx context.Context) {
 	}
 }
 
-// filesOf are the compose files to recreate s from: its container's own,
-// without eyedbg's override.
-func (r *restoreRun) filesOf(s *restoreSvc) []string {
-	override := r.override
-	if s.fi.Fast != nil {
-		override = s.fi.Fast.Override
+// filesOf are the compose files to recreate a container from: its own,
+// without eyedbg's override. Its fast.override label is untrusted (an image's
+// LABEL can name any file): the file it names is left out only when it is
+// this home's override, or eyedbg's override of any home (a moved
+// EYEDBG_HOME: the file starts with eyedbg's header, which an image can't put
+// in a user's compose file), or isn't there at all; otherwise it stays, as a
+// file of the user's.
+func (r *restoreRun) filesOf(fi *container.FastInfo) []string {
+	files := filesWithout(fi.ConfigFiles, r.override)
+
+	if fl := fi.Fast; fl != nil && fl.Override != r.override {
+		if present, ours := container.OverrideAt(fl.Override); !present || ours {
+			files = filesWithout(files, fl.Override)
+		}
 	}
 
-	return filesWithout(filesWithout(s.fi.ConfigFiles, override), r.override)
+	return files
 }
 
 // rewriteOverride drops the restored services' fragments from the override
