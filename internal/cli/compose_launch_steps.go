@@ -126,6 +126,8 @@ func (r *launchRun) checkKind(s *launchSvc) error {
 	// (an image's LABELs, another eyedbg's override) are ignored: the container
 	// is then judged as built.
 	ignored := fi.Fast != nil && !r.recordedFast(fi.Service, fi.Fast)
+	ownPath := ignored && fi.Fast.Override == r.override
+
 	if ignored {
 		fi.Fast = nil
 	}
@@ -143,15 +145,17 @@ func (r *launchRun) checkKind(s *launchSvc) error {
 
 	err := r.checkAsBuilt(s)
 	if err != nil && ignored {
-		return r.ignoredLabelsError(fi, err)
+		return r.ignoredLabelsError(fi, ownPath, err)
 	}
 
 	return err
 }
 
 // ignoredLabelsError adds to err, the refusal of a container judged as built,
-// that its eyedbg fast-mode labels were not believed.
-func (r *launchRun) ignoredLabelsError(fi *container.FastInfo, err error) error {
+// that its eyedbg fast-mode labels were not believed. ownPath: they name this
+// home's override (dropped from it, its build directory gone), so the way
+// back is this eyedbg's restore.
+func (r *launchRun) ignoredLabelsError(fi *container.FastInfo, ownPath bool, err error) error {
 	var ae *api.Error
 	if !errors.As(err, &ae) {
 		return err
@@ -163,6 +167,10 @@ func (r *launchRun) ignoredLabelsError(fi *container.FastInfo, err error) error 
 	}
 
 	hint := "'eyedbg compose restore " + fi.Service + "' with the eyedbg that made it, or 'docker compose up -d --force-recreate " + fi.Service + "', puts it back as built"
+	if ownPath {
+		hint = "'eyedbg compose restore " + fi.Service + "' puts it back as built, then 'eyedbg compose launch " + fi.Service + "'"
+	}
+
 	if ae.Hint != "" {
 		hint = ae.Hint + "; " + hint
 	}
