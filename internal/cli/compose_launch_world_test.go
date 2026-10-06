@@ -209,14 +209,20 @@ func (f *fakeStack) FastContainers(_ context.Context, project string) ([]contain
 	return out, nil
 }
 
-// RWBindSources answers with the read-write bind mount sources the test set.
-func (f *fakeStack) RWBindSources(_ context.Context, project string) ([]string, error) {
+// WritableSources answers with the writable sources the test set, one
+// spelling each.
+func (f *fakeStack) WritableSources(_ context.Context, project string) ([]container.WritableSource, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	f.recordf("rwmounts %s", project)
 
-	return slices.Clone(f.rw), f.rwErr
+	var out []container.WritableSource
+	for _, p := range f.rw {
+		out = append(out, container.WritableSource{Paths: []string{p}})
+	}
+
+	return out, f.rwErr
 }
 
 // overrideFile is the override as eyedbg wrote it: the header, then JSON.

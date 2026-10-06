@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/eyedebugger/eyedebugger/internal/api"
+	"github.com/eyedebugger/eyedebugger/internal/container"
 )
 
 // touch creates the file (and its directories).
@@ -259,7 +260,10 @@ func TestFindContainerProjectSkipsWritableMounts(t *testing.T) {
 		t.Skipf("symlinks: %v", err)
 	}
 
-	const writable = "a container can write"
+	const (
+		writable = "a container can write"
+		notHere  = "is not a path on this machine"
+	)
 
 	tests := []struct {
 		name string
@@ -278,7 +282,8 @@ func TestFindContainerProjectSkipsWritableMounts(t *testing.T) {
 		{name: "the file system root", dll: "App.dll", rw: []string{string(filepath.Separator)}, err: "compose directory"},
 		{name: "another directory's mount", dll: "Vendor.dll", rw: []string{filepath.Join(root, "other")}, want: "data/x/Vendor.csproj"},
 		{name: "a name that only starts like the mount's", dll: "Vendor.dll", rw: []string{filepath.Join(root, "dat")}, want: "data/x/Vendor.csproj"},
-		{name: "a mount source that isn't here", dll: "Vendor.dll", rw: []string{filepath.Join(root, "nowhere", "data")}, want: "data/x/Vendor.csproj"},
+		{name: "a mount source that isn't here", dll: "Vendor.dll", rw: []string{filepath.Join(root, "nowhere", "data")}, err: notHere},
+		{name: "a source in Linux syntax that isn't here", dll: "Vendor.dll", rw: []string{"/run/desktop/mnt/host/nowhere-eyedbg/data"}, err: notHere},
 		{name: "the project outside the mount, a planted twin inside", dll: "App.dll", rw: []string{filepath.Join(root, "data")}, want: "src/App/App.csproj"},
 		{name: "a planted twin is not an ambiguity either", dll: "App.dll", rw: []string{filepath.Join(root, "data"), filepath.Join(root, "other")}, want: "src/App/App.csproj"},
 	}
@@ -287,7 +292,7 @@ func TestFindContainerProjectSkipsWritableMounts(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := FindContainerProject(root, tt.dll, 50_000, tt.rw)
+			got, err := FindContainerProject(root, tt.dll, 50_000, oneSpelling(tt.rw...))
 
 			if tt.err != "" {
 				if got != "" || !strings.Contains(projectsOf(t, err), tt.err) {
@@ -319,8 +324,66 @@ func TestFindContainerProjectWritableMountCaseInsensitive(t *testing.T) {
 		t.Skip("a case-sensitive file system")
 	}
 
-	if _, err := FindContainerProject(root, "Vendor.dll", 100, []string{other}); err == nil || !strings.Contains(err.Error(), "a container can write") {
+	if _, err := FindContainerProject(root, "Vendor.dll", 100, oneSpelling(other)); err == nil || !strings.Contains(err.Error(), "a container can write") {
 		t.Errorf("a mount spelled %s did not cover Data: %v", other, err)
+	}
+}
+
+// oneSpelling is a writable source per path, each with that one spelling.
+func oneSpelling(paths ...string) []container.WritableSource {
+	out := make([]container.WritableSource, len(paths))
+	for i, p := range paths {
+		out[i] = container.WritableSource{Paths: []string{p}}
+	}
+
+	return out
+}
+
+// TestFindContainerProjectSpellings: a source counts when any of its
+// spellings is here (Docker Desktop's /host_mnt/<path> isn't, <path> is), and
+// stops the search when none is: what it covers can't be told.
+func TestFindContainerProjectSpellings(t *testing.T) {
+	t.Parallel()
+
+	root := realDir(t)
+	touch(t, filepath.Join(root, "src", "App", "App.csproj"))
+	touch(t, filepath.Join(root, "data", "x", "Vendor.csproj"))
+
+	data := filepath.Join(root, "data")
+	away := filepath.Join(root, "nowhere")
+
+	tests := []struct {
+		name string
+		dll  string
+		rw   []container.WritableSource
+		want string // the project below root, or ""
+		err  string // a part of the refusal
+	}{
+		{"the second spelling is here", "Vendor.dll", []container.WritableSource{{Paths: []string{"/host_mnt" + data, data}}}, "", "a container can write"},
+		{"the second spelling is here, the project outside", "App.dll", []container.WritableSource{{Paths: []string{"/host_mnt" + data, data}}}, "src/App/App.csproj", ""},
+		{"no spelling is here", "App.dll", []container.WritableSource{{Paths: []string{"/host_mnt" + away, away}}}, "", "is not a path on this machine"},
+		{"one source of several isn't here", "App.dll", []container.WritableSource{{Paths: []string{data}}, {Paths: []string{away}}}, "", "is not a path on this machine"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := FindContainerProject(root, tt.dll, 1000, tt.rw)
+
+			if tt.err != "" {
+				var ae *api.Error
+				if got != "" || !strings.Contains(projectsOf(t, err), tt.err) || !errors.As(err, &ae) || !strings.Contains(ae.Hint, "--dotnet-project") {
+					t.Errorf("got %q, %v; want a refusal containing %q and naming --dotnet-project", got, err, tt.err)
+				}
+
+				return
+			}
+
+			if err != nil || got != filepath.Join(root, filepath.FromSlash(tt.want)) {
+				t.Errorf("got %q, %v; want %s", got, err, tt.want)
+			}
+		})
 	}
 }
 
