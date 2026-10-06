@@ -265,6 +265,15 @@ func TestFindContainerProjectSkipsWritableMounts(t *testing.T) {
 		notHere  = "doesn't exist on this machine (a remote engine's or Docker Desktop VM path, or removed since)"
 	)
 
+	// The root of the compose directory's volume: C:\ (not \, the current
+	// drive's) on Windows.
+	volumeRoot := filepath.VolumeName(parent) + string(filepath.Separator)
+
+	rootedErr := "compose directory"
+	if runtime.GOOS == "windows" {
+		rootedErr = notHere
+	}
+
 	tests := []struct {
 		name string
 		dll  string
@@ -279,7 +288,11 @@ func TestFindContainerProjectSkipsWritableMounts(t *testing.T) {
 		{name: "a symlinked mount source", dll: "Vendor.dll", rw: []string{link}, err: writable},
 		{name: "the mount is the compose directory", dll: "App.dll", rw: []string{root}, err: "compose directory"},
 		{name: "a mount above the compose directory", dll: "App.dll", rw: []string{parent}, err: "compose directory"},
-		{name: "the file system root", dll: "App.dll", rw: []string{string(filepath.Separator)}, err: "compose directory"},
+		{name: "the file system root", dll: "App.dll", rw: []string{volumeRoot}, err: "compose directory"},
+		{name: "the file system root in another letter case", dll: "App.dll", rw: []string{strings.ToLower(volumeRoot)}, err: "compose directory"},
+		// On Windows, a path without a volume names no file here (Linux
+		// syntax: the engine VM's root), whichever drive is current.
+		{name: "a rooted path without a volume", dll: "App.dll", rw: []string{string(filepath.Separator)}, err: rootedErr},
 		{name: "another directory's mount", dll: "Vendor.dll", rw: []string{filepath.Join(root, "other")}, want: "data/x/Vendor.csproj"},
 		{name: "a name that only starts like the mount's", dll: "Vendor.dll", rw: []string{filepath.Join(root, "dat")}, want: "data/x/Vendor.csproj"},
 		{name: "a mount source that isn't here", dll: "Vendor.dll", rw: []string{filepath.Join(root, "nowhere", "data")}, err: notHere},
