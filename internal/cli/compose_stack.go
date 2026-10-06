@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -32,6 +33,7 @@ type stackDocker interface {
 	InspectFast(ctx context.Context, ref string) (container.FastInfo, error)
 	ProbeIdle(ctx context.Context, ref string) error
 	FastContainers(ctx context.Context, project string) ([]container.FastContainer, error)
+	RWBindSources(ctx context.Context, project string) ([]string, error)
 	ComposeUp(ctx context.Context, ref container.ProjectRef, override string, services []string, wait bool) error
 }
 
@@ -101,6 +103,11 @@ type stackRun struct {
 	// keepProject keeps the project directory although no service is in fast
 	// mode: a build failed, and its log is in it.
 	keepProject bool
+
+	// recorded is what eyedbg's override file for the project records (read
+	// once, again after a write); recordedErr why it could not be read.
+	recorded    *container.Recorded
+	recordedErr error
 }
 
 // newStackRun opens the run: the docker of the caller's engine.
@@ -131,9 +138,9 @@ func newStackRun(cmd *cobra.Command, info version.Info, g *globals, deps compose
 func corroborateProject(fi *container.FastInfo, opts container.ComposeOptions) error {
 	dir, err := container.CorroborateComposeDir(fi.ComposeDir, fi.ConfigFiles)
 	if err != nil {
-		return api.NewError(api.CodeInvalidRequest, "container "+fi.Name+"'s compose labels don't check out: "+err.Error(),
-			"fast mode builds in and recreates from the project directory its container's compose labels name, only when its compose files are there; "+
-				"an image's own labels can say anything, so a container made by plain 'docker run' is refused")
+		return api.NewError(api.CodeInvalidRequest, "container "+fi.Name+": "+err.Error(),
+			"fast mode needs a compose file inside the project directory: keep one there, or run compose without --project-directory. "+
+				"A container made by plain 'docker run' from an image that sets compose labels is refused the same way: an image's own labels can say anything")
 	}
 
 	if want := flagProjectDir(opts); want != "" && !sameDir(want, dir) {
@@ -253,6 +260,23 @@ func (r *stackRun) prune(ctx context.Context) bool {
 	return false
 }
 
+// holdsMounted reports whether eyedbg's directory for the project holds
+// anything a container can mount: the override file or a build under
+// services/. A directory with neither (a build log, the lock) has nothing a
+// container on any engine depends on; what can't be read counts as held.
+func (r *stackRun) holdsMounted() bool {
+	if _, err := os.Lstat(r.override); !errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+
+	entries, err := os.ReadDir(filepath.Join(r.projectDir, "services"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+
+	return err != nil || len(entries) > 0
+}
+
 // serviceDir is the directory of a service's build, which must exist as a
 // real directory for the override to mount it ("" when it doesn't).
 func (r *stackRun) serviceDir(service string) string {
@@ -264,13 +288,37 @@ func (r *stackRun) serviceDir(service string) string {
 	return dir
 }
 
+// recordedFast reports whether the fast-mode labels fl of service's container
+// are the ones eyedbg's own override file for this project records. Any
+// container label is untrusted input unless eyedbg-owned state corroborates
+// it: an image's LABELs copy onto every container made from it, so labels
+// alone may not say what a service runs or which project file builds it. A
+// file that can't be read records nothing.
+func (r *stackRun) recordedFast(service string, fl *container.FastLabels) bool {
+	if r.recorded == nil {
+		rec, err := container.ReadRecorded(r.override)
+		r.recorded, r.recordedErr = &rec, err
+	}
+
+	return r.recorded.Corroborates(service, fl)
+}
+
+// writeOverride writes the project's override file; what the next
+// [stackRun.recordedFast] reads is the new one.
+func (r *stackRun) writeOverride(frags []container.FastService) error {
+	r.recorded = nil
+
+	return container.WriteOverride(r.override, frags)
+}
+
 // fragmentOf is the override's fragment for a service already in fast mode,
-// rebuilt from its container's labels; it has none when its labels, its build
+// rebuilt from its container's labels, as eyedbg's own override records them
+// (the labels alone are untrusted); it has none when its labels, its build
 // directory or its project file can't be found ('eyedbg compose launch
 // SERVICE' makes them again).
 func (r *stackRun) fragmentOf(ctx context.Context, c container.FastContainer) (container.FastService, bool) {
 	fi, err := r.docker.InspectFast(ctx, c.ID)
-	if err != nil || fi.Fast == nil || fi.Fast.Version != container.FastVersion || fi.Fast.Project == "" {
+	if err != nil || fi.Fast == nil || fi.Fast.Version != container.FastVersion || fi.Fast.Project == "" || !r.recordedFast(c.Service, fi.Fast) {
 		return container.FastService{}, false
 	}
 

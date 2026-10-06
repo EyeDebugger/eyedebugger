@@ -38,7 +38,7 @@ func (w *launchWorld) enter(t *testing.T) {
 	oldIDs := map[string]string{"producer": w.docker.idOf("producer"), "consumer": w.docker.idOf("consumer"), "consumer2": w.docker.idOf("consumer2")}
 
 	out, _ := w.run(0, "compose", "launch", "--bp", producerTxt+":3")
-	expectOutput(t, out, "group myapp: launched 3 of 4 service(s)", "producer", "consumer2", "built in", "recreated -> launched",
+	expectOutput(t, out, "group myapp: launched 3 of 4 service(s)", "producer", "consumer2", "built Producer/Producer.csproj in", "recreated -> launched",
 		"db", "skipped", "path map: /src="+w.dir, "breakpoint "+producerTxt+":3:", "override: "+w.override(), "build log: ",
 		"recreated with this shell's compose environment", "app runs only while its eyedbg session runs it",
 		"undo with: eyedbg compose restore consumer consumer2 producer", "next: eyedbg compose wait -g myapp")
@@ -211,7 +211,7 @@ func (w *launchWorld) rebuild(t *testing.T) {
 		t.Errorf("while building: %+v, want the old app running with the old files (%s, %s)", building, producerMarker, before["producer"].ID)
 	}
 
-	expectOutput(t, out, "launched 1 of 1 service(s)", "built in", "launched (1 breakpoint carried)")
+	expectOutput(t, out, "launched 1 of 1 service(s)", "built Producer/Producer.csproj in", "launched (1 breakpoint carried)")
 
 	if strings.Contains(out, "recreated") {
 		t.Errorf("a rebuild says it recreated:\n%s", out)
@@ -389,6 +389,7 @@ func TestComposeLaunchHelp(t *testing.T) {
 	for _, want := range []string{
 		"RECREATES", "SAME container", "DOWN", "docker compose logs", "read-only", "command: or image CMD", "service_healthy",
 		"A compile error therefore changes nothing", "compose restore", "--no-build", "chiseled", "never reads", "no --map",
+		"read-write bind mount", "--dotnet-project SERVICE=PATH", "untrusted input", "Not supported: compose files outside the project directory",
 	} {
 		if !strings.Contains(launch.Long, want) {
 			t.Errorf("compose launch's help lacks %q", want)
@@ -446,8 +447,10 @@ func TestComposeLaunchRealEngine(t *testing.T) {
 		subs = append(subs, argv[0])
 	}
 
-	// A failed recreate prunes nothing and reads nothing back.
-	if want := []string{"inspect", "exec", "ps", "compose"}; !slices.Equal(subs, want) {
+	// The project is searched for after the read-write bind mounts of the
+	// stack's containers were asked for (a ps; no container answers here). A
+	// failed recreate prunes nothing and reads nothing back.
+	if want := []string{"inspect", "exec", "ps", "ps", "compose"}; !slices.Equal(subs, want) {
 		t.Fatalf("docker ran %v, want %v", subs, want)
 	}
 
@@ -460,7 +463,7 @@ func TestComposeLaunchRealEngine(t *testing.T) {
 		"--file=" + producer.ConfigFiles[0], "--file=" + producer.ConfigFiles[1], "--file=" + w.override(), "--env-file=" + envFile,
 		"up", "--detach", "--no-deps", "--force-recreate", "--no-build", "producer",
 	}
-	if got := argvs[3]; !slices.Equal(got, want) {
+	if got := argvs[4]; !slices.Equal(got, want) {
 		t.Errorf("compose up = %q\nwant         %q", got, want)
 	}
 }

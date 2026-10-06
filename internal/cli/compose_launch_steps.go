@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/eyedebugger/eyedebugger/drivers/dotnet"
@@ -120,19 +121,53 @@ func (r *launchRun) checkKind(s *launchSvc) error {
 		return err
 	}
 
+	// Its eyedbg labels say what runs and which project built it: believe them
+	// only when eyedbg's own override for this project records them. Others
+	// (an image's LABELs, another eyedbg's override) are ignored: the container
+	// is then judged as built.
+	ignored := fi.Fast != nil && !r.recordedFast(fi.Service, fi.Fast)
+	if ignored {
+		fi.Fast = nil
+	}
+
 	switch {
 	case fi.Fast != nil && fi.Fast.Version != container.FastVersion:
 		return api.NewError(api.CodeInvalidRequest, "container "+fi.Name+" is in fast mode of another eyedbg (label version "+fi.Fast.Version+")",
 			"'eyedbg compose restore "+fi.Service+"' with the eyedbg that made it, or 'docker compose up -d --force-recreate "+fi.Service+"'")
 	case fi.Fast != nil:
-		// In fast mode: its labels say what runs. Another override path means
-		// its container is recreated with this project's.
-		s.dll, s.appDir, s.entry = fi.Fast.DLL, fi.Fast.WorkDir, fi.Fast.Override != r.override
+		// In fast mode with this project's override: its labels say what runs.
+		s.dll, s.appDir, s.entry = fi.Fast.DLL, fi.Fast.WorkDir, false
 
 		return nil
 	}
 
-	return r.checkAsBuilt(s)
+	err := r.checkAsBuilt(s)
+	if err != nil && ignored {
+		return r.ignoredLabelsError(fi, err)
+	}
+
+	return err
+}
+
+// ignoredLabelsError adds to err, the refusal of a container judged as built,
+// that its eyedbg fast-mode labels were not believed.
+func (r *launchRun) ignoredLabelsError(fi *container.FastInfo, err error) error {
+	var ae *api.Error
+	if !errors.As(err, &ae) {
+		return err
+	}
+
+	why := "eyedbg's override for project " + r.project + " doesn't record them"
+	if r.recordedErr != nil {
+		why = "eyedbg's override for project " + r.project + " can't be read (" + r.recordedErr.Error() + ")"
+	}
+
+	hint := "'eyedbg compose restore " + fi.Service + "' with the eyedbg that made it, or 'docker compose up -d --force-recreate " + fi.Service + "', puts it back as built"
+	if ae.Hint != "" {
+		hint = ae.Hint + "; " + hint
+	}
+
+	return api.NewError(ae.Code, ae.Message+" (container "+fi.Name+" has eyedbg fast-mode labels, ignored: "+why+")", hint)
 }
 
 // checkAsBuilt checks a container nobody changed: its entrypoint must be
@@ -234,15 +269,16 @@ func (r *launchRun) checkBreakpoint(b breakpointArg) error {
 }
 
 // resolveProjects finds each service's project: --dotnet-project, else what
-// its container remembers, else the unique <assembly>.csproj under the compose
-// directory. Not needed without a build.
-func (r *launchRun) resolveProjects() {
+// its container remembers (the label eyedbg's own override records), else the
+// unique <assembly>.csproj under the compose directory that no container of the
+// stack can write. Not needed without a build.
+func (r *launchRun) resolveProjects(ctx context.Context) {
 	if r.req.noBuild {
 		return
 	}
 
 	for _, s := range r.live() {
-		abs, rel, err := r.projectOf(s)
+		abs, rel, err := r.projectOf(ctx, s)
 		if err != nil {
 			r.refuse(s, err)
 
@@ -253,7 +289,14 @@ func (r *launchRun) resolveProjects() {
 	}
 }
 
-func (r *launchRun) projectOf(s *launchSvc) (abs, rel string, err error) {
+// projectOf is the project to build for s. A project the user names with
+// --dotnet-project is built wherever it lies in the compose directory, even
+// under a bind mount a container can write: the user chose that file. One
+// found by search (or remembered by a label) is never one a container could
+// have written, which a search checks against the read-write bind mounts of
+// every container of the stack; the one a corroborated label remembers was
+// accepted by an earlier run.
+func (r *launchRun) projectOf(ctx context.Context, s *launchSvc) (abs, rel string, err error) {
 	if p, ok := r.req.projects[s.row.Service]; ok {
 		abs, rel, err = container.ResolveProject(r.workDir, p)
 
@@ -264,7 +307,12 @@ func (r *launchRun) projectOf(s *launchSvc) (abs, rel string, err error) {
 		return s.fi.Fast.ProjectPath, s.fi.Fast.Project, nil
 	}
 
-	found, err := dotnet.FindContainerProject(r.workDir, s.dll, maxProjectSearch)
+	rw, err := r.rwSources(ctx)
+	if err != nil {
+		return "", "", err
+	}
+
+	found, err := dotnet.FindContainerProject(r.workDir, s.dll, maxProjectSearch, rw)
 	if err != nil {
 		return "", "", fmt.Errorf("find the project of %s: %w", s.dll, err)
 	}
@@ -272,6 +320,17 @@ func (r *launchRun) projectOf(s *launchSvc) (abs, rel string, err error) {
 	abs, rel, err = container.ResolveProject(r.workDir, found)
 
 	return abs, rel, projectError("the project found for "+s.dll, err)
+}
+
+// rwSources are the host paths of the read-write bind mounts of every
+// container of the project, read once per run.
+func (r *launchRun) rwSources(ctx context.Context) ([]string, error) {
+	if !r.rwRead {
+		r.rwRead = true
+		r.rw, r.rwErr = r.docker.RWBindSources(ctx, r.project)
+	}
+
+	return r.rw, r.rwErr
 }
 
 // projectError is the INVALID_REQUEST for a project that can't be used.
@@ -323,6 +382,9 @@ func (r *launchRun) build(ctx context.Context) {
 	for _, group := range r.buildGroups() {
 		first := group[0]
 		out := filepath.Join(r.stage, first.row.Service)
+
+		r.announceBuild(group)
+
 		started := time.Now()
 
 		err := r.deps.stack.publish(ctx, dotnet.PublishSpec{
@@ -347,6 +409,17 @@ func (r *launchRun) build(ctx context.Context) {
 			s.out, s.built = out, elapsed
 		}
 	}
+}
+
+// announceBuild says on stderr, before the build starts, which project is
+// built for which services: it is the code this machine is about to run.
+func (r *launchRun) announceBuild(group []*launchSvc) {
+	names := make([]string, len(group))
+	for i, s := range group {
+		names[i] = s.row.Service
+	}
+
+	_, _ = fmt.Fprintf(r.cmd.ErrOrStderr(), "building %s: %s\n", strings.Join(names, ", "), group[0].projectRel)
 }
 
 // openBuildLog creates the build log, 0600, in eyedbg's project directory. A
@@ -482,7 +555,7 @@ func (r *launchRun) recreate(ctx context.Context) {
 		return
 	}
 
-	if err := container.WriteOverride(r.override, frags); err != nil {
+	if err := r.writeOverride(frags); err != nil {
 		r.failEntering(entering, err)
 
 		return
@@ -623,7 +696,7 @@ func (r *launchRun) members() []launchedMember {
 
 	for i, s := range r.svcs {
 		m := s.res
-		m.Service, m.Container = s.row.Service, s.row.Name
+		m.Service, m.Container, m.Project = s.row.Service, s.row.Name, s.projectRel
 
 		if m.Session != nil {
 			m.Fast = &launchFast{

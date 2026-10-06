@@ -4,6 +4,7 @@
 package container_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -553,5 +554,218 @@ func TestWriteOverrideMissingParent(t *testing.T) {
 
 	if err := container.WriteOverride(filepath.Join(dir, "override.yml"), []container.FastService{svc}); err == nil {
 		t.Error("written into a directory that doesn't exist")
+	}
+}
+
+// recordedOverride writes an override recording svcs (service -> labels) at
+// path, with the header eyedbg writes.
+func recordedOverride(t *testing.T, path string, svcs map[string]map[string]string) {
+	t.Helper()
+
+	type svc struct {
+		Labels map[string]string `json:"labels"`
+	}
+
+	doc := struct {
+		Services map[string]svc `json:"services"`
+	}{map[string]svc{}}
+
+	for n, l := range svcs {
+		doc.Services[n] = svc{Labels: l}
+	}
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(path, append([]byte(container.OverrideHeader+"\n"), body...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRecordedCorroboratesLabels: a container's fast-mode labels count only
+// when eyedbg's override records the same ones for that service, at that
+// path. Every field is checked: a label an image can copy onto any
+// container proves nothing.
+func TestRecordedCorroboratesLabels(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, container.OverrideName)
+
+	recorded := func(over, dll, wd, project string) map[string]string {
+		return map[string]string{
+			"dev.izzat.eyedbg.fast.version": "1", "dev.izzat.eyedbg.fast.override": over,
+			"dev.izzat.eyedbg.fast.dll": dll, "dev.izzat.eyedbg.fast.workdir": wd, "dev.izzat.eyedbg.fast.project": project,
+		}
+	}
+
+	recordedOverride(t, path, map[string]map[string]string{
+		"web":  recorded(path, "Web.dll", "/app", "Web/Web.csproj"),
+		"cash": recorded(path, "Co.dll", "/app", "Co$$t/Co.csproj"), // '$' is doubled in a file
+	})
+
+	rec, err := container.ReadRecorded(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	same := func() *container.FastLabels {
+		return &container.FastLabels{Version: "1", Override: path, DLL: "Web.dll", WorkDir: "/app", ProjectLabel: "Web/Web.csproj"}
+	}
+
+	tests := []struct {
+		name    string
+		service string
+		edit    func(l *container.FastLabels)
+		want    bool
+	}{
+		{"the recorded labels", "web", func(*container.FastLabels) {}, true},
+		{"a dollar sign, doubled in the file", "cash", func(l *container.FastLabels) {
+			l.DLL, l.ProjectLabel = "Co.dll", "Co$t/Co.csproj"
+		}, true},
+		{"a service the override doesn't record", "api", func(*container.FastLabels) {}, false},
+		{"another override path", "web", func(l *container.FastLabels) { l.Override = filepath.Join(dir, "elsewhere", container.OverrideName) }, false},
+		{"another assembly", "web", func(l *container.FastLabels) { l.DLL = "Evil.dll" }, false},
+		{"another working directory", "web", func(l *container.FastLabels) { l.WorkDir = "/src" }, false},
+		{"another project", "web", func(l *container.FastLabels) { l.ProjectLabel = "data/x/Evil.csproj" }, false},
+		{"no project label", "web", func(l *container.FastLabels) { l.ProjectLabel = "" }, false},
+		{"another version, as recorded in the file", "web", func(l *container.FastLabels) { l.Version = "2" }, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			l := same()
+			tt.edit(l)
+
+			if got := rec.Corroborates(tt.service, l); got != tt.want {
+				t.Errorf("Corroborates(%s, %+v) = %v, want %v", tt.service, l, got, tt.want)
+			}
+		})
+	}
+
+	if rec.Corroborates("web", nil) {
+		t.Error("nil labels corroborated")
+	}
+
+	// A copy of the file elsewhere is not the file the container was made with.
+	copied := filepath.Join(dir, "copy", container.OverrideName)
+	if err := os.MkdirAll(filepath.Dir(copied), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	recordedOverride(t, copied, map[string]map[string]string{"web": recorded(path, "Web.dll", "/app", "Web/Web.csproj")})
+
+	other, err := container.ReadRecorded(copied)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if other.Corroborates("web", same()) {
+		t.Error("a file at another path than the labels name corroborated them")
+	}
+}
+
+// TestRecordedOfOtherVersion: a label format this code doesn't read is
+// corroborated by its version and override alone, so the caller can say
+// "another eyedbg's" about a container eyedbg's own file records.
+func TestRecordedOfOtherVersion(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), container.OverrideName)
+	recordedOverride(t, path, map[string]map[string]string{"web": {"dev.izzat.eyedbg.fast.version": "2", "dev.izzat.eyedbg.fast.override": path}})
+
+	rec, err := container.ReadRecorded(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !rec.Corroborates("web", &container.FastLabels{Version: "2", Override: path}) {
+		t.Error("version 2 as recorded was not corroborated")
+	}
+
+	if rec.Corroborates("web", &container.FastLabels{Version: "3", Override: path}) {
+		t.Error("another version was corroborated")
+	}
+}
+
+// TestReadRecordedRefusesWhatIsNotEyedbgs: a file that is missing records
+// nothing without an error; anything but the regular, header-first, JSON file
+// eyedbg writes is an error and records nothing.
+func TestReadRecordedRefusesWhatIsNotEyedbgs(t *testing.T) {
+	t.Parallel()
+
+	labels := map[string]map[string]string{"web": {"dev.izzat.eyedbg.fast.version": "1"}}
+
+	tests := []struct {
+		name    string
+		prepare func(t *testing.T, path string)
+		wantErr bool
+	}{
+		{"missing", func(*testing.T, string) {}, false},
+		{"not eyedbg's header", func(t *testing.T, p string) {
+			t.Helper()
+
+			if err := os.WriteFile(p, []byte("# something else\n{\"services\":{}}"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+		{"not JSON", func(t *testing.T, p string) {
+			t.Helper()
+
+			if err := os.WriteFile(p, []byte(container.OverrideHeader+"\nservices: {}\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+		{"a directory", func(t *testing.T, p string) {
+			t.Helper()
+
+			if err := os.Mkdir(p, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+		{"a symlink to a good file", func(t *testing.T, p string) {
+			t.Helper()
+
+			target := p + ".target"
+			recordedOverride(t, target, labels)
+
+			if err := os.Symlink(target, p); err != nil {
+				t.Skip("no symlinks here:", err)
+			}
+		}, true},
+		{"too big", func(t *testing.T, p string) {
+			t.Helper()
+
+			if err := os.WriteFile(p, append([]byte(container.OverrideHeader+"\n"), bytes.Repeat([]byte(" "), 2<<20)...), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+		{"good", func(t *testing.T, p string) {
+			t.Helper()
+
+			recordedOverride(t, p, labels)
+		}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), container.OverrideName)
+			tt.prepare(t, path)
+
+			rec, err := container.ReadRecorded(path)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, want error: %v", err, tt.wantErr)
+			}
+
+			if tt.wantErr && rec.Corroborates("web", &container.FastLabels{Version: "1", Override: path}) {
+				t.Error("a refused file corroborated labels")
+			}
+		})
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/eyedebugger/eyedebugger/internal/container"
@@ -133,5 +134,53 @@ func TestCorroborateComposeDirResolvesLinks(t *testing.T) {
 	got, err := container.CorroborateComposeDir(link, []string{filepath.Join(link, "compose.yaml")})
 	if err != nil || got != proj {
 		t.Errorf("got %q, %v; want %q", got, err, proj)
+	}
+}
+
+// TestCorroborateComposeDirErrorIsNeutral: the refusal of a legitimate stack
+// whose compose file is outside its --project-directory says what eyedbg
+// can't confirm and which files it looked at, and never claims another
+// project made the container.
+func TestCorroborateComposeDirErrorIsNeutral(t *testing.T) {
+	t.Parallel()
+
+	root := realDir(t)
+	src := filepath.Join(root, "src")
+	compose := filepath.Join(root, "compose.yml")
+
+	writeFile(t, compose)
+	writeFile(t, filepath.Join(src, "app.cs"))
+
+	tests := []struct {
+		name  string
+		files []string
+		want  []string
+	}{
+		{"the compose file is outside", []string{compose}, []string{"can't confirm the project directory", "none of the compose files the container lists", "inside it"}},
+		{"no files listed", nil, []string{"can't confirm the project directory", "lists no compose files"}},
+		{"many files", []string{compose, compose, compose, compose}, []string{"and 1 more"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := container.CorroborateComposeDir(src, tt.files)
+			if err == nil {
+				t.Fatal("corroborated")
+			}
+
+			for _, w := range tt.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error %q lacks %q", err, w)
+				}
+			}
+
+			for _, banned := range []string{"isn't what created it", "this machine's compose project"} {
+				if strings.Contains(err.Error(), banned) {
+					t.Errorf("error %q accuses another project (%q)", err, banned)
+				}
+			}
+		})
 	}
 }

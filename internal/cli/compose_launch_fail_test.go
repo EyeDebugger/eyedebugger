@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -549,9 +550,12 @@ func TestComposeLaunchChecks(t *testing.T) {
 		{"a working directory fast mode can't use", func(w *launchWorld) {
 			w.docker.byService("producer").fi.WorkDirErr = errors.New("the container's working directory /usr/app can't hold the build")
 		}, api.CodeInvalidRequest, "working directory /usr/app", false},
-		{"no compose files recorded", func(w *launchWorld) { w.docker.byService("producer").fi.ConfigFiles = nil }, api.CodeInvalidRequest, "compose labels don't check out", false},
+		{"no compose files recorded", func(w *launchWorld) { w.docker.byService("producer").fi.ConfigFiles = nil }, api.CodeInvalidRequest, "can't confirm the project directory", false},
 		{"fast mode of another version", func(w *launchWorld) {
-			w.docker.byService("producer").fi.Fast = &container.FastLabels{Version: "2", Override: "/x/override.yml"}
+			w.docker.byService("producer").fi.Fast = &container.FastLabels{Version: "2", Override: w.override()}
+			w.recordFast(map[string]map[string]string{"producer": {
+				"dev.izzat.eyedbg.fast.version": "2", "dev.izzat.eyedbg.fast.override": w.override(),
+			}})
 		}, api.CodeInvalidRequest, "another eyedbg", false},
 		{"no tail in the image", func(w *launchWorld) {
 			w.docker.probeErr["producer"] = api.NewError(api.CodeInvalidRequest, "the image has no 'tail'", "")
@@ -803,21 +807,87 @@ func TestComposeRestoreWithoutDaemon(t *testing.T) {
 	}
 }
 
-// TestComposeLaunchReentersOutdatedFast: a container in fast mode with another
-// override (a moved home, an older file) is recreated like an as-built one,
-// from its own files without the old override.
-func TestComposeLaunchReentersOutdatedFast(t *testing.T) {
-	w := newLaunchWorld(t)
+// TestComposeLaunchIgnoresUncorroboratedFastLabels: any container label is
+// untrusted input unless eyedbg's own override for the project records it. A
+// container whose fast-mode labels another override (a moved home, an image's
+// LABELs) or nothing records is judged as built: an idle one is refused, and
+// naming why; a running one is entered, its labels deciding nothing.
+func TestComposeLaunchIgnoresUncorroboratedFastLabels(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels func(w *launchWorld) *container.FastLabels
+		// record is what the override file records for producer (nil: no file).
+		record func(w *launchWorld) map[string]string
+	}{
+		{"another override's path", func(w *launchWorld) *container.FastLabels {
+			return &container.FastLabels{
+				Version: container.FastVersion, Override: filepath.Join(w.dir, "old-override.yml"), DLL: "Producer.dll", WorkDir: "/app",
+				Project: "Producer/Producer.csproj", ProjectLabel: "Producer/Producer.csproj",
+			}
+		}, nil},
+		{"no override file", func(w *launchWorld) *container.FastLabels {
+			return &container.FastLabels{
+				Version: container.FastVersion, Override: w.override(), DLL: "Producer.dll", WorkDir: "/app",
+				Project: "Producer/Producer.csproj", ProjectLabel: "Producer/Producer.csproj",
+			}
+		}, nil},
+		{"a project the override doesn't record", func(w *launchWorld) *container.FastLabels {
+			return &container.FastLabels{
+				Version: container.FastVersion, Override: w.override(), DLL: "Producer.dll", WorkDir: "/app",
+				Project: "Consumer/Consumer.csproj", ProjectLabel: "Consumer/Consumer.csproj",
+			}
+		}, func(w *launchWorld) map[string]string {
+			return fastLabels(w.override(), "Producer.dll", "/app", "Producer/Producer.csproj")
+		}},
+		{"an assembly the override doesn't record", func(w *launchWorld) *container.FastLabels {
+			return &container.FastLabels{
+				Version: container.FastVersion, Override: w.override(), DLL: "Other.dll", WorkDir: "/app",
+				Project: "Producer/Producer.csproj", ProjectLabel: "Producer/Producer.csproj",
+			}
+		}, func(w *launchWorld) map[string]string {
+			return fastLabels(w.override(), "Producer.dll", "/app", "Producer/Producer.csproj")
+		}},
+	}
 
-	old := filepath.Join(w.dir, "old-override.yml")
-	w.docker.enterFast("producer", old, "Producer/Producer.csproj")
+	for _, tt := range tests {
+		t.Run(tt.name+"/idle", func(t *testing.T) {
+			w := newLaunchWorld(t)
+			c := w.docker.byService("producer")
+			c.fi.DLL, c.fi.Fast = "", tt.labels(w)
 
-	out, _ := w.run(0, "compose", "launch", "producer")
-	expectOutput(t, out, "recreated -> launched")
+			if tt.record != nil {
+				w.recordFast(map[string]map[string]string{"producer": tt.record(w)})
+			}
 
-	ups := w.docker.upCalls()
-	if len(ups) != 1 || slices.Contains(ups[0].ref.Files, old) || len(ups[0].ref.Files) != 2 || ups[0].override != w.override() {
-		t.Errorf("compose up = %+v", ups)
+			before := w.snap()
+
+			_, errOut := w.run(exitCodeOf(api.CodeInvalidRequest), "compose", "launch", "producer")
+			expectOutput(t, errOut, "isn't exec-form", "fast-mode labels, ignored", "eyedbg compose restore producer")
+			w.unchangedSince(t, before)
+		})
+
+		t.Run(tt.name+"/running", func(t *testing.T) {
+			// The same labels on a container that still runs 'dotnet Producer.dll':
+			// what runs, and where the project is, come from the container and
+			// the search; the labels name another project and decide nothing.
+			w := newLaunchWorld(t)
+			w.docker.byService("producer").fi.Fast = tt.labels(w)
+
+			if tt.record != nil {
+				w.recordFast(map[string]map[string]string{"producer": tt.record(w)})
+			}
+
+			out, _ := w.run(0, "compose", "launch", "producer")
+			expectOutput(t, out, "recreated -> launched")
+
+			if got := w.publishedProjects(); len(got) != 1 || filepath.Base(got[0]) != "Producer.csproj" {
+				t.Errorf("built %v, want Producer.csproj only", got)
+			}
+
+			if ups := w.docker.upCalls(); len(ups) != 1 || ups[0].override != w.override() {
+				t.Errorf("compose up = %+v", ups)
+			}
+		})
 	}
 }
 
@@ -1000,7 +1070,7 @@ func TestComposeLaunchRefusesUncorroboratedLabels(t *testing.T) {
 			before := w.snap()
 
 			_, errOut := w.run(exitCodeOf(api.CodeInvalidRequest), "compose", "launch", "producer")
-			expectOutput(t, errOut, "[INVALID_REQUEST]", "compose labels don't check out")
+			expectOutput(t, errOut, "[INVALID_REQUEST]", "can't confirm the project directory", "keep one there, or run compose without --project-directory")
 			w.unchangedSince(t, before)
 
 			if n := len(w.publishedProjects()); n != 0 {
@@ -1070,5 +1140,161 @@ func TestComposeLaunchProjectDirectoryFlags(t *testing.T) {
 				t.Errorf("a refused service was built: %v", w.publishedProjects())
 			}
 		})
+	}
+}
+
+// TestComposeLaunchRefusesProjectsInWritableMounts: a project that a container
+// can write (it lies under a read-write bind mount of any container of the
+// stack) is never found and built by the search: a container may have planted
+// it, and building runs its code here. Read-only mounts are not in the list
+// (a container can't write them). A project the user names is built anyway.
+func TestComposeLaunchRefusesProjectsInWritableMounts(t *testing.T) {
+	const writable = "a container can write"
+
+	t.Run("implicit: the service is skipped, the others go on", func(t *testing.T) {
+		w := newLaunchWorld(t)
+		w.docker.rw = []string{filepath.Join(w.dir, "Producer")}
+
+		out, _ := w.run(0, "compose", "launch")
+		expectOutput(t, out, "launched 2 of 4 service(s)", writable, "--dotnet-project")
+
+		if row := rowOf(out, "producer"); len(row) < 3 || row[1] != "-" || row[2] != "skipped" {
+			t.Errorf("producer's row = %q, want skipped:\n%s", row, out)
+		}
+
+		for _, p := range w.publishedProjects() {
+			if strings.Contains(p, "Producer") {
+				t.Errorf("a project in a writable mount was built: %s", p)
+			}
+		}
+
+		if got := w.docker.logCount("rwmounts myapp"); got != 1 {
+			t.Errorf("the mounts were read %d times, want once per run", got)
+		}
+	})
+
+	t.Run("named: INVALID_REQUEST with the way forward, nothing changes", func(t *testing.T) {
+		w := newLaunchWorld(t)
+		w.docker.rw = []string{filepath.Join(w.dir, "Producer")}
+		before := w.snap()
+
+		_, errOut := w.run(exitCodeOf(api.CodeInvalidRequest), "compose", "launch", "producer")
+		expectOutput(t, errOut, "[INVALID_REQUEST]", writable, "pass --dotnet-project SERVICE=PATH")
+		w.unchangedSince(t, before)
+
+		if n := len(w.publishedProjects()); n != 0 {
+			t.Errorf("a refused service was built: %v", w.publishedProjects())
+		}
+	})
+
+	t.Run("a mount above the compose directory covers every project", func(t *testing.T) {
+		w := newLaunchWorld(t)
+		w.docker.rw = []string{filepath.Dir(w.dir)}
+
+		out, _ := w.run(exitCodeOf(api.CodeInvalidRequest), "compose", "launch")
+		expectOutput(t, out, "launched 0 of 4 service(s)", "compose directory", "read-write bind mount")
+
+		if n := len(w.publishedProjects()); n != 0 {
+			t.Errorf("built %v", w.publishedProjects())
+		}
+	})
+}
+
+// TestComposeLaunchBuildsANamedProjectInAWritableMount: a project the user
+// names is built wherever it lies in the compose directory, even where a
+// container can write: the user chose that file.
+func TestComposeLaunchBuildsANamedProjectInAWritableMount(t *testing.T) {
+	w := newLaunchWorld(t)
+	w.docker.rw = []string{filepath.Join(w.dir, "Producer")}
+
+	out, _ := w.run(0, "compose", "launch", "producer", "--dotnet-project", "producer=Producer/Producer.csproj")
+	expectOutput(t, out, "launched 1 of 1 service(s)", "built Producer/Producer.csproj in")
+
+	if got := w.publishedProjects(); len(got) != 1 || filepath.Base(got[0]) != "Producer.csproj" {
+		t.Errorf("built %v", got)
+	}
+
+	if w.docker.logCount("rwmounts myapp") != 0 {
+		t.Error("the mounts were read for a project the user named")
+	}
+}
+
+// TestComposeLaunchMountsUnreadable: when docker can't say which directories a
+// container can write, no project is searched for and nothing changes.
+func TestComposeLaunchMountsUnreadable(t *testing.T) {
+	w := newLaunchWorld(t)
+	w.docker.rwErr = api.NewError(api.CodeAttachFailed, "docker inspect failed", "")
+	before := w.snap()
+
+	_, errOut := w.run(exitCodeOf(api.CodeAttachFailed), "compose", "launch", "producer")
+	expectOutput(t, errOut, "[ATTACH_FAILED]", "docker inspect failed")
+	w.unchangedSince(t, before)
+
+	if n := len(w.publishedProjects()); n != 0 {
+		t.Errorf("built %v", w.publishedProjects())
+	}
+}
+
+// TestComposeLaunchSaysWhatItBuilds: before a build starts the project is on
+// stderr, and every service's project is in the JSON, a failed build's too.
+func TestComposeLaunchSaysWhatItBuilds(t *testing.T) {
+	w := newLaunchWorld(t)
+
+	_, errOut := w.run(0, "compose", "launch", "producer")
+	expectOutput(t, errOut, "building producer: Producer/Producer.csproj")
+
+	w.publishErr["Consumer.csproj"] = api.NewError(api.CodeBuildFailed, "dotnet publish failed", "")
+
+	jsonOut, _ := w.run(0, "compose", "launch", "--json", "producer", "consumer")
+
+	var doc struct {
+		Members []struct {
+			Service string `json:"service"`
+			Project string `json:"project"`
+		} `json:"members"`
+	}
+
+	if err := json.Unmarshal([]byte(jsonOut), &doc); err != nil {
+		t.Fatalf("compose launch --json: %v\n%s", err, jsonOut)
+	}
+
+	got := map[string]string{}
+	for _, m := range doc.Members {
+		got[m.Service] = m.Project
+	}
+
+	if want := map[string]string{"producer": "Producer/Producer.csproj", "consumer": "Consumer/Consumer.csproj"}; !mapsEqual(got, want) {
+		t.Errorf("projects in the JSON = %v, want %v", got, want)
+	}
+
+	out, errOut := w.run(0, "compose", "launch", "producer", "consumer")
+	expectOutput(t, out, "project Consumer/Consumer.csproj: dotnet publish failed")
+	expectOutput(t, errOut, "building consumer: Consumer/Consumer.csproj")
+}
+
+// TestComposeLaunchKeepsOnlyRecordedFastServicesInTheOverride: a service
+// already in fast mode that the run doesn't touch is carried into the new
+// override from its container's labels only when the old override recorded
+// them; labels it doesn't (an image's own) are not copied into a file eyedbg
+// writes.
+func TestComposeLaunchKeepsOnlyRecordedFastServicesInTheOverride(t *testing.T) {
+	w := newLaunchWorld(t)
+
+	w.run(0, "compose", "launch", "producer", "consumer")
+
+	// Its container now says something else than the override recorded.
+	w.docker.byService("consumer").fi.Fast.DLL = "Other.dll"
+
+	w.run(0, "compose", "launch", "consumer2")
+
+	var got []string
+	for name := range readOverride(t, w.override()).Services {
+		got = append(got, name)
+	}
+
+	slices.Sort(got)
+
+	if want := []string{"consumer2", "producer"}; !slices.Equal(got, want) {
+		t.Errorf("override services = %v, want %v (consumer's labels were not the recorded ones)", got, want)
 	}
 }

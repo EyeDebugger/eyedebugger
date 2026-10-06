@@ -62,6 +62,8 @@ type fakeStack struct {
 	// upErr answers a 'compose up' (nil: it works); probeErr and adapterErr
 	// are per service; listErr fails FastContainers.
 	upErr      func(c upCall) error
+	rw         []string
+	rwErr      error
 	probeErr   map[string]error
 	adapterErr map[string]error
 	listErr    error
@@ -73,6 +75,22 @@ type fakeStack struct {
 
 func (f *fakeStack) recordf(format string, args ...any) {
 	f.log = append(f.log, fmt.Sprintf(format, args...))
+}
+
+// logCount is how often the fake's call log holds entry.
+func (f *fakeStack) logCount(entry string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	n := 0
+
+	for _, e := range f.log {
+		if e == entry {
+			n++
+		}
+	}
+
+	return n
 }
 
 // upCalls are the 'compose up' calls so far.
@@ -189,6 +207,16 @@ func (f *fakeStack) FastContainers(_ context.Context, project string) ([]contain
 	slices.SortFunc(out, func(a, b container.FastContainer) int { return strings.Compare(a.Service+a.ID, b.Service+b.ID) })
 
 	return out, nil
+}
+
+// RWBindSources answers with the read-write bind mount sources the test set.
+func (f *fakeStack) RWBindSources(_ context.Context, project string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.recordf("rwmounts %s", project)
+
+	return slices.Clone(f.rw), f.rwErr
 }
 
 // overrideFile is the override as eyedbg wrote it: the header, then JSON.
@@ -317,7 +345,7 @@ func (f *fakeStack) recreated(c *fakeCtr, call upCall, doc overrideFile) fakeCtr
 	next.Fast = &container.FastLabels{
 		Version: frag.Labels["dev.izzat.eyedbg.fast.version"], Override: frag.Labels["dev.izzat.eyedbg.fast.override"],
 		DLL: frag.Labels["dev.izzat.eyedbg.fast.dll"], WorkDir: frag.Labels["dev.izzat.eyedbg.fast.workdir"],
-		Project: frag.Labels["dev.izzat.eyedbg.fast.project"],
+		Project: frag.Labels["dev.izzat.eyedbg.fast.project"], ProjectLabel: frag.Labels["dev.izzat.eyedbg.fast.project"],
 	}
 	next.Fast.ProjectPath = filepath.Join(f.dir, filepath.FromSlash(next.Fast.Project))
 
@@ -389,6 +417,48 @@ type launchWorld struct {
 	// engine, when set, is the docker the commands use instead of the fake
 	// stack: a fake docker CLI, to see the real argv.
 	engine stackDocker
+}
+
+// recordFast writes eyedbg's override for the project the way a launch left it,
+// but with labels of the test's choosing: services maps a service to the
+// labels the override records for it (the file a container's labels are
+// corroborated against).
+func (w *launchWorld) recordFast(services map[string]map[string]string) {
+	w.t.Helper()
+
+	type svc struct {
+		Labels map[string]string `json:"labels"`
+	}
+
+	doc := struct {
+		Services map[string]svc `json:"services"`
+	}{map[string]svc{}}
+
+	for name, labels := range services {
+		doc.Services[name] = svc{Labels: labels}
+	}
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(w.override()), 0o700); err != nil {
+		w.t.Fatal(err)
+	}
+
+	if err := os.WriteFile(w.override(), append([]byte(container.OverrideHeader+"\n"), body...), 0o600); err != nil {
+		w.t.Fatal(err)
+	}
+}
+
+// fastLabels are the labels of a fast-mode container of version 1 (what
+// eyedbg's override records for it).
+func fastLabels(override, dll, workDir, project string) map[string]string {
+	return map[string]string{
+		"dev.izzat.eyedbg.fast.version": container.FastVersion, "dev.izzat.eyedbg.fast.override": override,
+		"dev.izzat.eyedbg.fast.dll": dll, "dev.izzat.eyedbg.fast.workdir": workDir, "dev.izzat.eyedbg.fast.project": project,
+	}
 }
 
 // launchRecord is one launch the fake driver prepared.

@@ -20,7 +20,11 @@ import (
 type launchedMember struct {
 	attachedMember
 
-	Fast *launchFast `json:"fast,omitempty"`
+	// Project is the project file, relative to the compose directory, the run
+	// chose to build for the service (also when its build failed); empty when
+	// nothing was to be built or none was chosen.
+	Project string      `json:"project,omitempty"`
+	Fast    *launchFast `json:"fast,omitempty"`
 }
 
 // launchFast is what a launch did to a service that now runs.
@@ -136,6 +140,8 @@ func launchRow(m *launchedMember) []string {
 		return []string{name, m.Session.ID, "launched", launchDetail(m)}
 	case m.Skipped != "":
 		return []string{name, "-", rowSkipped, m.Skipped}
+	case m.Error != nil && m.Project != "":
+		return []string{name, "-", rowFailed, "project " + m.Project + ": " + errorLine(m.Error)}
 	case m.Error != nil:
 		return []string{name, "-", rowFailed, errorLine(m.Error)}
 	default:
@@ -151,7 +157,7 @@ func launchDetail(m *launchedMember) string {
 	if f := m.Fast; f != nil {
 		switch {
 		case f.BuildLog != "":
-			steps = append(steps, "built in "+formatSeconds(f.DurationMs))
+			steps = append(steps, "built "+f.Project+" in "+formatSeconds(f.DurationMs))
 		default:
 			steps = append(steps, "from the last build")
 		}

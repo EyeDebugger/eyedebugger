@@ -40,8 +40,9 @@ eyedbg never reads, copies or passes them.
 
 What it does, in order: for each selected service (the named ones, else every running service of the stack that fits) it
 inspects the running container, then builds the service's project once ('dotnet publish -c Debug' on this machine, in
-your environment, into a staging directory under eyedbg's home: the project is found as <assembly>.csproj under the
-compose directory, or named with --dotnet-project SERVICE=PATH), and only after the build succeeded it carries your
+your environment, into a staging directory under eyedbg's home: the project is found as the unique <assembly>.csproj
+under the compose directory, or named with --dotnet-project SERVICE=PATH; each service's project is printed on stderr
+before its build starts, and is "project" in --json), and only after the build succeeded it carries your
 breakpoints and exception mode over from the service's live session, ends that session, replaces the service's files
 with the build and launches the app again. A compile error therefore changes nothing: the running app keeps running.
 
@@ -66,12 +67,21 @@ and netcoredbg not installed for the image's platform ('eyedbg adapters install 
 A service that depends on another with 'condition: service_healthy' fails when compose itself starts it while the
 other idles: launch that one first.
 
+Building a project runs its code on this machine, so a project a container could have planted is never built unasked:
+a search skips every file under (or at) a read-write bind mount of any container of the stack, resolved as real paths
+(a read-only mount can't be written by its container and is searched), and when the compose directory itself is under
+one nothing is searched. Such a service is refused (skipped without names) with a hint to name the project yourself:
+--dotnet-project SERVICE=PATH, which is built wherever it lies in the compose directory, as it is your choice. A
+service's own fast-mode labels (dev.izzat.eyedbg.fast.*) are believed only when eyedbg's override file for the
+project records the same ones: any container label is untrusted input unless eyedbg's own files corroborate it.
+
 Discovery is one 'docker compose ps' with -f FILE (repeatable), -p NAME and --project-directory DIR, as for
 'compose attach'; the Debug build maps /src to the compose directory, so breakpoints are by host path (there is no --map).
 The compose directory is the one the container's labels name, believed only when a compose file (.yml/.yaml) its
 labels list is in it (an image's own labels can claim any directory, so a container made by plain 'docker run' is
 refused) and, when --project-directory or -f is given, when it is the directory they name (for -f, the first
-file's).
+file's). Not supported: compose files outside the project directory (--project-directory DIR with -f FILE outside
+DIR); keep a compose file inside the project directory, or run compose without --project-directory.
 --bp (repeatable) goes in before the app starts, for every service; breakpoints, conditions, logpoints and the exception
 mode your sessions of these services had are carried over. One run per project at a time.
 
@@ -347,6 +357,12 @@ type launchRun struct {
 	stage    string
 	buildLog string
 	log      *os.File
+
+	// rw are the read-write bind mount sources of the project's containers
+	// (read at the first search for a project: rwRead, rwErr).
+	rw     []string
+	rwRead bool
+	rwErr  error
 }
 
 // live is the services still in the run, in order.
@@ -402,7 +418,7 @@ func (r *launchRun) execute(ctx context.Context) error {
 		return err
 	}
 
-	r.resolveProjects()
+	r.resolveProjects(ctx)
 	r.build(ctx)
 
 	if len(r.live()) == 0 {

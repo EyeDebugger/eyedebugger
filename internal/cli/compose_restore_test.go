@@ -226,6 +226,89 @@ func TestComposeRestoreKeepsFilesWhenNoFastContainerIsSeen(t *testing.T) {
 	}
 }
 
+// TestComposeRestoreKeepsWhatAnotherEngineMounts: without -p the project comes
+// from this engine's compose ps, which says nothing of whether its fast-mode
+// containers are here: a same-named project on another engine (a staging
+// context deployed from the same directory) shows in ps with none. What a
+// container could mount (the override, a build) decides, not what ps showed.
+func TestComposeRestoreKeepsWhatAnotherEngineMounts(t *testing.T) {
+	tests := []struct {
+		name            string
+		override, build bool
+	}{
+		{"the override and a build", true, true},
+		{"the override alone", true, false},
+		{"a build alone", false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newLaunchWorld(t)
+
+			dir := filepath.Dir(w.override())
+
+			var kept []string
+			if tt.override {
+				kept = append(kept, w.override())
+			}
+
+			if tt.build {
+				kept = append(kept, filepath.Join(dir, "services", "producer", "App.dll"))
+			}
+
+			writeAll(t, kept)
+
+			out, errOut := w.run(exitError, "compose", "restore")
+			expectOutput(t, out, "no fast-mode container of project "+worldProject+" was found", "were kept: "+dir)
+			expectOutput(t, errOut, "nothing is in fast mode")
+
+			for _, f := range kept {
+				if _, err := os.Stat(f); err != nil {
+					t.Errorf("a restore that saw the project in compose ps but no fast container removed %s: %v", f, err)
+				}
+			}
+		})
+	}
+}
+
+// writeAll creates each file (and its directories) holding "x", 0600.
+func writeAll(t *testing.T, files []string) {
+	t.Helper()
+
+	for _, f := range files {
+		if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestComposeRestoreLeavesNothingBehindWhenNothingWasThere: 'restore -p NAME'
+// on a project eyedbg has nothing for (a second restore, a typo) takes the
+// project lock, which makes the directory; it must not stay, nor be said to
+// hold kept files.
+func TestComposeRestoreLeavesNothingBehindWhenNothingWasThere(t *testing.T) {
+	w := newLaunchWorld(t)
+
+	out, errOut := w.run(exitError, "compose", "restore", "-p", worldProject)
+	expectOutput(t, errOut, "nothing is in fast mode")
+
+	if strings.Contains(out, "kept") {
+		t.Errorf("a note about kept files with none:\n%s", out)
+	}
+
+	if w.projectDirExists() {
+		t.Error("an empty directory is left behind")
+	}
+
+	if doc := w.restoreJSON(exitError, "-p", worldProject); doc.Removed != true || doc.Kept != "" {
+		t.Errorf("restore --json: removed = %v, kept = %q", doc.Removed, doc.Kept)
+	}
+}
+
 // TestComposeRestoreRefusesUncorroboratedLabels: restore recreates from the
 // directory and files a container's labels name, which an image's own LABELs
 // can set on a container made by plain 'docker run': a service whose files
@@ -247,7 +330,7 @@ func TestComposeRestoreRefusesUncorroboratedLabels(t *testing.T) {
 				t.Errorf("producer = %+v", m)
 			}
 		case "consumer":
-			if m.Restored || m.Error == nil || m.Error.Code != api.CodeInvalidRequest || !strings.Contains(m.Error.Message, "compose labels don't check out") {
+			if m.Restored || m.Error == nil || m.Error.Code != api.CodeInvalidRequest || !strings.Contains(m.Error.Message, "can't confirm the project directory") {
 				t.Errorf("consumer = %+v", m)
 			}
 		}
