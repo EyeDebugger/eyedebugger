@@ -339,7 +339,14 @@ func installServer(t *testing.T) (*http.Client, *adapters.Manifest) {
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 
-	for _, name := range []string{"netcoredbg/netcoredbg", "netcoredbg/lib.so"} {
+	names := []string{"netcoredbg/netcoredbg", "netcoredbg/lib.so"}
+	if runtime.GOOS == "windows" {
+		// What a host install looks for there; a Linux one still finds only
+		// "netcoredbg".
+		names = append(names, "netcoredbg/netcoredbg.exe")
+	}
+
+	for _, name := range names {
 		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: 1, Typeflag: tar.TypeReg}); err != nil {
 			t.Fatal(err)
 		}

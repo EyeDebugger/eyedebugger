@@ -3,9 +3,9 @@ group myapp: launched 2 of 3 service(s)
   consumer  s-m2n4  launched  built Consumer/Consumer.csproj in 2.1s -> recreated -> launched; container myapp-consumer-1; its healthcheck fails after 18s of a stop
   db        -       skipped   its entrypoint isn't exec-form 'dotnet X.dll'
 path map: /src=/work/app
-breakpoint Producer/Program.cs:6:
-  producer  bp 1 Producer/Program.cs:6 verified
-  consumer  bp 1 Producer/Program.cs:6 pending: module not loaded
+breakpoint Program.cs:6:
+  producer  bp 1 Program.cs:6 verified
+  consumer  bp 1 Program.cs:6 pending: module not loaded
 override: /home/me/.eyedbg/compose/myapp/override.yml
 build log: /home/me/.eyedbg/compose/myapp/build.log
 note: recreated with this shell's compose environment (variables and --env-file files); whatever the old containers wrote outside volumes is gone.

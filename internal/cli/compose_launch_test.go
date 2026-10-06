@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -424,8 +425,16 @@ func TestComposeLaunchRealEngine(t *testing.T) {
 	producer := w.docker.byService("producer").fi
 	configFiles := strings.Join(producer.ConfigFiles, ",")
 
-	inspect := `["` + producer.ID + `","/` + producer.Name + `","` + producer.Image + `","linux",true,false,false,"Producer.dll",false,"/app","` + worldProject +
-		`","producer","` + w.dir + `","` + configFiles + `",null,null,null,null,null]`
+	// Marshaled: the directory and files are host paths (backslashes on Windows).
+	inspectJSON, err := json.Marshal([]any{
+		producer.ID, "/" + producer.Name, producer.Image, "linux", true, false, false, "Producer.dll", false, "/app", worldProject,
+		"producer", w.dir, configFiles, nil, nil, nil, nil, nil,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	inspect := string(inspectJSON)
 
 	calls := filepath.Join(t.TempDir(), "calls")
 	w.engine = containertest.Engine(t, containertest.Scenario{Calls: calls, Rules: []containertest.Rule{

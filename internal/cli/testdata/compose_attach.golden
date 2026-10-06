@@ -4,9 +4,9 @@ group myapp: attached to 2 of 4 service(s)
   db        -       skipped   pid 1 runs postgres
   api       -       failed    container myapp-api-1 is not running [ATTACH_FAILED] (start it first)
 path map: /src=/work/app
-breakpoint Producer/Program.cs:42:
-  web       bp 1 Producer/Program.cs:42 verified
-  consumer  bp 2 Producer/Program.cs:44 (requested line 42) pending: module not loaded
+breakpoint Program.cs:42:
+  web       bp 1 Program.cs:42 verified
+  consumer  bp 2 Program.cs:44 (requested line 42) pending: module not loaded
 breakpoint Orders.cs:9:
   web       skipped: its file is outside this service's path map
   consumer  failed: container myapp-api-1 is not running [ATTACH_FAILED] (start it first)
