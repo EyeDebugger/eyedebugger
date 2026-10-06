@@ -1205,7 +1205,7 @@ func TestComposeLaunchRefusesProjectsInWritableMounts(t *testing.T) {
 		w.docker.rw = []string{"/run/desktop/mnt/host/c/eyedbg-nowhere/data"}
 
 		out, _ := w.run(exitCodeOf(api.CodeInvalidRequest), "compose", "launch")
-		expectOutput(t, out, "launched 0 of 4 service(s)", "is not a path on this machine", "--dotnet-project")
+		expectOutput(t, out, "launched 0 of 4 service(s)", `"/run/desktop/mnt/host/c/eyedbg-nowhere/data", a read-write mount`, "doesn't exist on this machine", "--dotnet-project")
 
 		if n := len(w.publishedProjects()); n != 0 {
 			t.Errorf("built %v", w.publishedProjects())
