@@ -203,6 +203,91 @@ func fastOverrideService(path string, s FastService) overrideService {
 // '${VAR}' in every string of its files, and reads '$$' as one '$'.
 func composeEscape(s string) string { return strings.ReplaceAll(s, "$", "$$") }
 
+// maxOverrideBytes bounds an override file read back (a 64-service override is
+// a few tens of KiB).
+const maxOverrideBytes = 1 << 20
+
+// Recorded is what eyedbg's own override file for a compose project says
+// about its services' fast-mode labels: the eyedbg-owned state that
+// corroborates a container's labels (they are untrusted input otherwise; see
+// the note at the labels). The file lives in eyedbg's private project
+// directory, which an image can't write.
+type Recorded struct {
+	path   string
+	labels map[string]map[string]string
+}
+
+// ReadRecorded reads the override eyedbg wrote at path. A file that isn't
+// there records nothing (no error); one that is not a regular file (a
+// symlink, a directory), is too big, doesn't start with [OverrideHeader] or
+// isn't the override's JSON is an error, and records nothing.
+func ReadRecorded(path string) (Recorded, error) {
+	rec := Recorded{path: path}
+
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return rec, nil
+	}
+
+	if err != nil {
+		return rec, fmt.Errorf("stat %s: %w", path, err)
+	}
+
+	if !info.Mode().IsRegular() || info.Size() > maxOverrideBytes {
+		return rec, fmt.Errorf("%s is not a regular file of the size eyedbg writes", path)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return rec, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	header, body, _ := bytes.Cut(raw, []byte("\n"))
+	if string(header) != OverrideHeader {
+		return rec, fmt.Errorf("%s does not start with eyedbg's override header", path)
+	}
+
+	var doc overrideDoc
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return rec, fmt.Errorf("%s is not eyedbg's override: %w", path, err)
+	}
+
+	rec.labels = make(map[string]map[string]string, len(doc.Services))
+	for name, svc := range doc.Services {
+		rec.labels[name] = svc.Labels
+	}
+
+	return rec, nil
+}
+
+// Corroborates reports whether the override records exactly the fast-mode
+// labels fl that the container of service carries: the file's own path as the
+// override label, and (for a label format this code understands) the same
+// assembly, working directory and project. A container whose labels are not
+// corroborated was not made by this eyedbg's override for the project: an
+// image's own LABELs can copy them onto a container eyedbg never changed.
+func (rec Recorded) Corroborates(service string, fl *FastLabels) bool {
+	l, ok := rec.labels[service]
+	if !ok || fl == nil || rec.path == "" || fl.Override != rec.path {
+		return false
+	}
+
+	want := [][2]string{{labelFastVersion, fl.Version}, {labelFastMode, fl.Override}}
+	if fl.Version == FastVersion {
+		want = append(want, [2]string{labelFastDLL, fl.DLL}, [2]string{labelFastWorkDir, fl.WorkDir}, [2]string{labelFastProject, fl.ProjectLabel})
+	}
+
+	for _, w := range want {
+		// The file holds each value with '$' doubled; compose undoes that when it
+		// labels the container.
+		if got, present := l[w[0]]; !present || got != composeEscape(w[1]) {
+			return false
+		}
+	}
+
+	return true
+}
+
 // tempTries bounds picking a fresh temporary name.
 const tempTries = 5
 

@@ -1,3 +1,3 @@
 group myapp: launched 0 of 2 service(s)
-  producer  -  failed  dotnet publish failed: see the build log [BUILD_FAILED] (error CS1002 in Program.cs(12))
+  producer  -  failed  project Producer/Producer.csproj: dotnet publish failed: see the build log [BUILD_FAILED] (error CS1002 in Program.cs(12))
   consumer  -  failed  the lease is held by human:bob [LEASE_HELD] (ask for it)

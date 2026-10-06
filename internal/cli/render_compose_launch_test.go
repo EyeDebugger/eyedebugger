@@ -39,10 +39,12 @@ func TestComposeLaunchRendering(t *testing.T) {
 	entered := []launchedMember{
 		{
 			attachedMember: attachedMember{Service: "producer", Container: "myapp-producer-1", Session: launchedSession("s-k3f9", "producer"), Breakpoints: []bpOutcome{{Location: "Producer/Program.cs:6", Breakpoint: bp}}},
+			Project:        "Producer/Producer.csproj",
 			Fast:           &launchFast{Project: "Producer/Producer.csproj", BuildLog: renderBuildLog, Override: renderOverride, Recreated: true, DurationMs: 2140},
 		},
 		{
 			attachedMember: attachedMember{Service: "consumer", Container: "myapp-consumer-1", Session: launchedSession("s-m2n4", "consumer"), Breakpoints: []bpOutcome{{Location: "Producer/Program.cs:6", Breakpoint: pending}}},
+			Project:        "Consumer/Consumer.csproj",
 			Fast:           &launchFast{Project: "Consumer/Consumer.csproj", BuildLog: renderBuildLog, Override: renderOverride, Recreated: true, DurationMs: 2140},
 		},
 		{attachedMember: attachedMember{Service: "db", Container: "myapp-db-1", Skipped: "its entrypoint isn't exec-form 'dotnet X.dll'"}},
@@ -51,6 +53,7 @@ func TestComposeLaunchRendering(t *testing.T) {
 	rebuilt := []launchedMember{
 		{
 			attachedMember: attachedMember{Service: "producer", Container: "myapp-producer-1", Session: launchedSession("s-q8x1", "producer")},
+			Project:        "Producer/Producer.csproj",
 			Fast:           &launchFast{Project: "Producer/Producer.csproj", BuildLog: renderBuildLog, Override: renderOverride, DurationMs: 3500, Carried: 2, Dropped: 1},
 		},
 		{
@@ -60,7 +63,7 @@ func TestComposeLaunchRendering(t *testing.T) {
 	}
 
 	failed := []launchedMember{
-		{attachedMember: attachedMember{Service: "producer", Container: "myapp-producer-1", Error: boom}},
+		{attachedMember: attachedMember{Service: "producer", Container: "myapp-producer-1", Error: boom}, Project: "Producer/Producer.csproj"},
 		{attachedMember: attachedMember{Service: "consumer", Container: "myapp-consumer-1", Error: lease}},
 	}
 

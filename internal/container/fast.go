@@ -22,8 +22,16 @@ import (
 )
 
 // Labels of fast mode (docs/adr/0021): compose's, and eyedbg's own, which
-// the override puts on the containers it changes. eyedbg's are read back as
-// untrusted input.
+// the override puts on the containers it changes.
+//
+// UNCORROBORATED LABELS: any container label is untrusted input unless
+// eyedbg-owned state corroborates it. An image's own LABELs are copied onto
+// every container made from it, so a container can carry any compose or fast
+// labels. What a label may decide on this machine (a directory to build in,
+// a project to build, files to read) it decides only after a check against
+// something an image can't write: the compose files in the directory
+// ([CorroborateComposeDir]), or the override file in eyedbg's own private
+// project directory ([Recorded.Corroborates]).
 const (
 	labelConfigFiles = "com.docker.compose.project.config_files"
 
@@ -125,6 +133,9 @@ type FastLabels struct {
 	// "/"-separated, and ProjectPath its absolute resolved path. Both are ""
 	// when the file is gone (the caller searches again) or can't be checked.
 	Project, ProjectPath string
+	// ProjectLabel is the project label as the container carries it ("" when
+	// absent), whatever became of the file; [Recorded.Corroborates] compares it.
+	ProjectLabel string
 }
 
 // InspectFast reads container ref (an id or a name) with one docker inspect
@@ -348,7 +359,7 @@ func (i *FastInfo) readFast(raw *rawFast) error {
 		return labelError(labelFastWorkDir, wd)
 	}
 
-	fl.DLL, fl.WorkDir = dll, wd
+	fl.DLL, fl.WorkDir, fl.ProjectLabel = dll, wd, project
 
 	return i.readFastProject(fl, project)
 }
@@ -638,4 +649,93 @@ func (e Engine) FastContainers(ctx context.Context, project string) ([]FastConta
 	})
 
 	return found, nil
+}
+
+// maxRWMountContainers bounds the containers of a project whose mounts
+// [Engine.RWBindSources] reads.
+const maxRWMountContainers = 512
+
+// rwMountsTemplate selects, of a container, only the host path of each of its
+// read-write bind mounts: a JSON array (a trailing null ends it). It names
+// no environment, arguments or other mount field.
+const rwMountsTemplate = `[{{range .Mounts}}{{if and .RW (eq .Type "bind")}}{{json .Source}},{{end}}{{end}}null]`
+
+// RWBindSources are the host paths of the read-write bind mounts of every
+// container of compose project (a name), in any state, sorted and without
+// duplicates: whatever sits under one of them a container can write. It is one
+// docker ps -a and one docker inspect, and fails on any answer it can't read,
+// so the caller never works from a partial list. A named volume is not a bind
+// mount here (its host path is docker's own).
+func (e Engine) RWBindSources(ctx context.Context, project string) ([]string, error) {
+	if err := api.CheckGroup(project); err != nil {
+		return nil, err
+	}
+
+	res, fail := e.run(ctx, QueryTimeout, nil, e.Args("ps", "--all", "--no-trunc", "--quiet", "--filter=label="+labelProject+"="+project))
+	if fail != nil {
+		return nil, dockerError(fail)
+	}
+
+	ids := strings.Fields(string(res.stdout))
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	if len(ids) > maxRWMountContainers {
+		return nil, api.NewError(api.CodeAttachFailed, fmt.Sprintf("project %s has %d containers; eyedbg reads the mounts of at most %d", project, len(ids), maxRWMountContainers), "")
+	}
+
+	for _, id := range ids {
+		if !isFullID(id) {
+			return nil, api.NewError(api.CodeAttachFailed, "unexpected answer from docker ps: "+show(id, 100),
+				"eyedbg reads a fixed set of fields; this docker may differ from the ones it was verified with (docker 24 to 26)")
+		}
+	}
+
+	argv := e.Args(slices.Concat([]string{"inspect", "--type", "container", "--format", rwMountsTemplate, "--"}, ids)...)
+
+	res, fail = e.run(ctx, QueryTimeout, nil, argv)
+	if fail != nil {
+		return nil, dockerError(fail)
+	}
+
+	return parseRWMounts(res.stdout, len(ids))
+}
+
+// parseRWMounts decodes want lines of rwMountsTemplate's output.
+func parseRWMounts(out []byte, want int) ([]string, error) {
+	bad := func(why string) ([]string, error) {
+		return nil, api.NewError(api.CodeAttachFailed, "unexpected answer from docker inspect: "+why,
+			"eyedbg reads a fixed set of fields; this docker may differ from the ones it was verified with (docker 24 to 26)")
+	}
+
+	lines := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n")
+	if len(lines) != want {
+		return bad(fmt.Sprintf("%d answers for %d containers", len(lines), want))
+	}
+
+	var sources []string
+
+	for _, line := range lines {
+		var list []*string
+		if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\r")), &list); err != nil {
+			return bad("a container's mounts are not a JSON array")
+		}
+
+		for _, p := range list {
+			if p == nil {
+				continue
+			}
+
+			if !plainAbsPath(*p) {
+				return bad("a mount source is not a plain absolute path: " + show(*p, 80))
+			}
+
+			sources = append(sources, *p)
+		}
+	}
+
+	slices.Sort(sources)
+
+	return slices.Compact(sources), nil
 }

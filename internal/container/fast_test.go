@@ -278,7 +278,7 @@ func TestInspectFastFields(t *testing.T) {
 		ConfigFiles: []string{filepath.Join(f.dir, "compose.yml"), filepath.Join(f.dir, "compose.override.yml")},
 		Fast: &container.FastLabels{
 			Version: "1", Override: f.override, DLL: "Web.dll", WorkDir: "/app",
-			Project: f.project, ProjectPath: filepath.Join(f.dir, "Web", "Web.csproj"),
+			Project: f.project, ProjectPath: filepath.Join(f.dir, "Web", "Web.csproj"), ProjectLabel: f.project,
 		},
 	}
 
@@ -414,8 +414,15 @@ func TestInspectFastLenientCases(t *testing.T) {
 		return &container.FastLabels{Version: "1", Override: f.override, DLL: "Web.dll", WorkDir: "/app"}
 	}
 
+	withLabel := func(label string) *container.FastLabels {
+		l := full()
+		l.ProjectLabel = label
+
+		return l
+	}
+
 	withProject := full()
-	withProject.Project, withProject.ProjectPath = f.project, filepath.Join(f.dir, "Web", "Web.csproj")
+	withProject.Project, withProject.ProjectPath, withProject.ProjectLabel = f.project, filepath.Join(f.dir, "Web", "Web.csproj"), f.project
 
 	tests := []struct {
 		name string
@@ -426,8 +433,9 @@ func TestInspectFastLenientCases(t *testing.T) {
 		{"later version", map[int]any{14: "2", 16: "not a dll", 17: "/usr/x", 18: "../x"}, &container.FastLabels{Version: "2", Override: f.override}},
 		// A project file that is gone, or a compose dir to check it in that is
 		// gone, leaves the project empty (the caller searches again).
-		{"project file gone", map[int]any{18: "Gone/Gone.csproj"}, full()},
-		{"compose dir gone", map[int]any{12: filepath.Join(f.dir, "nowhere")}, full()},
+		// The label itself is kept (what the override file is compared with).
+		{"project file gone", map[int]any{18: "Gone/Gone.csproj"}, withLabel("Gone/Gone.csproj")},
+		{"compose dir gone", map[int]any{12: filepath.Join(f.dir, "nowhere")}, withLabel(f.project)},
 		{"no project label", map[int]any{18: nil}, full()},
 		{"project resolved", nil, withProject},
 		{"no labels at all", map[int]any{14: nil, 15: nil, 16: nil, 17: nil, 18: nil}, nil},
@@ -891,5 +899,151 @@ func TestFastContainersChecksProjectNames(t *testing.T) {
 
 	if n := len(containertest.ReadCalls(t, calls)); n != 0 {
 		t.Errorf("docker ran %d times for invalid projects", n)
+	}
+}
+
+// pinnedRWMountsTemplate is the inspect template of RWBindSources, spelled
+// out: it names the host path of read-write bind mounts and nothing else.
+const pinnedRWMountsTemplate = `[{{range .Mounts}}{{if and .RW (eq .Type "bind")}}{{json .Source}},{{end}}{{end}}null]`
+
+func TestRWBindSourcesAsksForMountsOnly(t *testing.T) {
+	t.Parallel()
+
+	id1, id2 := strings.Repeat("1", 64), strings.Repeat("2", 64)
+	calls := filepath.Join(t.TempDir(), "calls")
+	e := containertest.Engine(t, containertest.Scenario{Calls: calls, Rules: []containertest.Rule{
+		{Match: []string{"ps"}, Stdout: id1 + "\n" + id2 + "\n"},
+		{Match: []string{"inspect"}, Stdout: `["/b/data",null]` + "\n" + `["/a/logs","/b/data",null]` + "\n"},
+	}})
+	e.Host = "tcp://remote:2375"
+
+	got, err := e.RWBindSources(t.Context(), "my-app")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := []string{"/a/logs", "/b/data"}; !slices.Equal(got, want) {
+		t.Errorf("sources = %q, want %q (sorted, no duplicates)", got, want)
+	}
+
+	argvs := containertest.ReadCalls(t, calls)
+	wantPS := []string{"--host=tcp://remote:2375", "ps", "--all", "--no-trunc", "--quiet", "--filter=label=com.docker.compose.project=my-app"}
+	wantInspect := []string{"--host=tcp://remote:2375", "inspect", "--type", "container", "--format", pinnedRWMountsTemplate, "--", id1, id2}
+
+	if len(argvs) != 2 || !slices.Equal(argvs[0], wantPS) || !slices.Equal(argvs[1], wantInspect) {
+		t.Errorf("docker ran %q\nwant %q and %q", argvs, wantPS, wantInspect)
+	}
+
+	// The template never names more than the sources of writable bind mounts.
+	for _, banned := range []string{".Config", "Env", "Args", ".HostConfig", "Destination", "Name"} {
+		if strings.Contains(pinnedRWMountsTemplate, banned) {
+			t.Errorf("the template names %s", banned)
+		}
+	}
+}
+
+// TestRWBindSourcesTemplate runs the template over inspect documents: only a
+// read-write bind mount counts; a read-only one (its container can't write
+// it), a named volume and a tmpfs don't.
+func TestRWBindSourcesTemplate(t *testing.T) {
+	t.Parallel()
+
+	mount := func(typ, src string, rw bool) any {
+		return map[string]any{"Type": typ, "Source": src, "Destination": "/x", "RW": rw, "Name": "secret-volume-name"}
+	}
+
+	tests := []struct {
+		name   string
+		mounts []any
+		want   []string
+	}{
+		{"a read-write bind", []any{mount("bind", "/h/data", true)}, []string{"/h/data"}},
+		{"a read-only bind", []any{mount("bind", "/h/app", false)}, nil},
+		{"a named volume", []any{mount("volume", "/var/lib/docker/volumes/v/_data", true)}, nil},
+		{"a tmpfs", []any{mount("tmpfs", "", true)}, nil},
+		{"mixed", []any{mount("bind", "/h/app", false), mount("bind", "/h/a b/$c", true), mount("volume", "/v", true)}, []string{"/h/a b/$c"}},
+		{"none", nil, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			out := dockerJSON(t, pinnedRWMountsTemplate, map[string]any{"Mounts": tt.mounts})
+
+			var got []*string
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatalf("not JSON: %q: %v", out, err)
+			}
+
+			var sources []string
+
+			for _, p := range got {
+				if p != nil {
+					sources = append(sources, *p)
+				}
+			}
+
+			if !slices.Equal(sources, tt.want) {
+				t.Errorf("sources = %q, want %q (output %s)", sources, tt.want, out)
+			}
+		})
+	}
+}
+
+// TestRWBindSourcesBadAnswers: a partial list must never come back, since the
+// caller trusts every project outside it.
+func TestRWBindSourcesBadAnswers(t *testing.T) {
+	t.Parallel()
+
+	id := strings.Repeat("1", 64)
+	id2 := strings.Repeat("2", 64)
+
+	tests := []struct {
+		name     string
+		ps, insp containertest.Rule
+	}{
+		{"ps fails", containertest.Rule{Exit: 1, Stderr: "boom"}, containertest.Rule{}},
+		{"a short id", containertest.Rule{Stdout: "abc123\n"}, containertest.Rule{}},
+		{"inspect fails", containertest.Rule{Stdout: id + "\n"}, containertest.Rule{Exit: 1, Stderr: "no such container"}},
+		{"too few answers", containertest.Rule{Stdout: id + "\n" + id2 + "\n"}, containertest.Rule{Stdout: `["/a"]` + "\n"}},
+		{"not JSON", containertest.Rule{Stdout: id + "\n"}, containertest.Rule{Stdout: "/a\n"}},
+		{"a relative source", containertest.Rule{Stdout: id + "\n"}, containertest.Rule{Stdout: `["data",null]` + "\n"}},
+		{"a control character", containertest.Rule{Stdout: id + "\n"}, containertest.Rule{Stdout: `["/a\nb",null]` + "\n"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tt.ps.Match, tt.insp.Match = []string{"ps"}, []string{"inspect"}
+			e := containertest.Engine(t, containertest.Scenario{Rules: []containertest.Rule{tt.ps, tt.insp}})
+
+			if got, err := e.RWBindSources(t.Context(), "my-app"); err == nil || got != nil {
+				t.Errorf("got %q, %v; want an error and no list", got, err)
+			}
+		})
+	}
+}
+
+func TestRWBindSourcesNoContainerNoInspect(t *testing.T) {
+	t.Parallel()
+
+	calls := filepath.Join(t.TempDir(), "calls")
+	e := containertest.Engine(t, containertest.Scenario{Calls: calls, Rules: []containertest.Rule{{Match: []string{"ps"}}}})
+
+	got, err := e.RWBindSources(t.Context(), "my-app")
+	if err != nil || got != nil {
+		t.Errorf("got %q, %v; want none", got, err)
+	}
+
+	if n := len(containertest.ReadCalls(t, calls)); n != 1 {
+		t.Errorf("docker ran %d times, want the ps only", n)
+	}
+
+	for _, p := range []string{"", "My App", "--x"} {
+		if _, err := e.RWBindSources(t.Context(), p); api.CodeOf(err) != api.CodeInvalidRequest {
+			t.Errorf("project %q: err = %v", p, err)
+		}
 	}
 }

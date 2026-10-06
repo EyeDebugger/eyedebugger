@@ -30,16 +30,16 @@ import (
 // failed, for a message; the values are never read for anything else.
 func CorroborateComposeDir(dir string, files []string) (string, error) {
 	if dir == "" || !plainAbsPath(dir) || filepath.Dir(dir) == dir {
-		return "", errors.New("no compose project directory is recorded")
+		return "", errors.New("eyedbg can't confirm the project directory: the container records none (an absolute directory below the root)")
 	}
 
 	resolved, err := filepath.EvalSymlinks(filepath.Clean(dir))
 	if err != nil {
-		return "", fmt.Errorf("the compose project directory %s is not on this machine", show(dir, 80))
+		return "", fmt.Errorf("eyedbg can't confirm the project directory %s: it is not on this machine", show(dir, 80))
 	}
 
 	if st, err := os.Stat(resolved); err != nil || !st.IsDir() {
-		return "", fmt.Errorf("the compose project directory %s is not a directory", show(dir, 80))
+		return "", fmt.Errorf("eyedbg can't confirm the project directory %s: it is not a directory", show(dir, 80))
 	}
 
 	for _, f := range files {
@@ -57,8 +57,30 @@ func CorroborateComposeDir(dir string, files []string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("none of the compose files the container records is a file inside %s: "+
-		"this machine's compose project isn't what created it", show(dir, 80))
+	return "", fmt.Errorf("eyedbg can't confirm the project directory %s: %s", show(dir, 80), listedFiles(files))
+}
+
+// maxListedFiles is how many compose files an error names.
+const maxListedFiles = 3
+
+// listedFiles says that none of the container's compose files is inside its
+// project directory, naming the files.
+func listedFiles(files []string) string {
+	if len(files) == 0 {
+		return "the container lists no compose files"
+	}
+
+	shown := make([]string, 0, maxListedFiles)
+	for _, f := range files[:min(len(files), maxListedFiles)] {
+		shown = append(shown, show(f, 80))
+	}
+
+	more := ""
+	if len(files) > maxListedFiles {
+		more = fmt.Sprintf(" and %d more", len(files)-maxListedFiles)
+	}
+
+	return "none of the compose files the container lists (" + strings.Join(shown, ", ") + more + ") is a compose file inside it"
 }
 
 // isComposeFileName reports whether the base name of path ends in .yml or

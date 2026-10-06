@@ -92,7 +92,7 @@ func TestFindContainerProject(t *testing.T) {
 		t.Run(tt.dll, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := FindContainerProject(root, tt.dll, 50_000)
+			got, err := FindContainerProject(root, tt.dll, 50_000, nil)
 			if tt.wantErr != "" {
 				if msg := projectsOf(t, err); !strings.Contains(msg, tt.wantErr) {
 					t.Errorf("err = %v, want %q", err, tt.wantErr)
@@ -115,14 +115,14 @@ func TestFindContainerProjectNamesTheFlag(t *testing.T) {
 	touch(t, filepath.Join(root, "A", "Dup.csproj"))
 	touch(t, filepath.Join(root, "B", "Dup.csproj"))
 
-	_, err := FindContainerProject(root, "Dup.dll", 100)
+	_, err := FindContainerProject(root, "Dup.dll", 100, nil)
 
 	var ae *api.Error
 	if !errors.As(err, &ae) || !strings.Contains(ae.Hint, "--dotnet-project") || !strings.Contains(ae.Message, filepath.Join(root, "A", "Dup.csproj")) || !strings.Contains(ae.Message, filepath.Join(root, "B", "Dup.csproj")) {
 		t.Errorf("err = %#v", err)
 	}
 
-	_, err = FindContainerProject(root, "None.dll", 100)
+	_, err = FindContainerProject(root, "None.dll", 100, nil)
 	if !errors.As(err, &ae) || !strings.Contains(ae.Hint, "--dotnet-project") {
 		t.Errorf("err = %#v", err)
 	}
@@ -136,7 +136,7 @@ func TestFindContainerProjectListsTenCandidates(t *testing.T) {
 		touch(t, filepath.Join(root, fmt.Sprintf("d%02d", i), "Dup.csproj"))
 	}
 
-	_, err := FindContainerProject(root, "Dup.dll", 1000)
+	_, err := FindContainerProject(root, "Dup.dll", 1000, nil)
 	msg := projectsOf(t, err)
 
 	if !strings.Contains(msg, "13 projects") || !strings.Contains(msg, "d09") || strings.Contains(msg, "d10") || !strings.Contains(msg, "and 3 more") {
@@ -154,12 +154,12 @@ func TestFindContainerProjectLimit(t *testing.T) {
 
 	touch(t, filepath.Join(root, "zzz", "Last.csproj")) // found only past the limit
 
-	_, err := FindContainerProject(root, "Last.dll", 10)
+	_, err := FindContainerProject(root, "Last.dll", 10, nil)
 	if msg := projectsOf(t, err); !strings.Contains(msg, "without finishing") {
 		t.Errorf("err = %v", err)
 	}
 
-	if got, err := FindContainerProject(root, "Last.dll", 1000); err != nil || filepath.Base(got) != "Last.csproj" {
+	if got, err := FindContainerProject(root, "Last.dll", 1000, nil); err != nil || filepath.Base(got) != "Last.csproj" {
 		t.Errorf("within the limit: %q, %v", got, err)
 	}
 }
@@ -185,13 +185,13 @@ func TestFindContainerProjectFollowsNoSymlink(t *testing.T) {
 	}
 
 	for _, dll := range []string{"Escaped.dll", "Linked.dll", "Target.dll"} {
-		if got, err := FindContainerProject(root, dll, 50_000); err == nil {
+		if got, err := FindContainerProject(root, dll, 50_000, nil); err == nil {
 			t.Errorf("FindContainerProject(%q) = %q through a symlink", dll, got)
 		}
 	}
 
 	// And the loop doesn't run away: the real project is still found.
-	if got, err := FindContainerProject(root, "Real.dll", 50_000); err != nil || got != filepath.Join(root, "Real", "Real.csproj") {
+	if got, err := FindContainerProject(root, "Real.dll", 50_000, nil); err != nil || got != filepath.Join(root, "Real", "Real.csproj") {
 		t.Errorf("Real: %q, %v", got, err)
 	}
 }
@@ -208,11 +208,11 @@ func TestFindContainerProjectResolvesTheRoot(t *testing.T) {
 	}
 
 	// The root itself may be a symlink: the answer is below its real path.
-	if got, err := FindContainerProject(link, "Web.dll", 100); err != nil || got != filepath.Join(root, "Web", "Web.csproj") {
+	if got, err := FindContainerProject(link, "Web.dll", 100, nil); err != nil || got != filepath.Join(root, "Web", "Web.csproj") {
 		t.Errorf("got %q, %v", got, err)
 	}
 
-	if _, err := FindContainerProject(filepath.Join(root, "nowhere"), "Web.dll", 100); api.CodeOf(err) != api.CodeInvalidRequest {
+	if _, err := FindContainerProject(filepath.Join(root, "nowhere"), "Web.dll", 100, nil); api.CodeOf(err) != api.CodeInvalidRequest {
 		t.Errorf("a missing root: %v", err)
 	}
 }
@@ -234,8 +234,93 @@ func TestFindContainerProjectSkipsUnreadableDirectories(t *testing.T) {
 
 	t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, "locked"), 0o700) }) //nolint:gosec // Restore access so the directory can be removed.
 
-	if got, err := FindContainerProject(root, "Web.dll", 100); err != nil || filepath.Base(got) != "Web.csproj" {
+	if got, err := FindContainerProject(root, "Web.dll", 100, nil); err != nil || filepath.Base(got) != "Web.csproj" {
 		t.Errorf("got %q, %v", got, err)
+	}
+}
+
+// TestFindContainerProjectSkipsWritableMounts: a project a container can write
+// (under, or at, one of the stack's read-write bind mounts) is never built: a
+// container may have planted it, and a build runs its code on this machine.
+func TestFindContainerProjectSkipsWritableMounts(t *testing.T) {
+	t.Parallel()
+
+	parent := realDir(t)
+	root := filepath.Join(parent, "stack")
+
+	for _, p := range []string{
+		"compose.yml", "src/App/App.csproj", "data/x/Vendor.csproj", "data/App/App.csproj", "dat/Real/Real.csproj", "other/Shared/Shared.csproj",
+	} {
+		touch(t, filepath.Join(root, filepath.FromSlash(p)))
+	}
+
+	link := filepath.Join(parent, "mnt")
+	if err := os.Symlink(filepath.Join(root, "data"), link); err != nil {
+		t.Skipf("symlinks: %v", err)
+	}
+
+	const writable = "a container can write"
+
+	tests := []struct {
+		name string
+		dll  string
+		rw   []string
+		want string // the project below root, or ""
+		err  string // a part of the refusal
+	}{
+		{name: "no mounts", dll: "Vendor.dll", want: "data/x/Vendor.csproj"},
+		{name: "the mount holds the project", dll: "Vendor.dll", rw: []string{filepath.Join(root, "data")}, err: writable},
+		{name: "the mount is the project file", dll: "Vendor.dll", rw: []string{filepath.Join(root, "data", "x", "Vendor.csproj")}, err: writable},
+		{name: "a mount above the project, inside the compose directory", dll: "Vendor.dll", rw: []string{filepath.Join(root, "data", "x")}, err: writable},
+		{name: "a symlinked mount source", dll: "Vendor.dll", rw: []string{link}, err: writable},
+		{name: "the mount is the compose directory", dll: "App.dll", rw: []string{root}, err: "compose directory"},
+		{name: "a mount above the compose directory", dll: "App.dll", rw: []string{parent}, err: "compose directory"},
+		{name: "the file system root", dll: "App.dll", rw: []string{string(filepath.Separator)}, err: "compose directory"},
+		{name: "another directory's mount", dll: "Vendor.dll", rw: []string{filepath.Join(root, "other")}, want: "data/x/Vendor.csproj"},
+		{name: "a name that only starts like the mount's", dll: "Vendor.dll", rw: []string{filepath.Join(root, "dat")}, want: "data/x/Vendor.csproj"},
+		{name: "a mount source that isn't here", dll: "Vendor.dll", rw: []string{filepath.Join(root, "nowhere", "data")}, want: "data/x/Vendor.csproj"},
+		{name: "the project outside the mount, a planted twin inside", dll: "App.dll", rw: []string{filepath.Join(root, "data")}, want: "src/App/App.csproj"},
+		{name: "a planted twin is not an ambiguity either", dll: "App.dll", rw: []string{filepath.Join(root, "data"), filepath.Join(root, "other")}, want: "src/App/App.csproj"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := FindContainerProject(root, tt.dll, 50_000, tt.rw)
+
+			if tt.err != "" {
+				if got != "" || !strings.Contains(projectsOf(t, err), tt.err) {
+					t.Errorf("got %q, %v; want a refusal containing %q", got, err, tt.err)
+				}
+
+				return
+			}
+
+			if err != nil || got != filepath.Join(root, filepath.FromSlash(tt.want)) {
+				t.Errorf("got %q, %v; want %s", got, err, tt.want)
+			}
+		})
+	}
+}
+
+// TestFindContainerProjectWritableMountCaseInsensitive: on a file system that
+// ignores letter case, a mount named in another case is still the same
+// directory (os.SameFile), so the case a mount is spelled in is no way round
+// the rule.
+func TestFindContainerProjectWritableMountCaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	root := realDir(t)
+	touch(t, filepath.Join(root, "Data", "x", "Vendor.csproj"))
+
+	other := filepath.Join(root, "DATA")
+	if _, err := os.Stat(other); err != nil {
+		t.Skip("a case-sensitive file system")
+	}
+
+	if _, err := FindContainerProject(root, "Vendor.dll", 100, []string{other}); err == nil || !strings.Contains(err.Error(), "a container can write") {
+		t.Errorf("a mount spelled %s did not cover Data: %v", other, err)
 	}
 }
 

@@ -1,6 +1,6 @@
 group myapp: launched 2 of 3 service(s)
-  producer  s-k3f9  launched  built in 2.1s -> recreated -> launched; container myapp-producer-1; its healthcheck fails after 18s of a stop
-  consumer  s-m2n4  launched  built in 2.1s -> recreated -> launched; container myapp-consumer-1; its healthcheck fails after 18s of a stop
+  producer  s-k3f9  launched  built Producer/Producer.csproj in 2.1s -> recreated -> launched; container myapp-producer-1; its healthcheck fails after 18s of a stop
+  consumer  s-m2n4  launched  built Consumer/Consumer.csproj in 2.1s -> recreated -> launched; container myapp-consumer-1; its healthcheck fails after 18s of a stop
   db        -       skipped   its entrypoint isn't exec-form 'dotnet X.dll'
 path map: /src=/work/app
 breakpoint Producer/Program.cs:6:

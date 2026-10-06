@@ -52,7 +52,18 @@ func skippedProjectDir(name string) bool {
 // several are INVALID_REQUEST naming --dotnet-project (and listing up to
 // ten candidates). It returns the project's absolute path below the
 // resolved root.
-func FindContainerProject(root, dll string, limit int) (string, error) {
+//
+// rw are the host paths of the read-write bind mounts of the stack's
+// containers (container.Engine.RWBindSources): a container can write
+// anything under one, a project file included, and building a project is
+// running its code on this machine. So a project at or under one of them is
+// never returned: it is not counted among the matches, and when it is the
+// only match the error says so. When root is itself at or under one, no
+// project is found at all. Mounts are compared as the same directory
+// (os.SameFile on each ancestor, so symlinks and letter case don't matter),
+// else by resolved path when a source can't be read here. A read-only mount
+// is not in rw: its container can't write it.
+func FindContainerProject(root, dll string, limit int, rw []string) (string, error) {
 	if !container.ValidDLL(dll) {
 		return "", api.NewError(api.CodeInvalidRequest, "invalid assembly name "+quote(dll), "")
 	}
@@ -63,40 +74,135 @@ func FindContainerProject(root, dll string, limit int) (string, error) {
 			"pass --dotnet-project SERVICE=PATH")
 	}
 
-	name := strings.TrimSuffix(dll, ".dll")
+	mounts := newMountSet(rw)
 
-	var found []string
-
-	seen := 0
-
-	walk := func(p string, d fs.DirEntry, err error) error {
-		seen++
-		if seen > limit {
-			return errSearchLimit
-		}
-
-		switch {
-		case err != nil && d != nil && d.IsDir():
-			return filepath.SkipDir // unreadable: a project there couldn't be built either
-		case err != nil:
-			return nil //nolint:nilerr // An entry that can't be read can't be a project that could be built either.
-		case d.IsDir():
-			if p != realRoot && skippedProjectDir(d.Name()) {
-				return filepath.SkipDir
-			}
-		case d.Type().IsRegular() && isProjectOf(d.Name(), name):
-			found = append(found, p)
-		}
-
-		return nil
+	if src := mounts.covering(realRoot, ""); src != "" {
+		return "", api.NewError(api.CodeInvalidRequest, "the compose directory "+quote(realRoot)+" is at or under "+quote(src)+", a read-write bind mount of one of the stack's containers: "+
+			"a container could have written any project file there, so none is searched for the project of "+dll,
+			"pass --dotnet-project SERVICE=PATH to name the project yourself")
 	}
 
-	if err := filepath.WalkDir(realRoot, walk); err != nil {
+	search := projectSearch{name: strings.TrimSuffix(dll, ".dll"), root: realRoot, limit: limit, mounts: mounts}
+
+	if err := filepath.WalkDir(realRoot, search.visit); err != nil {
 		return "", api.NewError(api.CodeInvalidRequest, fmt.Sprintf("searched %d entries of %s for the project of %s without finishing", limit, quote(realRoot), dll),
 			"pass --dotnet-project SERVICE=PATH")
 	}
 
-	return oneProject(found, realRoot, dll)
+	if len(search.found) == 0 && len(search.written) > 0 {
+		return "", writtenError(realRoot, dll, search.written)
+	}
+
+	return oneProject(search.found, realRoot, dll)
+}
+
+// projectSearch is one walk for a project: the matches outside the mounts a
+// container can write (found), and those inside (written).
+type projectSearch struct {
+	name, root     string
+	limit, seen    int
+	mounts         mountSet
+	found, written []string
+}
+
+// visit is the walk's function: it counts entries, skips what is not
+// searched and sorts the matches.
+func (ps *projectSearch) visit(p string, d fs.DirEntry, err error) error {
+	ps.seen++
+	if ps.seen > ps.limit {
+		return errSearchLimit
+	}
+
+	switch {
+	case err != nil && d != nil && d.IsDir():
+		return filepath.SkipDir // unreadable: a project there couldn't be built either
+	case err != nil:
+		return nil //nolint:nilerr // An entry that can't be read can't be a project that could be built either.
+	case d.IsDir():
+		if p != ps.root && skippedProjectDir(d.Name()) {
+			return filepath.SkipDir
+		}
+	case d.Type().IsRegular() && isProjectOf(d.Name(), ps.name):
+		if ps.mounts.covering(p, ps.root) != "" {
+			ps.written = append(ps.written, p)
+		} else {
+			ps.found = append(ps.found, p)
+		}
+	}
+
+	return nil
+}
+
+// writtenError is the refusal of a project found only where a container can
+// write.
+func writtenError(root, dll string, written []string) error {
+	listed := make([]string, 0, maxProjectCandidates)
+
+	for _, p := range written[:min(len(written), maxProjectCandidates)] {
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			rel = p
+		}
+
+		listed = append(listed, quote(rel))
+	}
+
+	return api.NewError(api.CodeInvalidRequest,
+		"the only project for "+dll+" is in a directory a container can write (a read-write bind mount): "+strings.Join(listed, ", "),
+		"a container could have planted it; if it is yours, pass --dotnet-project SERVICE=PATH")
+}
+
+// mountSet is the read-write bind mount sources of a stack, as they can be
+// compared.
+type mountSet struct {
+	paths []string
+	infos []os.FileInfo
+}
+
+// newMountSet reads each source: its file info when it exists here (os.Stat
+// follows a symlink; an entry without one is compared by its path alone).
+func newMountSet(sources []string) mountSet {
+	var m mountSet
+
+	for _, src := range sources {
+		info, err := os.Stat(src)
+		if err != nil {
+			info = nil
+		}
+
+		m.paths = append(m.paths, filepath.Clean(src))
+		m.infos = append(m.infos, info)
+	}
+
+	return m
+}
+
+// covering returns the source that p is at or under, "" when none: p and each
+// of its parents up to (not above) stop are compared with every source. A
+// stop of "" goes up to the file system root.
+func (m mountSet) covering(p, stop string) string {
+	if len(m.paths) == 0 {
+		return ""
+	}
+
+	for cur := p; ; cur = filepath.Dir(cur) {
+		for i, src := range m.paths {
+			if cur == src || (m.infos[i] != nil && sameFile(cur, m.infos[i])) {
+				return src
+			}
+		}
+
+		if cur == stop || filepath.Dir(cur) == cur {
+			return ""
+		}
+	}
+}
+
+// sameFile reports whether the file at p is the one info describes.
+func sameFile(p string, info os.FileInfo) bool {
+	cur, err := os.Stat(p)
+
+	return err == nil && os.SameFile(cur, info)
 }
 
 // errSearchLimit ends a project search that read too many entries.
