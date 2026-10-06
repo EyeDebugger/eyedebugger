@@ -4,10 +4,12 @@
 package artifacts
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -394,114 +396,188 @@ func RemoveProjectDir(root, project string) error {
 // unlock runs. A lock that exists is [ErrLocked], unless it is older than
 // [LockMaxAge]: that one is taken over once (a run that died). unlock
 // removes only the file this call created.
+//
+// A lock is told apart from another by what it holds — this run's pid and
+// a fresh random token, written by the run that created it — and never by
+// its file identity: once a stale lock is taken over, the new lock may get
+// the old one's inode number (ext4 reuses a freed inode at once), so
+// [os.SameFile] can't tell them apart.
 func Lock(projectDir string) (unlock func(), err error) {
 	return lock(projectDir, time.Now())
 }
 
+// lockReadMax bounds how much of a lock file is read: a lock is one short
+// line ("<pid> <token>\n").
+const lockReadMax = 256
+
+// errNotLock is readLock's error for a lock path that holds something no
+// run writes: not a regular file (a symlink, say), too long, or not one
+// complete line (a run that died while writing it). Such a lock is never
+// taken over, however old: only a user may delete it.
+var errNotLock = errors.New("not a complete eyedbg lock file")
+
 func lock(projectDir string, now time.Time) (func(), error) {
-	if err := requireRealDir(projectDir); err != nil {
+	root, err := openRealDir(projectDir)
+	if err != nil {
 		return nil, err
 	}
+	defer root.Close()
 
 	path := filepath.Join(projectDir, lockName)
 
 	for attempt := range 2 {
-		info, err := createLock(path)
+		content, err := createLock(root)
 		if err == nil {
-			return unlockFunc(path, info), nil
+			return unlockFunc(projectDir, content), nil
 		}
 
 		if !errors.Is(err, fs.ErrExist) {
 			return nil, fmt.Errorf("take the lock %s: %w", path, err)
 		}
 
-		held, serr := os.Lstat(path)
-		if errors.Is(serr, fs.ErrNotExist) {
+		held, info, rerr := readLock(root, lockName)
+		if errors.Is(rerr, fs.ErrNotExist) {
 			continue // released between the two calls
 		}
 
-		if serr != nil || attempt > 0 || now.Sub(held.ModTime()) <= LockMaxAge {
-			return nil, busyError(path, held, now)
+		if rerr != nil || attempt > 0 || now.Sub(info.ModTime()) <= LockMaxAge {
+			return nil, busyError(path, info, now)
 		}
 
-		if !evictStale(path, held) {
-			return nil, busyError(path, held, now)
+		if !removeLock(root, held) {
+			return nil, busyError(path, info, now)
 		}
 	}
 
 	return nil, busyError(path, nil, now)
 }
 
-// createLock creates the lock file exclusively and returns its info.
-func createLock(path string) (fs.FileInfo, error) {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+// createLock creates the lock file exclusively in root and writes this
+// run's line to it, which it returns.
+func createLock(root *os.Root) ([]byte, error) {
+	var token [16]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return nil, fmt.Errorf("make a lock token: %w", err)
+	}
+
+	content := []byte(strconv.Itoa(os.Getpid()) + " " + hex.EncodeToString(token[:]) + "\n")
+
+	f, err := root.OpenFile(lockName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // The caller tests the cause with errors.Is.
 	}
 
-	_, werr := f.WriteString(strconv.Itoa(os.Getpid()) + "\n")
-	info, serr := f.Stat()
+	_, werr := f.Write(content)
 
 	if cerr := f.Close(); werr == nil {
 		werr = cerr
 	}
 
-	if werr == nil {
-		werr = serr
-	}
-
 	if werr != nil {
-		_ = os.Remove(path)
+		// Still this run's: only a lock older than LockMaxAge is taken over.
+		_ = root.Remove(lockName)
 
 		return nil, werr
 	}
 
-	return info, nil
+	return content, nil
 }
 
-// evictStale removes the stale lock (held is what was seen at path): it is
-// renamed away first, so that only a file that was at path is removed, and
-// it is removed only if it is the one that was seen. A lock a live run
-// created in between is put back.
-func evictStale(path string, held fs.FileInfo) bool {
+// readLock reads the lock file name in root without following a symlink:
+// its content and its info, both from one open file (so the age goes with
+// the content). The info is returned with errNotLock too, for the age.
+func readLock(root *os.Root, name string) ([]byte, fs.FileInfo, error) {
+	seen, err := root.Lstat(name)
+	if err != nil {
+		return nil, nil, err //nolint:wrapcheck // The caller tests the cause with errors.Is.
+	}
+
+	if !seen.Mode().IsRegular() {
+		return nil, seen, errNotLock
+	}
+
+	f, err := root.Open(name)
+	if err != nil {
+		return nil, seen, err //nolint:wrapcheck // The caller tests the cause with errors.Is.
+	}
+	defer f.Close()
+
+	// What was opened is what was checked (not a symlink put there since):
+	// both exist at once here, so their identities can be compared.
+	info, err := f.Stat()
+	if err != nil || !os.SameFile(seen, info) {
+		return nil, seen, errNotLock
+	}
+
+	content, err := io.ReadAll(io.LimitReader(f, lockReadMax+1))
+	if err != nil {
+		return nil, info, fmt.Errorf("read the lock: %w", err)
+	}
+
+	// One complete line: a lock being written (or never finished) is not
+	// one, so its content can't match a lock read before.
+	if len(content) == 0 || len(content) > lockReadMax || bytes.IndexByte(content, '\n') != len(content)-1 {
+		return nil, info, errNotLock
+	}
+
+	return content, info, nil
+}
+
+// removeLock removes the lock in root if it holds want, and reports whether
+// it did. The lock is renamed to a fresh private name first and checked
+// there, so what is removed is exactly what was checked. A lock that isn't
+// want (another run took it over in between) is put back.
+//
+// What it removes is race-free: the private name is this call's alone. The
+// residual race is in the put-back: the lock name is empty between the
+// rename and the link back, so a third run may take the lock then (the
+// moved one is then dropped, and its holder runs alongside the third). That
+// takes another run replacing want between the check below and the rename,
+// which only happens to a lock older than LockMaxAge: two runs taking over
+// one stale lock at once, or a run outliving LockMaxAge — one whose
+// exclusivity was already gone.
+func removeLock(root *os.Root, want []byte) bool {
+	// Narrow the put-back window: only a lock that holds want is moved.
+	if cur, _, err := readLock(root, lockName); err != nil || !bytes.Equal(cur, want) {
+		return false
+	}
+
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return false
 	}
 
-	// Narrow the window in which another run takes over first: only a lock
-	// that is still the stale one is moved.
-	if cur, err := os.Lstat(path); err != nil || !os.SameFile(cur, held) {
+	moved := lockName + ".stale-" + hex.EncodeToString(b[:])
+	if err := root.Rename(lockName, moved); err != nil {
 		return false
 	}
 
-	moved := path + ".stale-" + hex.EncodeToString(b[:])
-	if err := os.Rename(path, moved); err != nil {
-		return false
-	}
-
-	info, err := os.Lstat(moved)
-	if err == nil && os.SameFile(info, held) {
-		_ = os.Remove(moved)
+	if got, _, err := readLock(root, moved); err == nil && bytes.Equal(got, want) {
+		_ = root.Remove(moved)
 
 		return true
 	}
 
-	// Not the file seen: a live run took the lock in between. Put it back
-	// (Link fails if yet another run took the name; then that one owns it).
-	_ = os.Link(moved, path)
-	_ = os.Remove(moved)
+	// Not want: a run took the lock in between. Put it back (Link fails if
+	// yet another run took the name; then that one owns it).
+	_ = root.Link(moved, lockName)
+	_ = root.Remove(moved)
 
 	return false
 }
 
-// unlockFunc removes the lock file at path if it still is the one created
-// (info): a lock taken over after it went stale is the new holder's.
-func unlockFunc(path string, info fs.FileInfo) func() {
+// unlockFunc removes the lock in projectDir if it still holds content, the
+// line this run wrote: a lock taken over after it went stale is the new
+// holder's.
+func unlockFunc(projectDir string, content []byte) func() {
 	return func() {
-		if now, err := os.Lstat(path); err == nil && os.SameFile(now, info) {
-			_ = os.Remove(path)
+		root, err := openRealDir(projectDir)
+		if err != nil {
+			return
 		}
+		defer root.Close()
+
+		removeLock(root, content)
 	}
 }
 
