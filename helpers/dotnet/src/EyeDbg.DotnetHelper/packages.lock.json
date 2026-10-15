@@ -4,30 +4,31 @@
     "net8.0": {
       "Microsoft.Diagnostics.NETCore.Client": {
         "type": "Direct",
-        "requested": "[0.2.745401, )",
-        "resolved": "0.2.745401",
-        "contentHash": "M+XXKCFl5JZxcaopsXQgL3ItTQW3ZNlM9MR8YY9wX2/VvjVBDBfShzmiKmFq3Pl7WmA+l1jzE2OoB714gItLxA==",
+        "requested": "[0.2.750501, )",
+        "resolved": "0.2.750501",
+        "contentHash": "XVOWyjoikpjTecPv8fYWspgNGhXtOeMX3K3wq9kXftU9U04V6IwCY4NQuVrY/BIBwmui6lF8z7pNP64cwFvUNQ==",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "8.0.3"
         }
       },
       "Microsoft.Diagnostics.Runtime": {
         "type": "Direct",
-        "requested": "[4.1.745802, )",
-        "resolved": "4.1.745802",
-        "contentHash": "2rAGwsWz6eX8T9wXzkfBZH8sKOlq+YKLd7HaEIHn9iK/TL0mNn43ial6Li5VmLl8pzC2OATNPhI3q3ZS9mw9vg==",
+        "requested": "[4.2.750101, )",
+        "resolved": "4.2.750101",
+        "contentHash": "EmXKatE8WuD1Xg9IK7f5b/4C1Wk6OGm1Zno9dc4s+cgpP4Gu5Z+DTKbLaeCRwG7kSAs9pmG/ERl6MF9gTzV+OA==",
         "dependencies": {
           "Azure.Identity": "1.21.0",
           "Microsoft.Diagnostics.NETCore.Client": "0.2.661903",
+          "Microsoft.Security.AntiSSRF": "1.0.0",
           "System.Collections.Immutable": "10.0.7",
           "System.Runtime.CompilerServices.Unsafe": "6.1.2"
         }
       },
       "Microsoft.Diagnostics.Tracing.TraceEvent": {
         "type": "Direct",
-        "requested": "[3.2.6, )",
-        "resolved": "3.2.6",
-        "contentHash": "8GhxriLz9/fIjcmC5VuuBMwORVUOAHjdGqxfuxyYVljtpWBhUsAi/L1RpiRgHdeBgNbhbnRhkF8gHtpZF3At8w==",
+        "requested": "[3.2.8, )",
+        "resolved": "3.2.8",
+        "contentHash": "QDtQEOaAB/btecYg/RS0sFscAFttqfbqqzt5+R0M3x2ePYff5qcK3meIyGsxT64cWcaDlK4i54EoTF745ehkRA==",
         "dependencies": {
           "Microsoft.Diagnostics.NETCore.Client": "0.2.510501",
           "Microsoft.Win32.Registry": "5.0.0",
@@ -162,6 +163,11 @@
         "type": "Transitive",
         "resolved": "5.0.0",
         "contentHash": "VyPlqzH2wavqquTcYpkIIAQ6WdenuKoFN0BdYBbCWsclXacSOHNQn66Gt4z5NBqEYW0FAPm5rlvki9ZiCij5xQ=="
+      },
+      "Microsoft.Security.AntiSSRF": {
+        "type": "Transitive",
+        "resolved": "1.0.0",
+        "contentHash": "V0AJQt8FC5HXkvFhBqB0WgMADVL+vG+qiMK9p39OHdqfNwYOh1durk8j9rKPklWasBxpk8ifVdzoJmEgUWVoeg=="
       },
       "Microsoft.Win32.Registry": {
         "type": "Transitive",
