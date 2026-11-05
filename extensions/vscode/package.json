@@ -1090,11 +1090,11 @@
     "test:integration": "node esbuild.mjs extension && node esbuild.mjs integration && node out/integration/runner.js"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
+    "@biomejs/biome": "2.6.4",
     "@types/node": "20.19.43",
     "@types/vscode": "1.100.0",
     "@vscode/test-electron": "3.1.0",
-    "@vscode/vsce": "4.0.0",
+    "@vscode/vsce": "4.1.0",
     "esbuild": "0.28.2",
     "typescript": "6.0.3"
   },
