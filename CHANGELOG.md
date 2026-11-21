@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-21
+
+### Changed
+
+- The .NET side helper is built on Microsoft.Diagnostics.Runtime (ClrMD) 4.2.751201,
+  Microsoft.Diagnostics.Tracing.TraceEvent 4.0.0 and Microsoft.Diagnostics.NETCore.Client
+  0.2.750501. ClrMD now brings Microsoft.Security.AntiSSRF 1.0.0 (MIT), which ships with the helper
+  and is listed in its `THIRD-PARTY-NOTICES.txt`.
+- `github.com/spf13/pflag` 1.1.0.
+- Release binaries are built with Go 1.27.4, which carries the standard library's security fixes
+  since Go 1.27.1 (`crypto/tls`, `crypto/x509`, `net/http`, `net/textproto`, `os`).
+
 ## [0.3.0] - 2026-10-06
 
 ### Added
@@ -464,7 +476,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A response over 1 MiB (e.g. `output` after a lot of program output) dropped the connection.
 - Stopping a session that is also ending by itself no longer races over its end reason.
 
-[Unreleased]: https://github.com/EyeDebugger/eyedebugger/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/EyeDebugger/eyedebugger/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/EyeDebugger/eyedebugger/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/EyeDebugger/eyedebugger/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/EyeDebugger/eyedebugger/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/EyeDebugger/eyedebugger/compare/v0.2.0-beta.1...v0.2.0
