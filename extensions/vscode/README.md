@@ -196,14 +196,14 @@ kept); the views show and copy their paths, and never read, copy, move or delete
 
 ## Settings
 
-| Setting | Default | |
-|---|---|---|
-| `eyedbg.path` | `""` | Absolute path of `eyedbg` (`~/` allowed). Empty: `eyedbg` on `PATH`. User settings only. |
-| `eyedbg.clientName` | `""` | You join as `human:NAME`. Empty: your OS user name. User settings only. |
-| `eyedbg.lease.afterTakeOver` | `ask` | After taking control from an agent under `free`: `ask`, `humanPriority` or `keep`. |
-| `eyedbg.autoJoin` | `ask` | Offer to join an agent's session of a program in this workspace: `ask` or `never`. |
-| `eyedbg.followAgent` | `true` | Show the agent's stops in an editor, without taking focus. |
-| `eyedbg.activity.hide` | `[]` | Kinds the Activity view hides: `exec`, `breakpoint`, `lease`, `client`, `exceptions`. |
+| Setting                      | Default |                                                                                          |
+| ---------------------------- | ------- | ---------------------------------------------------------------------------------------- |
+| `eyedbg.path`                | `""`    | Absolute path of `eyedbg` (`~/` allowed). Empty: `eyedbg` on `PATH`. User settings only. |
+| `eyedbg.clientName`          | `""`    | You join as `human:NAME`. Empty: your OS user name. User settings only.                  |
+| `eyedbg.lease.afterTakeOver` | `ask`   | After taking control from an agent under `free`: `ask`, `humanPriority` or `keep`.       |
+| `eyedbg.autoJoin`            | `ask`   | Offer to join an agent's session of a program in this workspace: `ask` or `never`.       |
+| `eyedbg.followAgent`         | `true`  | Show the agent's stops in an editor, without taking focus.                               |
+| `eyedbg.activity.hide`       | `[]`    | Kinds the Activity view hides: `exec`, `breakpoint`, `lease`, `client`, `exceptions`.    |
 
 ## Security
 

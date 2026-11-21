@@ -7,7 +7,7 @@
 # strictDepBuilds (default true) fails any install that meets a new one.
 allowBuilds:
   esbuild: false
-  '@vscode/vsce-sign': false
+  "@vscode/vsce-sign": false
 
 # A release must be 7 days old before it can be installed (minutes), as the
 # repository's Dependabot cooldown.
