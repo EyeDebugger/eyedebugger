@@ -4,13 +4,13 @@
     "net8.0": {
       "xunit.v3.mtp-off": {
         "type": "Direct",
-        "requested": "[4.0.1, )",
-        "resolved": "4.0.1",
-        "contentHash": "miSoh5QghDDdVN95dJEl+XrfCjdYy70IWumadlxHMhHie1ym+qG8UPIHRZOepBu2MbGs6nRB0pr4cd1fw/Gfvw==",
+        "requested": "[4.0.3, )",
+        "resolved": "4.0.3",
+        "contentHash": "/2DllJSdr4mnMdnY5gN5ndxGdTGwTX6brIpmZv2PEV7D2N1PwwdSW4t+3ARD/5JwYXFBl1XV+8ozwSTyq2wbEg==",
         "dependencies": {
-          "xunit.analyzers": "2.1.0",
-          "xunit.v3.assert": "[4.0.1]",
-          "xunit.v3.core.mtp-off": "[4.0.1]"
+          "xunit.analyzers": "2.3.0",
+          "xunit.v3.assert": "[4.0.3]",
+          "xunit.v3.core.mtp-off": "[4.0.3]"
         }
       },
       "Azure.Core": {
@@ -133,6 +133,11 @@
         "resolved": "8.14.0",
         "contentHash": "iwbCpSjD3ehfTwBhtSNEtKPK0ICun6ov7Ibx6ISNA9bfwIyzI2Siwyi9eJFCJBwxowK9xcA1mj+jBWiigeqgcQ=="
       },
+      "Microsoft.Security.AntiSSRF": {
+        "type": "Transitive",
+        "resolved": "1.0.0",
+        "contentHash": "V0AJQt8FC5HXkvFhBqB0WgMADVL+vG+qiMK9p39OHdqfNwYOh1durk8j9rKPklWasBxpk8ifVdzoJmEgUWVoeg=="
+      },
       "Microsoft.Win32.Registry": {
         "type": "Transitive",
         "resolved": "5.0.0",
@@ -232,100 +237,101 @@
       },
       "xunit.analyzers": {
         "type": "Transitive",
-        "resolved": "2.1.0",
-        "contentHash": "X7QXEcZQGz0G/HL4HUyK+aAvNa/IMGbOCnFIq4jD/Evktq12xANKwzOUr7b08vCmC1LXu/47qHWOdjm3KfaJ0A=="
+        "resolved": "2.3.0",
+        "contentHash": "FcuLqoNBgQA4MmQXOdNWsDnlw+LBysWUcWOql6MCTXXFJZPn+qjbxHA9F9KBRiPH0Y97MLr1VE6LxdH8MgKUoQ=="
       },
       "xunit.v3.assert": {
         "type": "Transitive",
-        "resolved": "4.0.1",
-        "contentHash": "nC7d3cY06Oo7hkdwWPZkBR0Ud75xNhgx0P7i0GmMMZC3puCGlc4szFiT30biH03IN/eDnr8h+nv3A1UD17bk/A=="
+        "resolved": "4.0.3",
+        "contentHash": "RrlWQ3yXla+ud9JBWDIY9GnUS/DS44r3ObqqV7wdWt1GhS+SveCe0MBDL238VXYoV2mWnX/DhO2LdTq5FTlT7g=="
       },
       "xunit.v3.common": {
         "type": "Transitive",
-        "resolved": "4.0.1",
-        "contentHash": "Qf25TVdadDQYf9zVxSd7L9RNQhuP0jCUHmo96XTmIKLxGefylIEV63jRbXBPFzdXmV09TCdcurk+AQ9LiWS2Hg==",
+        "resolved": "4.0.3",
+        "contentHash": "+2qGz3rcveIxzbXeZVHU8dhMyaawt01mgm/zv1FJH2FPcvJpfTUqc1vQ3hK2V5zVt8QEDddA+B6fkf9/LWf/Pg==",
         "dependencies": {
           "Microsoft.Bcl.AsyncInterfaces": "6.0.0"
         }
       },
       "xunit.v3.core.mtp-off": {
         "type": "Transitive",
-        "resolved": "4.0.1",
-        "contentHash": "pPKhAFeXpN95l8sBBRQ4YrqhFDoTDj/QVgc//oSPlBXjrW7YLUBN/eDqvWSWVle1ITvNbYHGLmy3LZSPC6gGJQ==",
+        "resolved": "4.0.3",
+        "contentHash": "zzd3noMJ7I6DnoXMfNv/skWlJx873Cj7PrraA+JTVFtBnoy9yJwGd5f9ovP2jBQxVYfyHUdiWAlE3plvJghy8Q==",
         "dependencies": {
-          "xunit.v3.extensibility.core": "[4.0.1]",
-          "xunit.v3.runner.inproc.console": "[4.0.1]"
+          "xunit.v3.extensibility.core": "[4.0.3]",
+          "xunit.v3.runner.inproc.console": "[4.0.3]"
         }
       },
       "xunit.v3.extensibility.core": {
         "type": "Transitive",
-        "resolved": "4.0.1",
-        "contentHash": "J0d5OfFcp920nZxCRIvU14+TZhiSPQR0wvqEMZ3MRiJLPu1VmYlcRNkmcSW0i1DwkB81gAHc+fHUQf/cU64MYg==",
+        "resolved": "4.0.3",
+        "contentHash": "TBYqQKyT+XBDLSHjG6PnmQpooqatflBcWvNiESVS5ptQxWXVf/FGlkUfkNyHKRCUDSCxxHIJNgwO+SRosUmZEw==",
         "dependencies": {
-          "xunit.v3.common": "[4.0.1]"
+          "xunit.v3.common": "[4.0.3]"
         }
       },
       "xunit.v3.runner.common": {
         "type": "Transitive",
-        "resolved": "4.0.1",
-        "contentHash": "p9AyfBpj2e5Iws8B57SbLiSngg7mEdvegHInKR4T2cjt2mis9h8htVgCnmu//agZO4zri6p6VQOj5EkHHTy3gA==",
+        "resolved": "4.0.3",
+        "contentHash": "J/kkhBgJg3wu1xI8gY2Esm3oRE47gNrGmKpT/XZDPOzZ3/F33yTK/ZH1CM6qDpAHoTT3GY/JgrVbS4T1JEKYiQ==",
         "dependencies": {
           "Microsoft.Win32.Registry": "[5.0.0]",
           "System.Security.AccessControl": "[6.0.1]",
-          "xunit.v3.common": "[4.0.1]"
+          "xunit.v3.common": "[4.0.3]"
         }
       },
       "xunit.v3.runner.inproc.console": {
         "type": "Transitive",
-        "resolved": "4.0.1",
-        "contentHash": "Hqwfd6ehMIhPmVWUQ2dgmknzuLFTWeyp8ES1q3D4YR5bQVyiXDcaIoaFwqAz2zgLr49WaW4Mz7VVncP7u/Q8/Q==",
+        "resolved": "4.0.3",
+        "contentHash": "lDvNs5exa8rBdWXX/wdapPTp81SNCvUarXC5iXzr1qvO168+Sx/Ytrk9VSLbSD3Y9KNK8PcOjMl1q7JfCoo3LQ==",
         "dependencies": {
-          "xunit.v3.extensibility.core": "[4.0.1]",
-          "xunit.v3.runner.common": "[4.0.1]"
+          "xunit.v3.extensibility.core": "[4.0.3]",
+          "xunit.v3.runner.common": "[4.0.3]"
         }
       },
       "eyedbg-dotnet-helper": {
         "type": "Project",
         "dependencies": {
-          "Microsoft.Diagnostics.NETCore.Client": "[0.2.745401, )",
-          "Microsoft.Diagnostics.Runtime": "[4.1.745802, )",
-          "Microsoft.Diagnostics.Tracing.TraceEvent": "[3.2.6, )"
+          "Microsoft.Diagnostics.NETCore.Client": "[0.2.750501, )",
+          "Microsoft.Diagnostics.Runtime": "[4.2.751201, )",
+          "Microsoft.Diagnostics.Tracing.TraceEvent": "[4.0.0, )"
         }
       },
       "Microsoft.Diagnostics.NETCore.Client": {
         "type": "CentralTransitive",
-        "requested": "[0.2.745401, )",
-        "resolved": "0.2.745401",
-        "contentHash": "M+XXKCFl5JZxcaopsXQgL3ItTQW3ZNlM9MR8YY9wX2/VvjVBDBfShzmiKmFq3Pl7WmA+l1jzE2OoB714gItLxA==",
+        "requested": "[0.2.750501, )",
+        "resolved": "0.2.750501",
+        "contentHash": "XVOWyjoikpjTecPv8fYWspgNGhXtOeMX3K3wq9kXftU9U04V6IwCY4NQuVrY/BIBwmui6lF8z7pNP64cwFvUNQ==",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "8.0.3"
         }
       },
       "Microsoft.Diagnostics.Runtime": {
         "type": "CentralTransitive",
-        "requested": "[4.1.745802, )",
-        "resolved": "4.1.745802",
-        "contentHash": "2rAGwsWz6eX8T9wXzkfBZH8sKOlq+YKLd7HaEIHn9iK/TL0mNn43ial6Li5VmLl8pzC2OATNPhI3q3ZS9mw9vg==",
+        "requested": "[4.2.751201, )",
+        "resolved": "4.2.751201",
+        "contentHash": "9rg4pJnc46e7QvUYC8Pxu5VqPJhKEO2ILGEZy1LOKrwurLC8iSAAzamDVLd/cYPb3zGbM9RE4Zo41Tis8OxCyA==",
         "dependencies": {
           "Azure.Identity": "1.21.0",
           "Microsoft.Diagnostics.NETCore.Client": "0.2.661903",
+          "Microsoft.Security.AntiSSRF": "1.0.0",
           "System.Collections.Immutable": "10.0.7",
           "System.Runtime.CompilerServices.Unsafe": "6.1.2"
         }
       },
       "Microsoft.Diagnostics.Tracing.TraceEvent": {
         "type": "CentralTransitive",
-        "requested": "[3.2.6, )",
-        "resolved": "3.2.6",
-        "contentHash": "8GhxriLz9/fIjcmC5VuuBMwORVUOAHjdGqxfuxyYVljtpWBhUsAi/L1RpiRgHdeBgNbhbnRhkF8gHtpZF3At8w==",
+        "requested": "[4.0.0, )",
+        "resolved": "4.0.0",
+        "contentHash": "uqiUXrXzIuVqm7h3G9Sr+HuwY8LNKqRDt/yHMOAOFGvzySX7ZVTgFiO0LUKFO+c92qYCn0Gml838quCOfai7RA==",
         "dependencies": {
-          "Microsoft.Diagnostics.NETCore.Client": "0.2.510501",
+          "Microsoft.Diagnostics.NETCore.Client": "0.2.661903",
           "Microsoft.Win32.Registry": "5.0.0",
-          "System.Collections.Immutable": "9.0.8",
+          "System.Collections.Immutable": "10.0.7",
           "System.Reflection.Metadata": "9.0.8",
           "System.Reflection.TypeExtensions": "4.7.0",
           "System.Runtime.CompilerServices.Unsafe": "6.1.2",
-          "System.Text.Json": "9.0.8"
+          "System.Text.Json": "10.0.3"
         }
       }
     }

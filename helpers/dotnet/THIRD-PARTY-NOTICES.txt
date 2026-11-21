@@ -4,23 +4,29 @@ The EyeDebugger .NET side helper (eyedbg-dotnet-helper.dll, Apache-2.0, see LICE
 next to eyedbg) ships with the third-party assemblies below, unmodified, from nuget.org.
 Each is licensed under the MIT License, whose text follows the list.
 
-Microsoft.Diagnostics.NETCore.Client 0.2.745401
+Microsoft.Diagnostics.NETCore.Client 0.2.750501
   Files: Microsoft.Diagnostics.NETCore.Client.dll
   License: MIT
   Copyright (c) Microsoft Corporation. All rights reserved.
   Source: https://github.com/dotnet/diagnostics
 
-Microsoft.Diagnostics.Runtime 4.1.745802
+Microsoft.Diagnostics.Runtime 4.2.751201
   Files: Microsoft.Diagnostics.Runtime.dll
   License: MIT
   Copyright (c) Microsoft Corporation. All rights reserved.
   Source: https://github.com/microsoft/clrmd
 
-Microsoft.Diagnostics.Tracing.TraceEvent 3.2.6
+Microsoft.Diagnostics.Tracing.TraceEvent 4.0.0
   Files: Microsoft.Diagnostics.Tracing.TraceEvent.dll, Microsoft.Diagnostics.FastSerialization.dll, Dia2Lib.dll, TraceReloggerLib.dll
   License: MIT
   Copyright (c) Microsoft Corporation. All rights reserved.
   Source: https://github.com/microsoft/perfview
+
+Microsoft.Security.AntiSSRF 1.0.0
+  Files: Microsoft.Security.AntiSSRF.dll
+  License: MIT
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Source: https://github.com/Microsoft/AntiSSRF
 
 Azure.Core 1.53.0
   Files: Azure.Core.dll
