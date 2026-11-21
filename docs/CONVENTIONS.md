@@ -142,7 +142,7 @@ found skips naming why); `drivers/generic`
 ## Formatting and linting
 
 - `task fmt` (gofumpt + goimports).
-- `task lint` must report 0 issues with v2.13.2.
+- `task lint` must report 0 issues with v2.15.0.
 - `//nolint:<linter> // <reason>` is the only suppression form.
 
 ## File headers and doc comments

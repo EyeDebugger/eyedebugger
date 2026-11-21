@@ -12,7 +12,7 @@
 - Task v3: `winget install Task.Task`, `scoop install task`, `choco install go-task`, or
   `go install github.com/go-task/task/v3/cmd/task@latest`; other platforms at
   https://taskfile.dev/installation/.
-- **golangci-lint v2.13.2**, installed as a binary
+- **golangci-lint v2.15.0**, installed as a binary
   (https://golangci-lint.run/docs/welcome/install/local/). Older versions report different issues.
 - Optional: goreleaser v2 for `task snapshot` (which also packages the extension: Node and pnpm,
   and the .NET helper: the .NET 10 SDK).

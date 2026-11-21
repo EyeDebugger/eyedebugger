@@ -25,7 +25,7 @@ env:
   # Toolchain and tool pins. Keep GOLANGCI_LINT_VERSION and GOVULNCHECK_VERSION
   # in sync with Taskfile.yml. go.mod's `go` line is the minimum supported Go.
   GO_VERSION: "1.27.x"
-  GOLANGCI_LINT_VERSION: v2.13.2
+  GOLANGCI_LINT_VERSION: v2.15.0
   GOVULNCHECK_VERSION: v1.8.0
   GORELEASER_VERSION: v2.18.2
   DOTNET_VERSION: "10.0.x"

@@ -220,7 +220,7 @@ func awaitLoser(ctx context.Context, exited <-chan error) {
 	}
 
 	select {
-	case <-exited:
+	case <-exited: //nolint:errcheck // only the loser's exit matters, not its status; `_ =` trips staticcheck S1005
 	case <-ctx.Done():
 	}
 }
